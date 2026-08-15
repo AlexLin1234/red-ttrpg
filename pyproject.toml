@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cprtool"
+version = "0.1.0"
+description = "A local-first Cyberpunk RED stream GM tool"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Alexander Lin" }]
+dependencies = [
+  "anthropic>=0.64,<1",
+  "fastapi>=0.116,<1",
+  "pdfplumber>=0.11,<1",
+  "pymupdf>=1.26,<2",
+  "sqlite-vec>=0.1.6,<1",
+  "uvicorn[standard]>=0.35,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28,<1",
+  "pytest>=8.4,<9",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["cprtool"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
