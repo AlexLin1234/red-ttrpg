@@ -8,6 +8,7 @@ reversible session log, and renders a snapshot the Godot viewer can draw.
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict
 from typing import Any, Mapping
 
 from cprtool.rules.events import Session
@@ -74,9 +75,11 @@ class Encounter:
     ) -> None:
         self.tables = tables
         self.rng = rng
-        self.session = Session({"actors": {}})
+        self.session = Session({"actors": {}, "covers": {}})
         self.revision = 0
         self.card: dict[str, Any] | None = None
+        self.events: list[dict[str, Any]] = []
+        self.result: dict[str, Any] | None = None
         if actors is not None:
             self.load(actors)
 
@@ -87,10 +90,15 @@ class Encounter:
 
         if not actors:
             raise ValueError("an encounter needs at least one actor")
-        state = {"actors": {str(key): _normalise_actor(str(key), value) for key, value in actors.items()}}
+        state = {
+            "actors": {str(key): _normalise_actor(str(key), value) for key, value in actors.items()},
+            "covers": {},
+        }
         self.session = Session(state)
         self.revision += 1
         self.card = None
+        self.events = []
+        self.result = None
         return self.snapshot()
 
     def _actor(self, actor_id: str) -> dict[str, Any]:
@@ -153,7 +161,11 @@ class Encounter:
         mode: str = "single",
         modifiers: int = 0,
         contested: bool = False,
+        cover_hp: int | None = None,
+        cover_id: str | None = None,
     ) -> dict[str, Any]:
+        if cover_id is not None and cover_hp is None:
+            raise ValueError("cover_id requires cover_hp")
         attacker = self._actor(attacker_id)
         weapon_state = self._weapon_state(attacker_id, weapon)
         if weapon_state["jammed"]:
@@ -167,9 +179,40 @@ class Encounter:
                 raise KeyError(f"{target_id} has no evasion_base")
             defender_evasion_base = int(target["evasion_base"])
 
+        target_state = self._target_state(target_id)
+        cover_events: tuple[dict[str, Any], ...] = ()
+        if cover_hp is not None:
+            if cover_hp < 0:
+                raise ValueError("cover HP cannot be negative")
+            known_cover_hp = self.session.state.get("covers", {}).get(str(cover_id))
+            if cover_id is not None and known_cover_hp is not None:
+                cover_hp = int(known_cover_hp)
+            target_state = TargetState(
+                target_id=target_state.target_id,
+                hp=target_state.hp,
+                max_hp=target_state.max_hp,
+                body_sp=target_state.body_sp,
+                head_sp=target_state.head_sp,
+                cover_hp=cover_hp,
+            )
+            target_actor = self._actor(target_id)
+            if (
+                cover_hp != target_actor["cover_hp"]
+                or cover_id != target_actor.get("cover_id")
+                or (cover_id is not None and str(cover_id) not in self.session.state.get("covers", {}))
+            ):
+                cover_events = (
+                    {
+                        "kind": "cover_set",
+                        "target_id": target_id,
+                        "hp": cover_hp,
+                        "cover_id": cover_id,
+                    },
+                )
+
         request = AttackRequest(
             attacker_id=attacker_id,
-            target=self._target_state(target_id),
+            target=target_state,
             weapon=self._weapon(attacker_id, weapon),
             attack_base=int(attacker["attack_base"]),
             distance_m=float(distance_m),
@@ -190,10 +233,21 @@ class Encounter:
             "mode": mode,
             "modifiers": int(modifiers),
             "contested": contested,
+            "cover_hp": cover_hp,
+            "cover_id": cover_id,
         }
-        self.session.record(action, result.events)
+        result_events = tuple(
+            {**event, "cover_id": cover_id}
+            if cover_id is not None and event.get("kind") == "cover_damaged"
+            else event
+            for event in result.events
+        )
+        applied_events = cover_events + result_events
+        self.session.record(action, applied_events)
         self.revision += 1
         self.card = self._attack_card(action, result)
+        self.events = [deepcopy(event) for event in applied_events]
+        self.result = asdict(result)
         return self.snapshot()
 
     def reload(self, *, actor_id: str, weapon: str, amount: int | None = None) -> dict[str, Any]:
@@ -202,9 +256,13 @@ class Encounter:
         refill = magazine - int(state["ammo"]) if amount is None else int(amount)
         if refill <= 0:
             raise ValueError(f"{weapon} does not need a reload")
+        missing = magazine - int(state["ammo"])
+        if refill > missing:
+            raise ValueError(f"{weapon} can accept at most {missing} rounds")
+        events = ({"kind": "ammo_restored", "actor_id": actor_id, "weapon": weapon, "amount": refill},)
         self.session.record(
             {"kind": "reload", "actor_id": actor_id, "weapon": weapon, "amount": refill},
-            ({"kind": "ammo_restored", "actor_id": actor_id, "weapon": weapon, "amount": refill},),
+            events,
         )
         self.revision += 1
         self.card = {
@@ -212,16 +270,21 @@ class Encounter:
             "title": "RELOAD",
             "actor": self._actor(actor_id)["name"],
             "lines": [f"{weapon}: +{refill} rounds", f"Ammo: {self._weapon_state(actor_id, weapon)['ammo']}"],
+            "tone": "neutral",
+            "duration_seconds": 5.0,
         }
+        self.events = [deepcopy(event) for event in events]
+        self.result = {"ammo_restored": refill}
         return self.snapshot()
 
     def clear_jam(self, *, actor_id: str, weapon: str) -> dict[str, Any]:
         state = self._weapon_state(actor_id, weapon)
         if not state["jammed"]:
             raise ValueError(f"{weapon} is not jammed")
+        events = ({"kind": "weapon_unjammed", "actor_id": actor_id, "weapon": weapon},)
         self.session.record(
             {"kind": "clear_jam", "actor_id": actor_id, "weapon": weapon},
-            ({"kind": "weapon_unjammed", "actor_id": actor_id, "weapon": weapon},),
+            events,
         )
         self.revision += 1
         self.card = {
@@ -229,19 +292,41 @@ class Encounter:
             "title": "JAM CLEARED",
             "actor": self._actor(actor_id)["name"],
             "lines": [f"{weapon} is ready to fire"],
+            "tone": "neutral",
+            "duration_seconds": 5.0,
         }
+        self.events = [deepcopy(event) for event in events]
+        self.result = {"jam_cleared": True}
         return self.snapshot()
 
     def undo(self) -> dict[str, Any]:
+        inverse = [deepcopy(event) for event in self.session.log[-1].inverse]
         self.session.undo()
         self.revision += 1
-        self.card = None
+        self.card = {
+            "kind": "undo",
+            "title": "UNDO",
+            "lines": ["Previous action reversed."],
+            "tone": "undo",
+            "duration_seconds": 5.0,
+        }
+        self.events = inverse
+        self.result = {"undone": True}
         return self.snapshot()
 
     def redo(self) -> dict[str, Any]:
+        replayed = [deepcopy(event) for event in self.session.redo_log[-1].events]
         self.session.redo()
         self.revision += 1
-        self.card = None
+        self.card = {
+            "kind": "redo",
+            "title": "REDO",
+            "lines": ["Previous action applied again."],
+            "tone": "neutral",
+            "duration_seconds": 5.0,
+        }
+        self.events = replayed
+        self.result = {"redone": True}
         return self.snapshot()
 
     # -- presentation --------------------------------------------------------
@@ -269,6 +354,8 @@ class Encounter:
             "hp_damage": result.hp_damage,
             "critical_injury": result.critical_injury,
             "lines": list(result.card_lines),
+            "tone": "hit" if result.hit else "miss",
+            "duration_seconds": 5.0,
         }
 
     def _actor_view(self, actor_id: str, actor: Mapping[str, Any]) -> dict[str, Any]:
@@ -282,14 +369,38 @@ class Encounter:
             "wound_state": actor["wound_state"],
             "death_save_due": bool(actor["death_save_due"]),
             "critical_injuries": list(actor["critical_injuries"]),
-            "weapons": [
-                {
-                    "name": name,
-                    "ammo": int(weapon["ammo"]),
-                    "jammed": bool(weapon["jammed"]),
-                }
-                for name, weapon in actor["weapons"].items()
-            ],
+            "attack_base": int(actor.get("attack_base", 0)),
+            "evasion_base": int(actor.get("evasion_base", 0)),
+            "selected_weapon": str(actor.get("selected_weapon", next(iter(actor["weapons"]), ""))),
+            "skills": deepcopy(dict(actor.get("skills", {}))),
+            "weapons": [self._weapon_view(actor_id, name, weapon) for name, weapon in actor["weapons"].items()],
+        }
+
+    def _weapon_view(self, actor_id: str, name: str, state: Mapping[str, Any]) -> dict[str, Any]:
+        try:
+            weapon = self._weapon(actor_id, name)
+        except (KeyError, ValueError):
+            return {
+                "name": name,
+                "ammo": int(state["ammo"]),
+                "jammed": bool(state["jammed"]),
+                "weapon_type": str(state.get("weapon_type", "unknown")),
+                "damage_dice": int(state.get("damage_dice", 0)),
+                "rof": int(state.get("rof", 1)),
+                "magazine": int(state.get("magazine", state["ammo"])),
+                "autofire_rating": state.get("autofire_rating"),
+                "quality": str(state.get("quality", "standard")),
+            }
+        return {
+            "name": name,
+            "ammo": int(state["ammo"]),
+            "jammed": bool(state["jammed"]),
+            "weapon_type": weapon.weapon_type,
+            "damage_dice": weapon.damage_dice,
+            "rof": weapon.rof,
+            "magazine": weapon.magazine,
+            "autofire_rating": weapon.autofire_rating,
+            "quality": weapon.quality,
         }
 
     def snapshot(self) -> dict[str, Any]:
@@ -303,6 +414,9 @@ class Encounter:
                 for actor_id, actor in self.session.state["actors"].items()
             ],
             "card": deepcopy(self.card),
+            "events": deepcopy(self.events),
+            "result": deepcopy(self.result),
+            "covers": deepcopy(self.session.state.get("covers", {})),
         }
 
 

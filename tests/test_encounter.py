@@ -96,7 +96,21 @@ def test_load_fills_defaults_and_reports_a_drawable_snapshot():
     assert goon["death_save_due"] is False
     assert goon["critical_injuries"] == []
     assert actor(snapshot, "solo")["hp"] == 40  # hp defaults to max_hp
-    assert actor(snapshot, "solo")["weapons"] == [{"name": "Heavy Pistol", "ammo": 8, "jammed": False}]
+    weapon = actor(snapshot, "solo")["weapons"][0]
+    assert weapon["name"] == "Heavy Pistol"
+    assert weapon["ammo"] == 8
+    assert weapon["jammed"] is False
+    assert weapon["weapon_type"] == "pistol"
+    assert weapon["damage_dice"] == 3
+    assert weapon["rof"] == 1
+    assert weapon["magazine"] == 8
+    assert weapon["autofire_rating"] is None
+    assert weapon["quality"] == "standard"
+    solo = actor(snapshot, "solo")
+    assert solo["attack_base"] == 12
+    assert solo["evasion_base"] == 10
+    assert solo["selected_weapon"] == "Heavy Pistol"
+    assert solo["skills"] == {}
     assert snapshot["card"] is None
     assert snapshot["can_undo"] is False
 
@@ -111,6 +125,8 @@ def test_attack_spends_ammo_applies_damage_and_renders_a_card():
     assert snapshot["card"]["target"] == "Booster"
     assert snapshot["card"]["hp_damage"] == 5
     assert snapshot["card"]["lines"]
+    assert snapshot["events"][0]["kind"] == "ammo_spent"
+    assert snapshot["result"]["hit"] is True
     assert snapshot["can_undo"] is True
 
 
@@ -129,12 +145,14 @@ def test_undo_restores_the_previous_state_and_redo_replays_it():
     undone = session.undo()
     assert actor(undone, "goon")["hp"] == 30
     assert actor(undone, "solo")["weapons"][0]["ammo"] == 8
-    assert undone["card"] is None
+    assert undone["card"]["title"] == "UNDO"
+    assert any(event["kind"] == "damage_healed" for event in undone["events"])
     assert undone["can_redo"] is True
 
     redone = session.redo()
     assert actor(redone, "goon")["hp"] == 25
     assert actor(redone, "solo")["weapons"][0]["ammo"] == 7
+    assert redone["card"]["title"] == "REDO"
 
 
 def test_nothing_to_undo_raises():
@@ -202,6 +220,57 @@ def test_reload_refills_the_magazine_and_is_reversible():
 
     with pytest.raises(ValueError, match="does not need"):
         session.reload(actor_id="solo", weapon="Heavy Pistol", amount=0)
+
+
+def test_reload_cannot_overfill_the_magazine():
+    session = encounter(2, dv=20)
+    strike(session)
+    with pytest.raises(ValueError, match="at most 1"):
+        session.reload(actor_id="solo", weapon="Heavy Pistol", amount=2)
+
+
+def test_attack_cover_snapshot_is_event_sourced_and_reversible():
+    session = encounter(8, 4, 4, 4)
+    covered = strike(session, cover_hp=20, cover_id="BlueBarrier")
+    assert actor(covered, "goon")["cover_hp"] == 8
+    assert covered["covers"] == {"BlueBarrier": 8}
+    assert actor(covered, "goon")["hp"] == 30
+    assert [event["kind"] for event in covered["events"]] == [
+        "cover_set",
+        "ammo_spent",
+        "cover_damaged",
+    ]
+
+    undone = session.undo()
+    assert actor(undone, "goon")["cover_hp"] == 0
+    assert undone["covers"] == {}
+    assert any(event["kind"] == "cover_restored" for event in undone["events"])
+
+    redone = session.redo()
+    assert redone["covers"] == {"BlueBarrier": 8}
+    cover_damage = next(event for event in redone["events"] if event["kind"] == "cover_damaged")
+    assert cover_damage["cover_id"] == "BlueBarrier"
+
+
+def test_cover_identity_requires_a_cover_hp_measurement():
+    session = encounter()
+    with pytest.raises(ValueError, match="cover_id requires cover_hp"):
+        strike(session, cover_id="BlueBarrier")
+
+
+def test_unknown_minimal_weapon_remains_drawable_until_used():
+    class RejectingTables(FakeTables):
+        def weapon(self, name: str) -> WeaponProfile:
+            raise KeyError(name)
+
+    session = Encounter(
+        RejectingTables(),
+        {"solo": {"max_hp": 40, "weapons": {"Homebrew": {"ammo": 3}}}},
+    )
+    weapon = actor(session.snapshot(), "solo")["weapons"][0]
+    assert weapon["name"] == "Homebrew"
+    assert weapon["ammo"] == 3
+    assert weapon["weapon_type"] == "unknown"
 
 
 def test_weapon_stats_fall_back_to_the_validated_tables():

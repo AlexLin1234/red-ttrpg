@@ -1,0 +1,59 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/api_client.gd" id="2_api"]
+
+[sub_resource type="Environment" id="Environment_night"]
+background_mode = 1
+background_color = Color(0.003, 0.005, 0.018, 1)
+ambient_light_source = 3
+ambient_light_color = Color(0.15, 0.24, 0.42, 1)
+ambient_light_energy = 0.42
+reflected_light_source = 2
+tonemap_mode = 2
+glow_enabled = true
+glow_intensity = 1.35
+volumetric_fog_enabled = true
+volumetric_fog_density = 0.018
+volumetric_fog_albedo = Color(0.16, 0.21, 0.36, 1)
+volumetric_fog_emission = Color(0.015, 0.025, 0.055, 1)
+volumetric_fog_emission_energy = 1.5
+volumetric_fog_length = 55.0
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1_main")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_night")
+
+[node name="KeyLight" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-58, -35, 0)
+light_color = Color(0.4, 0.58, 1, 1)
+light_energy = 0.65
+shadow_enabled = true
+
+[node name="Camera" type="Camera3D" parent="."]
+unique_name_in_owner = true
+transform = Transform3D(0.707107, -0.541675, 0.454519, 0, 0.642788, 0.766044, -0.707107, -0.541675, 0.454519, 18, 20, 18)
+projection = 1
+size = 28.0
+current = true
+
+[node name="AlleyGrid" type="GridMap" parent="."]
+unique_name_in_owner = true
+
+[node name="Cover" type="Node3D" parent="."]
+unique_name_in_owner = true
+
+[node name="Tokens" type="Node3D" parent="."]
+unique_name_in_owner = true
+
+[node name="Effects" type="Node3D" parent="."]
+unique_name_in_owner = true
+
+[node name="ApiClient" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("2_api")
+
+[node name="HUD" type="CanvasLayer" parent="."]
+layer = 10

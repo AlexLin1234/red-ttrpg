@@ -63,6 +63,22 @@ def test_session_undo_redo_and_new_action_clears_redo():
     assert not session.redo_log
 
 
+def test_cover_assignment_and_damage_reverse_as_one_action():
+    target = TargetState("goon", 30, 40)
+    weapon = Weapon("Heavy Pistol", "pistol", 3, magazine=8)
+    before = world(target, weapon, 8)
+    events = (
+        {"kind": "cover_set", "target_id": "goon", "hp": 20, "cover_id": "crate"},
+        {"kind": "cover_damaged", "target_id": "goon", "amount": 12, "cover_id": "crate"},
+    )
+    after, inverse = apply(before, events)
+    assert after["actors"]["goon"]["cover_hp"] == 8
+    restored, _ = apply(after, inverse)
+    assert restored == before
+    assert inverse[0]["cover_id"] == "crate"
+    assert inverse[1]["affected_cover_id"] == "crate"
+
+
 def test_one_thousand_random_attacks_round_trip():
     generator = random.Random(20260815)
     tables = TestTables()

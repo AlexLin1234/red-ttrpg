@@ -107,11 +107,14 @@ func _accent_for(card: Dictionary) -> Color:
 func _subtitle_for(card: Dictionary) -> String:
 	if String(card.get("kind", "")) != "attack":
 		return String(card.get("actor", ""))
-	var text := "%s -> %s  |  %s" % [
-		String(card.get("attacker", "")),
-		String(card.get("target", "")),
-		String(card.get("weapon", "")),
-	]
+	var text := (
+		"%s -> %s  |  %s"
+		% [
+			String(card.get("attacker", "")),
+			String(card.get("target", "")),
+			String(card.get("weapon", "")),
+		]
+	)
 	var mode := String(card.get("mode", "single"))
 	if mode != "single":
 		text += " (%s)" % mode

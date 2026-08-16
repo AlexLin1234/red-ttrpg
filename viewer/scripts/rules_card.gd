@@ -77,7 +77,9 @@ func _citation_text(citations: Array) -> String:
 		var book := String(citation.get("book", "Cyberpunk Red"))
 		var first := int(citation.get("page_start", 0))
 		var last := int(citation.get("page_end", first))
-		labels.append("%s, p. %d" % [book, first] if first == last else "%s, pp. %d-%d" % [book, first, last])
+		labels.append(
+			"%s, p. %d" % [book, first] if first == last else "%s, pp. %d-%d" % [book, first, last]
+		)
 	if labels.is_empty():
 		return "No citation returned - treat this as a GM ruling, not a printed rule."
 	return "  ".join(labels)

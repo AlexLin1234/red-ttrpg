@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="384" height="512" viewBox="0 0 384 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#17080a"/><stop offset="1" stop-color="#270f05"/></linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="384" height="512" rx="32" fill="url(#bg)"/>
+  <circle cx="193" cy="205" r="112" fill="#ff5a1f" opacity=".16" filter="url(#glow)"/>
+  <path d="M78 512c8-116 45-170 115-170 69 0 107 54 115 170" fill="#171718" stroke="#ff5a1f" stroke-width="5"/>
+  <path d="M129 176c6-72 124-76 132-3l-8 116c-28 51-92 51-119 0Z" fill="#9d6651"/>
+  <path d="M119 187c-5-93 151-105 154 4l-31-43-85-20Z" fill="#181313"/>
+  <path d="M138 218h48l9 13-14 14h-43l-11-14Zm59 13 11-13h48l11 13-12 14h-43Z" fill="#130604" stroke="#ff5a1f" stroke-width="4" filter="url(#glow)"/>
+  <path d="M185 231h24" stroke="#ff5a1f" stroke-width="5"/>
+  <path d="M166 299c22 8 43 8 62-1" fill="none" stroke="#3b2018" stroke-width="6"/>
+  <path d="M104 411h178M113 438h160" stroke="#64210e" stroke-width="11"/>
+  <text x="24" y="55" font-family="sans-serif" font-weight="800" font-size="26" fill="#fff6ee">BOOSTER</text>
+  <rect x="24" y="70" width="118" height="5" fill="#ff5a1f"/>
+</svg>

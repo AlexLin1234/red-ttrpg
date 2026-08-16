@@ -126,6 +126,7 @@ def test_cover_takes_full_hit_and_stops_resolution():
     result = resolve_attack(request(target=covered), FakeTables(), FixedRng(8, 6, 6, 6))
     assert kinds(result) == ["ammo_spent", "cover_damaged"]
     assert result.hp_damage == 0 and result.critical_injury is None
+    assert result.card_lines[-1] == "Cover: 4 HP - 18 = 0 HP"
 
 
 def test_crossing_half_hp_emits_seriously_wounded():

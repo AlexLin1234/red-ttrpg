@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Iterator, Literal
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from cprtool.gm.agent import Agent, AnthropicAgent, OfflineAgent
 from cprtool.gm.encounter import Encounter
@@ -56,11 +59,13 @@ class AttackCommand(BaseModel):
     attacker_id: str
     target_id: str
     weapon: str
-    distance_m: float = Field(ge=0)
+    distance_m: float = Field(ge=0, allow_inf_nan=False)
     location: Literal["body", "head"] = "body"
     mode: Literal["single", "aimed", "autofire"] = "single"
     modifiers: int = 0
     contested: bool = False
+    cover_hp: int | None = Field(default=None, ge=0)
+    cover_id: str | None = Field(default=None, max_length=200)
 
 
 class ReloadCommand(BaseModel):
@@ -77,12 +82,27 @@ class JamCommand(BaseModel):
 class ViewerHub:
     """Fan out encounter snapshots to every attached viewer."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_clients: int = 8) -> None:
         self.clients: set[WebSocket] = set()
+        self.max_clients = max_clients
+        self._admission_lock = asyncio.Lock()
 
-    async def connect(self, websocket: WebSocket) -> None:
-        await websocket.accept()
-        self.clients.add(websocket)
+    async def connect(self, websocket: WebSocket) -> bool:
+        origin = websocket.headers.get("origin")
+        try:
+            origin_host = urlsplit(origin).hostname if origin else None
+        except ValueError:
+            origin_host = "invalid"
+        if origin and origin_host not in {"127.0.0.1", "localhost", "::1"}:
+            await websocket.close(code=1008, reason="viewer origin is not allowed")
+            return False
+        async with self._admission_lock:
+            if len(self.clients) >= self.max_clients:
+                await websocket.close(code=1013, reason="viewer capacity reached")
+                return False
+            await websocket.accept()
+            self.clients.add(websocket)
+        return True
 
     def disconnect(self, websocket: WebSocket) -> None:
         self.clients.discard(websocket)
@@ -155,7 +175,11 @@ def create_app(
     @application.post("/ask", response_model=AskResponse)
     async def ask(request: AskRequest) -> AskResponse:
         try:
-            answer, citations = current_agent().ask(request.question, request.book)
+            answer, citations = await run_in_threadpool(
+                current_agent().ask,
+                request.question,
+                request.book,
+            )
         except (FileNotFoundError, RuntimeError, ValueError, KeyError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         citation_models = [CitationModel(**asdict(citation)) for citation in citations]
@@ -195,6 +219,12 @@ def create_app(
             snapshot = current_encounter().attack(**command.model_dump())
         return await publish(snapshot)
 
+    @application.post("/resolve")
+    async def resolve(command: AttackCommand) -> dict[str, Any]:
+        """Compatibility route matching the implementation-plan contract."""
+
+        return await attack(command)
+
     @application.post("/encounter/reload")
     async def reload_weapon(command: ReloadCommand) -> dict[str, Any]:
         with _domain_errors():
@@ -222,7 +252,8 @@ def create_app(
     @application.websocket("/viewer")
     async def viewer(websocket: WebSocket) -> None:
         hub: ViewerHub = application.state.viewers
-        await hub.connect(websocket)
+        if not await hub.connect(websocket):
+            return
         try:
             await websocket.send_json(current_encounter().snapshot())
         except (FileNotFoundError, KeyError, ValueError) as exc:

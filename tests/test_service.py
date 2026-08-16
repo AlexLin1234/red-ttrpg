@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import asyncio
+import threading
 from pathlib import Path
 
 import httpx
@@ -58,6 +59,34 @@ def test_service_routes_are_grounded_and_advisory(tmp_path):
 
 def test_arithmetic_is_reserved_for_resolver(tmp_path):
     assert "Never roll dice or perform damage" in SYSTEM_PROMPT
+
+
+def test_ask_does_not_block_health_checks():
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingAgent:
+        def ask(self, question, book=None):
+            entered.set()
+            assert release.wait(timeout=2)
+            return "Done", []
+
+    app = create_app(agent=BlockingAgent())
+
+    async def exercise_concurrency():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            ask_task = asyncio.create_task(client.post("/ask", json={"question": "Wait here"}))
+            assert await asyncio.to_thread(entered.wait, 1)
+            health = await asyncio.wait_for(client.get("/health"), timeout=0.5)
+            assert health.json() == {"status": "ok"}
+            release.set()
+            assert (await ask_task).status_code == 200
+
+    try:
+        asyncio.run(exercise_concurrency())
+    finally:
+        release.set()
 
 
 def test_twenty_rules_questions_include_the_verified_page():

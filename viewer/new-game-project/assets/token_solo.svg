@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="384" height="512" viewBox="0 0 384 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#081124"/><stop offset="1" stop-color="#180524"/></linearGradient>
+    <linearGradient id="coat" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#182f45"/><stop offset="1" stop-color="#070a12"/></linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="384" height="512" rx="32" fill="url(#bg)"/>
+  <path d="M0 390L90 335 192 360 292 326 384 374V512H0Z" fill="#05070d"/>
+  <circle cx="194" cy="205" r="112" fill="#00e5ff" opacity=".16" filter="url(#glow)"/>
+  <path d="M99 484c9-101 36-142 93-142s89 42 98 142" fill="url(#coat)" stroke="#00e5ff" stroke-width="5"/>
+  <path d="M133 169c9-65 111-79 125-6l-9 121c-23 52-91 52-116-1Z" fill="#bd806f"/>
+  <path d="M124 178c0-89 143-115 151 8-27-38-62-58-102-57-17 5-33 22-49 49Z" fill="#111826"/>
+  <path d="M141 218h45l10 12-14 14h-41l-12-13Z" fill="#041019" stroke="#00e5ff" stroke-width="4" filter="url(#glow)"/>
+  <path d="M196 230h51" stroke="#00e5ff" stroke-width="4"/>
+  <path d="M174 296c17 11 35 11 54-1" fill="none" stroke="#402526" stroke-width="5"/>
+  <path d="M252 220l24 12-18 59-14-8Z" fill="#1a2532" stroke="#ff2ca8" stroke-width="4"/>
+  <path d="M121 385l71 70 70-70" fill="none" stroke="#ff2ca8" stroke-width="7" filter="url(#glow)"/>
+  <text x="24" y="55" font-family="sans-serif" font-weight="800" font-size="26" fill="#f8fbff">ROGUE SIGNAL</text>
+  <rect x="24" y="70" width="148" height="5" fill="#ff2ca8"/>
+</svg>

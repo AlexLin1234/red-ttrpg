@@ -1,13 +1,13 @@
 # Cyberpunk RED Stream Viewer
 
-A display-only Godot 4.3 client for the local GM service. It subscribes to
+A display-only Godot 4.7 client for the local GM service. It subscribes to
 `ws://127.0.0.1:8000/viewer`, draws the encounter roster, and shows the
 resolver's own card text when an action resolves. It rolls nothing, computes
 nothing, and cannot change the encounter.
 
 ## Running
 
-Open `viewer/` in Godot 4.3 and press play, or run it headless-free from a
+Open `viewer/` in Godot 4.7 and press play, or run it headless-free from a
 shell:
 
 ```powershell
@@ -50,8 +50,8 @@ appears in the top-right; it disappears once the socket is back.
 | Top right    | Connection warning, shown only while the service is unreachable |
 
 Cards fade out on their own (9 seconds for a resolution, 16 for a rules
-answer). Undo and redo clear the card rather than replaying it, so what is on
-screen is always something that just happened live.
+answer). Undo and redo show a short reversal card so viewers can follow a live
+correction without replaying the original outcome.
 
 ## Files
 

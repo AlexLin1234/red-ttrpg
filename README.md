@@ -3,9 +3,9 @@
 A local, single-GM tool for resolving combat, retrieving cited rules, and
 presenting readable outcomes in an OBS-captured Godot scene.
 
-Phases 0-6 are implemented: deterministic combat resolution, local validated
-tables, reversible state, cited hybrid retrieval, the local GM HTTP service, and
-the Godot viewer that renders it for stream.
+Phases 0-8 are implemented: deterministic combat resolution, local validated
+tables, reversible state, cited hybrid retrieval, the local GM HTTP service,
+the OBS overlay, and an interactive Godot tactical viewer.
 
 ## Development
 
@@ -69,7 +69,12 @@ viewers as a full snapshot.
 | `POST /encounter/clear-jam` | Clear a jammed weapon                           |
 | `POST /encounter/undo`   | Reverse the last action                            |
 | `POST /encounter/redo`   | Reapply the last undone action                     |
+| `POST /resolve`          | Resolve an attack (tactical-viewer compatibility) |
 | `WS /viewer`             | Snapshot stream for the Godot viewer               |
+
+Attack commands may include `cover_hp`; the tactical viewer supplies this from
+its shooter-to-target raycasts. The cover assignment and resulting damage are
+recorded as one reversible event action.
 
 An actor carries its own HP, armour SP, cover, and weapons. Weapon stats come
 from the validated tables by name, or inline on the actor when you want a
@@ -94,3 +99,12 @@ python scripts\viewer_smoke.py
 `viewer_smoke.py` drives a sample fight through the public routes so you can
 confirm an OBS scene before going live. See `viewer/README.md` for the OBS
 source settings and the layout map.
+
+For the interactive isometric board, open
+`viewer/new-game-project/project.godot` in Godot 4.7. It includes a 20×20
+GridMap alley, three draggable billboard tokens, cover raycasts, the seven v1
+actions, a compact inspector, resolution cards, combat VFX, and server-backed
+undo/redo. Encounter snapshots dynamically create tokens and persist cover HP
+by prop ID; Move mode also supports Shift-dragging cover props. The included
+modular geometry and SVG portraits are original
+placeholders that can be replaced with a licensed environment kit.

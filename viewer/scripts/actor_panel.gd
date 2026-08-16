@@ -159,4 +159,6 @@ func _flash(color: Color) -> void:
 
 
 func _blend_edge(amount: float, from: Color) -> void:
-	add_theme_stylebox_override("panel", Palette.panel_style(from.lerp(Palette.EDGE, amount), 3 if amount < 1.0 else 2))
+	add_theme_stylebox_override(
+		"panel", Palette.panel_style(from.lerp(Palette.EDGE, amount), 3 if amount < 1.0 else 2)
+	)

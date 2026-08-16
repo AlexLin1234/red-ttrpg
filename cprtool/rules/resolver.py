@@ -256,7 +256,10 @@ def resolve_attack(
                 "amount": raw_damage,
             }
         )
-        card_lines.append(f"Cover: {request.target.cover_hp} HP - {raw_damage}")
+        remaining_cover = max(0, request.target.cover_hp - raw_damage)
+        card_lines.append(
+            f"Cover: {request.target.cover_hp} HP - {raw_damage} = {remaining_cover} HP"
+        )
         return AttackResult(
             hit=True,
             attack_roll=check,

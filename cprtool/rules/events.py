@@ -13,6 +13,7 @@ EVENT_KINDS: Final[frozenset[str]] = frozenset(
         "weapon_jammed",
         "attack_missed",
         "cover_damaged",
+        "cover_set",
         "armor_ablated",
         "damage_taken",
         "critical_injury",
@@ -53,12 +54,72 @@ def _apply_one(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, Any
             "weapon": event["weapon"],
         }
     target = _actor(state, str(event.get("target_id", "")))
+    if kind == "cover_set":
+        previous = int(target.get("cover_hp", 0))
+        target_cover_id_existed = "cover_id" in target
+        previous_id = target.get("cover_id")
+        cover_id = event.get("cover_id")
+        covers_existed = "covers" in state
+        covers = state.setdefault("covers", {})
+        cover_existed = cover_id is not None and str(cover_id) in covers
+        previous_cover_hp = int(covers[str(cover_id)]) if cover_existed else None
+        target["cover_hp"] = int(event["hp"])
+        target["cover_id"] = cover_id
+        if target["cover_hp"] < 0:
+            raise ValueError("cover HP cannot be negative")
+        if cover_id is not None:
+            covers[str(cover_id)] = target["cover_hp"]
+        return {
+            "kind": "cover_restored",
+            "target_id": event["target_id"],
+            "hp": previous,
+            "cover_id": previous_id,
+            "target_cover_id_existed": target_cover_id_existed,
+            "affected_cover_id": cover_id,
+            "cover_existed": cover_existed,
+            "previous_cover_hp": previous_cover_hp,
+            "covers_existed": covers_existed,
+        }
+    if kind == "cover_restored":
+        target["cover_hp"] = int(event["hp"])
+        if event.get("target_cover_id_existed", False):
+            target["cover_id"] = event.get("cover_id")
+        else:
+            target.pop("cover_id", None)
+        covers = state.setdefault("covers", {})
+        affected_cover_id = event.get("affected_cover_id")
+        if affected_cover_id is not None:
+            key = str(affected_cover_id)
+            if event.get("cover_existed", False):
+                covers[key] = int(event["previous_cover_hp"])
+            else:
+                covers.pop(key, None)
+        if not event.get("covers_existed", True) and not covers:
+            state.pop("covers", None)
+        return {"kind": "noop"}
     if kind in {"cover_damaged", "cover_repaired"}:
         amount = int(event["amount"])
-        previous = int(target.get("cover_hp", 0))
-        target["cover_hp"] = max(0, previous - amount) if kind == "cover_damaged" else previous + amount
+        cover_id = event.get("cover_id")
+        covers = state.setdefault("covers", {}) if cover_id is not None else state.get("covers", {})
+        previous = (
+            int(covers[str(cover_id)])
+            if cover_id is not None and str(cover_id) in covers
+            else int(target.get("cover_hp", 0))
+        )
+        target["cover_hp"] = (
+            max(0, previous - amount) if kind == "cover_damaged" else previous + amount
+        )
+        if cover_id is not None:
+            covers[str(cover_id)] = target["cover_hp"]
         actual = previous - target["cover_hp"] if kind == "cover_damaged" else amount
-        return {"kind": "cover_repaired" if kind == "cover_damaged" else "cover_damaged", "target_id": event["target_id"], "amount": actual}
+        inverse = {
+            "kind": "cover_repaired" if kind == "cover_damaged" else "cover_damaged",
+            "target_id": event["target_id"],
+            "amount": actual,
+        }
+        if event.get("cover_id") is not None:
+            inverse["cover_id"] = event["cover_id"]
+        return inverse
     if kind in {"armor_ablated", "armor_restored"}:
         location = str(event["location"])
         amount = int(event.get("amount", 1))
