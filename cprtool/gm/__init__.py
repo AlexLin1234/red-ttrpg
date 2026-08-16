@@ -1,1 +1,1 @@
-"""Local GM service boundary (implemented in Phase 5)."""
+"""Local GM service boundary: bounded agent tools, encounter state, viewer feed."""
