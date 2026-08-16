@@ -1,16 +1,23 @@
-; Cyberpunk RED stream viewer.
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
 ;
-; A display-only Godot client for the local GM service. It never rolls dice and
-; never edits state: it draws whatever snapshot the service broadcasts.
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
 
 config_version=5
+
+[animation]
+
+compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 [application]
 
 config/name="Cyberpunk RED Viewer"
 config/description="OBS-capture viewer for the local Cyberpunk RED GM service."
 run/main_scene="res://scenes/viewer.tscn"
-config/features=PackedStringArray("4.3", "GL Compatibility")
+config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
 
 [display]
