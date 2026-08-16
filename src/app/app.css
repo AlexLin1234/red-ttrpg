@@ -1,0 +1,251 @@
+.app {
+  display: grid;
+  grid-template-rows: var(--header-height) 1fr;
+  height: 100%;
+  background: var(--bg-page);
+}
+
+.app-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--gap-4);
+  padding: 0 var(--gap-4);
+  background: var(--panel);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-3);
+  min-width: 0;
+}
+
+.app-brand-mark {
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+}
+
+.app-brand-name {
+  font-size: 14px;
+  letter-spacing: 0.16em;
+}
+
+.app-brand .micro {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-nav {
+  display: flex;
+  gap: 1px;
+  justify-self: center;
+}
+
+.app-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--panel-inset);
+  border: 1px solid transparent;
+}
+
+.app-nav-item:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.app-nav-item[aria-current='page'] {
+  color: var(--bg-deep);
+  background: var(--accent-fill);
+}
+
+.app-nav-item[aria-current='page'] .app-nav-key {
+  color: var(--bg-deep);
+  opacity: 0.7;
+}
+
+.app-nav-item:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.app-nav-key {
+  font-size: 9px;
+  color: var(--muted-dim);
+}
+
+.app-header-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--gap-3);
+}
+
+.app-status {
+  color: var(--good);
+}
+
+.app-dirty.is-dirty {
+  color: var(--warn);
+}
+
+.app-save {
+  padding: 4px 14px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--bg-deep);
+  background: var(--accent-fill);
+  border-radius: var(--radius);
+}
+
+.app-save:hover {
+  background: var(--accent);
+}
+
+.app-body {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Shared building blocks used by more than one screen. */
+.stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.field-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-3);
+  padding: 3px 0;
+}
+
+.field-row + .field-row {
+  border-top: 1px solid var(--hairline);
+}
+
+.field-value {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-3);
+  padding: var(--gap-2) var(--gap-3);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.empty-state {
+  display: grid;
+  place-content: center;
+  gap: var(--gap-3);
+  height: 100%;
+  text-align: center;
+  color: var(--muted);
+}
+
+.hatched {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 4px,
+    rgba(147, 188, 226, 0.06) 4px,
+    rgba(147, 188, 226, 0.06) 5px
+  );
+}
+
+.hp-bar {
+  position: relative;
+  height: 2px;
+  background: var(--rule);
+  overflow: hidden;
+}
+
+.hp-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent);
+}
+
+.hp-bar-fill.is-hurt {
+  background: var(--warn);
+}
+
+.hp-bar-fill.is-critical {
+  background: var(--alert);
+}
+
+.tab-row {
+  display: flex;
+  gap: 1px;
+}
+
+.tab {
+  padding: 5px 14px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--panel-inset);
+}
+
+.tab[aria-selected='true'] {
+  color: var(--text-display);
+  background: var(--panel-raised);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.button {
+  padding: 7px 14px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.button:hover:not(:disabled) {
+  border-color: var(--accent-fill);
+  color: var(--text-display);
+}
+
+.button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.button.is-primary {
+  color: var(--bg-deep);
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+}
+
+.button.is-primary:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--bg-deep);
+}
+
+.button.is-danger {
+  color: var(--alert-bright);
+  border-color: var(--alert);
+}
