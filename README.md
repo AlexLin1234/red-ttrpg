@@ -3,8 +3,9 @@
 A local, single-GM tool for resolving combat, retrieving cited rules, and
 presenting readable outcomes in an OBS-captured Godot scene.
 
-Phases 0-5 are implemented: deterministic combat resolution, local validated
-tables, reversible state, cited hybrid retrieval, and the local GM HTTP service.
+Phases 0-6 are implemented: deterministic combat resolution, local validated
+tables, reversible state, cited hybrid retrieval, the local GM HTTP service, and
+the Godot viewer that renders it for stream.
 
 ## Development
 
@@ -52,3 +53,44 @@ returns a suggested DV for explicit GM approval. Without an API key, the service
 uses a deterministic extractive fallback. To enable the optional Anthropic agent,
 set both `ANTHROPIC_API_KEY` and `CPR_ANTHROPIC_MODEL`; no model name is silently
 selected for you.
+
+## Encounters and the viewer
+
+The service also holds one live encounter. Every command resolves through the
+pure resolver, is applied as reversible events, and is broadcast to attached
+viewers as a full snapshot.
+
+| Route                    | Purpose                                            |
+| ------------------------ | -------------------------------------------------- |
+| `POST /encounter`        | Load actors; clears undo history                   |
+| `GET /encounter`         | Current snapshot                                   |
+| `POST /encounter/attack` | Resolve one attack and broadcast the outcome card  |
+| `POST /encounter/reload` | Refill a magazine                                  |
+| `POST /encounter/clear-jam` | Clear a jammed weapon                           |
+| `POST /encounter/undo`   | Reverse the last action                            |
+| `POST /encounter/redo`   | Reapply the last undone action                     |
+| `WS /viewer`             | Snapshot stream for the Godot viewer               |
+
+An actor carries its own HP, armour SP, cover, and weapons. Weapon stats come
+from the validated tables by name, or inline on the actor when you want a
+one-off:
+
+```json
+{"actors": {"solo": {
+  "name": "Rache", "max_hp": 40, "attack_base": 14,
+  "weapons": {"Heavy Pistol": {"ammo": 8}}
+}}}
+```
+
+`POST /ask` with `"broadcast": true` also pushes the cited answer to the viewer.
+
+Start the viewer once the service is running:
+
+```powershell
+godot --path viewer
+python scripts\viewer_smoke.py
+```
+
+`viewer_smoke.py` drives a sample fight through the public routes so you can
+confirm an OBS scene before going live. See `viewer/README.md` for the OBS
+source settings and the layout map.
