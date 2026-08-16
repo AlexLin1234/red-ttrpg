@@ -62,7 +62,7 @@ if (screens.length > 0) {
   await page.getByRole('button', { name: /Continue/ }).click()
   await page.waitForTimeout(700)
   for (const screen of screens) {
-    await page.getByRole('button', { name: new RegExp(`^${screen}`, 'i') }).click()
+    await page.locator('.app-nav-item', { hasText: new RegExp(`^${screen}`, 'i') }).first().click()
     await page.waitForTimeout(900)
     await page.screenshot({ path: join(outDir, `${screen.toLowerCase()}.png`) })
     console.log(`shot ${screen.toLowerCase()}`)
