@@ -129,6 +129,24 @@ static func load_file(path: String) -> Dictionary:
 	var roster: Variant = (
 		_decode(reader.read_file(ROSTER), ROSTER) if names.has(ROSTER) else {"characters": []}
 	)
+	if typeof(campaign) != TYPE_DICTIONARY or typeof(roster) != TYPE_DICTIONARY:
+		reader.close()
+		return {"ok": false, "error": "campaign state is unreadable"}
+	var current_month: Variant = (campaign as Dictionary).get(
+		"current_month", Lifestyle.month_key((campaign as Dictionary).get("clock", {}))
+	)
+	if not Lifestyle.is_month(current_month):
+		reader.close()
+		return {"ok": false, "error": "campaign current_month must use YYYY-MM"}
+	(campaign as Dictionary)["current_month"] = current_month
+	for value in (roster as Dictionary).get("characters", []):
+		var character: Dictionary = value
+		if String(character.get("kind", "npc")) == "pc" or character.has("lifestyle"):
+			Lifestyle.ensure_character(character)
+			var problem := Lifestyle.validate_character(character)
+			if problem != "":
+				reader.close()
+				return {"ok": false, "error": "%s: %s" % [character.get("name", "character"), problem]}
 
 	var locations: Array = []
 	for name in names:

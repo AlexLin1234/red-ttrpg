@@ -7,6 +7,10 @@ location, and character Forge.
 No server, sidecar, or network connection is required. Rules run in GDScript
 and campaigns are portable `.red` files stored on disk.
 
+An optional FastAPI service and container are included for a persistent cloud
+session. `POST /encounter/month-end` performs the same in-game month close as
+one atomic operation and `/ws` broadcasts the resulting campaign state.
+
 ![The campaign library](docs/mockups/1a-library.png)
 
 ## Features
@@ -65,6 +69,24 @@ godot --path .
 Both scripts accept `GODOT=/path/to/godot`. The test script performs the import
 pass required to register global GDScript classes and then runs the headless
 suite. Screenshot tests require a graphical renderer or Xvfb.
+
+## Private Night City map
+
+The sourcebook and map are deliberately ignored by Git. With a user-owned PDF
+mounted read-only, extract the largest embedded image (optionally constrain the
+search with `--page N`):
+
+```bash
+python scripts/extract_night_city_map.py \
+  --pdf "/input/Cyberpunk Red.pdf" \
+  --output "data/maps/night_city_2045.png"
+```
+
+The City screen loads that RGB-compatible PNG at runtime, preserves its aspect
+ratio, and toggles it with **M** or **Map [M]**. When absent, the built-in map
+remains usable. For cloud use, `docker compose up --build` provides persistent
+`/data` campaign storage, a writable map mount, a read-only sourcebook mount,
+and the API health check. Set `SOURCEBOOK_PDF` to the host PDF path.
 
 ## Layout
 

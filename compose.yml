@@ -1,0 +1,10 @@
+services:
+  redline:
+    build: .
+    ports: ["8000:8000"]
+    volumes:
+      - campaign-data:/data
+      - ./data/maps:/app/data/maps
+      - ${SOURCEBOOK_PDF:-/dev/null}:/input/Cyberpunk Red.pdf:ro
+volumes:
+  campaign-data:

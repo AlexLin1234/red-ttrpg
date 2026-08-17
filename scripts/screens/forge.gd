@@ -741,11 +741,11 @@ func _blank_character() -> Dictionary:
 		"max_humanity": 50,
 		"cash": 0,
 		"lifestyle": "kibble",
-		"lifestyle_status": "current",
+		"lifestyle_status": "paid",
 		"lifestyle_paid_through": null,
 		"lifestyle_balance_due": 0,
-		"lifestyle_grace_days": null,
-		"last_lifestyle_charge": 0,
+		"lifestyle_grace_days": 0,
+		"last_lifestyle_charge": null,
 		"weapons": [],
 	}
 

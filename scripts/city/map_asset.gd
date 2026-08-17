@@ -3,6 +3,7 @@ extends RefCounted
 
 const MAX_BYTES := 32 * 1024 * 1024
 const MAX_PIXELS := 40_000_000
+const EXTERNAL_PATH := "res://data/maps/night_city_2045.png"
 
 
 static func from_file(path: String) -> Dictionary:
@@ -34,3 +35,12 @@ static func decode(data: Dictionary) -> Image:
 	if encoded == "" or image.load_png_from_buffer(Marshalls.base64_to_raw(encoded)) != OK:
 		return null
 	return image
+
+
+static func load_external(path: String = EXTERNAL_PATH) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		return {"ok": false, "error": "Night City map is not installed. Extract it into data/maps/night_city_2045.png."}
+	var loaded := from_file(path)
+	if not bool(loaded.get("ok", false)):
+		return loaded
+	return {"ok": true, "image": decode(loaded["map"]), "path": path}

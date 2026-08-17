@@ -66,7 +66,7 @@ static func flat(
 static func build_theme() -> Theme:
 	var theme := Theme.new()
 	theme.default_font = BODY_FONT
-	theme.default_font_size = 13
+	theme.default_font_size = 15
 
 	theme.set_stylebox("panel", "PanelContainer", flat(PANEL, HAIRLINE, 1))
 	theme.set_stylebox("panel", "Panel", flat(PANEL, HAIRLINE, 1))
@@ -85,7 +85,7 @@ static func build_theme() -> Theme:
 	theme.set_color("font_pressed_color", "Button", TEXT_DISPLAY)
 	theme.set_color("font_disabled_color", "Button", MUTED_DIM)
 	theme.set_font("font", "Button", BODY_BOLD_FONT)
-	theme.set_font_size("font_size", "Button", 11)
+	theme.set_font_size("font_size", "Button", 13)
 
 	theme.set_color("font_color", "Label", TEXT)
 	theme.set_color("font_color", "RichTextLabel", TEXT)
@@ -116,7 +116,7 @@ static func micro(text: String, color := MUTED) -> Label:
 	var label := Label.new()
 	label.text = text.to_upper()
 	label.add_theme_font_override("font", BODY_BOLD_FONT)
-	label.add_theme_font_size_override("font_size", 9)
+	label.add_theme_font_size_override("font_size", 11)
 	label.add_theme_color_override("font_color", color)
 	label.add_theme_constant_override("line_spacing", 2)
 	# Godot has no letter-spacing property, so the effect is approximated with
@@ -143,7 +143,7 @@ static func display(text: String, size := 24, color := TEXT_DISPLAY) -> Label:
 	return label
 
 
-static func body(text: String, size := 12, color := TEXT) -> Label:
+static func body(text: String, size := 14, color := TEXT) -> Label:
 	var label := Label.new()
 	label.text = text
 	label.add_theme_font_size_override("font_size", size)
@@ -151,7 +151,7 @@ static func body(text: String, size := 12, color := TEXT) -> Label:
 	return label
 
 
-static func value(text: String, size := 11, color := TEXT) -> Label:
+static func value(text: String, size := 13, color := TEXT) -> Label:
 	var label := Label.new()
 	label.text = text
 	label.add_theme_font_override("font", BODY_BOLD_FONT)
@@ -251,7 +251,7 @@ static func tab_button(text: String, selected: bool) -> Button:
 	button.button_pressed = selected
 	button.focus_mode = Control.FOCUS_NONE
 	button.add_theme_font_override("font", BODY_BOLD_FONT)
-	button.add_theme_font_size_override("font_size", 9)
+	button.add_theme_font_size_override("font_size", 11)
 	button.add_theme_stylebox_override("normal", flat(PANEL_INSET, Color.TRANSPARENT, 0, 8))
 	button.add_theme_stylebox_override("hover", flat(PANEL_INSET, HAIRLINE, 1, 8))
 	var active := flat(PANEL_RAISED, Color.TRANSPARENT, 0, 8)

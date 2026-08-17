@@ -6,7 +6,12 @@ export_presets.cfg
 # Book-derived data stays local.
 *.pdf
 !docs/mockups/*.pdf
-data/
+# Private source and extracted map assets (keep the mount point in Git).
+data/maps/*.png
+data/maps/*.jpg
+data/maps/*.jpeg
+data/maps/*.pdf
+!data/maps/.gitkeep
 
 # Build output
 build/

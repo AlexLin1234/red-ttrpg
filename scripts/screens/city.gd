@@ -17,7 +17,14 @@ var _tab_buttons: Dictionary = {}
 var _upload_button: Button
 var _zone_button: Button
 var _clear_zones_button: Button
+var _map_toggle_button: Button
 var _map_dialog: FileDialog
+var _month_dialog: ConfirmationDialog
+var _campaign_dialog: ConfirmationDialog
+var _campaign_name: LineEdit
+var _campaign_city: LineEdit
+var _campaign_gm: LineEdit
+var _closing_month := false
 
 
 func _ready() -> void:
@@ -57,6 +64,12 @@ func _ready() -> void:
 	_map_dialog.file_selected.connect(_on_map_selected)
 	add_child(_map_dialog)
 	_map.zones_changed.connect(_on_zones_changed)
+	_month_dialog = ConfirmationDialog.new()
+	_month_dialog.title = "Close campaign month?"
+	_month_dialog.dialog_text = "Pay every character's Lifestyle for the upcoming in-game month?"
+	_month_dialog.confirmed.connect(_confirm_month_close)
+	add_child(_month_dialog)
+	_build_campaign_dialog()
 
 	_refresh()
 
@@ -94,6 +107,12 @@ func _build_bar() -> Control:
 	_clear_zones_button = UI.plain_button("Clear zones")
 	_clear_zones_button.pressed.connect(_clear_zones)
 	bar.add_child(_clear_zones_button)
+	_map_toggle_button = UI.plain_button("Map [M]")
+	_map_toggle_button.pressed.connect(func() -> void: _map.toggle_map())
+	bar.add_child(_map_toggle_button)
+	var settings_button := UI.plain_button("Campaign settings")
+	settings_button.pressed.connect(_open_campaign_dialog)
+	bar.add_child(settings_button)
 
 	var right := UI.micro("GM · %s" % String(Store.campaign.get("gm", "unset")))
 	right.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -101,6 +120,49 @@ func _build_bar() -> Control:
 	bar.add_child(right)
 
 	return bar
+
+
+func _build_campaign_dialog() -> void:
+	_campaign_dialog = ConfirmationDialog.new()
+	_campaign_dialog.title = "Campaign settings"
+	_campaign_dialog.get_ok_button().text = "Save changes"
+	var form := UI.vbox(UI.GAP_3)
+	for pair in [["Campaign name", "name"], ["City / setting", "city"], ["Game master", "gm"]]:
+		form.add_child(UI.micro(String(pair[0])))
+		var field := LineEdit.new()
+		field.custom_minimum_size.y = 38
+		form.add_child(field)
+		match String(pair[1]):
+			"name": _campaign_name = field
+			"city": _campaign_city = field
+			"gm": _campaign_gm = field
+	_campaign_dialog.add_child(UI.margins(form, UI.GAP_4))
+	_campaign_dialog.confirmed.connect(_save_campaign_settings)
+	add_child(_campaign_dialog)
+
+
+func _open_campaign_dialog() -> void:
+	_campaign_name.text = String(Store.campaign.get("name", ""))
+	_campaign_city.text = String(Store.campaign.get("city", ""))
+	_campaign_gm.text = String(Store.campaign.get("gm", ""))
+	_campaign_dialog.popup_centered(Vector2i(520, 330))
+
+
+func _save_campaign_settings() -> void:
+	if _campaign_name.text.strip_edges() == "":
+		Store.set_status("Campaign name is required")
+		return
+	Store.campaign["name"] = _campaign_name.text.strip_edges()
+	Store.campaign["city"] = _campaign_city.text.strip_edges()
+	Store.campaign["gm"] = _campaign_gm.text.strip_edges()
+	Store.mark_dirty()
+	_refresh()
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_M:
+		_map.toggle_map()
+		get_viewport().set_input_as_handled()
 
 
 func _on_hovered(district_id: String) -> void:
@@ -197,7 +259,7 @@ func _build_clock() -> Control:
 	var shift := CampaignSchema.shift_of(clock)
 
 	var box := UI.vbox(3)
-	box.add_child(UI.micro("In-world clock"))
+	box.add_child(UI.micro("Campaign month · %s" % Lifestyle.month_key(clock)))
 	box.add_child(UI.display(CampaignSchema.format_clock(clock), 40))
 	box.add_child(UI.micro("%s · Shift %d" % [shift["label"], int(shift["shift"])]))
 	box.add_child(UI.micro(CampaignSchema.format_date(clock), UI.MUTED_DIM))
@@ -231,11 +293,9 @@ func _build_clock() -> Control:
 	box.add_child(actions)
 
 	var close_button := UI.primary_button("Close month · auto-pay Lifestyles")
-	close_button.pressed.connect(
-		func() -> void:
-			Store.close_month()
-			_refresh()
-	)
+	var month := Lifestyle.month_key(clock)
+	close_button.disabled = _closing_month or (Store.campaign.get("closed_months", []) as Array).has(month)
+	close_button.pressed.connect(func() -> void: _month_dialog.popup_centered())
 	box.add_child(close_button)
 	var report: Dictionary = Store.campaign.get("last_lifestyle_report", {})
 	if not report.is_empty():
@@ -246,8 +306,22 @@ func _build_clock() -> Control:
 				UI.WARN if int(report.get("unpaid", 0)) > 0 else UI.GOOD,
 			)
 		)
+		for result in report.get("results", []):
+			var item: Dictionary = result
+			var summary := "%s · -%deb" % [item.get("name", "Character"), item.get("deducted", 0)]
+			if String(item.get("status", "")) == "unpaid":
+				summary = "%s · UNPAID · %deb due · 7-day grace" % [item.get("name", "Character"), item.get("balance_due", 0)]
+			box.add_child(UI.micro(summary, UI.WARN if String(item.get("status", "")) == "unpaid" else UI.GOOD))
 
 	return UI.margins(box, UI.GAP_3)
+
+
+func _confirm_month_close() -> void:
+	_closing_month = true
+	_refresh_rail()
+	Store.close_month(Lifestyle.month_key(Store.campaign["clock"]))
+	_closing_month = false
+	_refresh()
 
 
 func _build_district_panel() -> Control:
@@ -261,6 +335,28 @@ func _build_district_panel() -> Control:
 	var is_combat_zone := String(district["zone_type"]) == "combat"
 
 	var box := UI.vbox(UI.GAP_2)
+	var gm_map: Dictionary = Store.campaign.get("gm_map", {})
+	if gm_map.has("png_base64"):
+		box.add_child(UI.micro("Map · %s" % String(gm_map.get("name", "Campaign map"))))
+		var opacity := HSlider.new()
+		opacity.min_value = 0.2
+		opacity.max_value = 1.0
+		opacity.step = 0.05
+		opacity.value = float(gm_map.get("opacity", 0.72))
+		opacity.tooltip_text = "Map opacity"
+		opacity.value_changed.connect(func(value: float) -> void:
+			var edited: Dictionary = Store.campaign.get("gm_map", {})
+			edited["opacity"] = value
+			Store.campaign["gm_map"] = edited
+			Store.mark_dirty()
+			_map.set_custom_map(edited)
+		)
+		box.add_child(opacity)
+	elif not FileAccess.file_exists(MapAsset.EXTERNAL_PATH):
+		var setup := UI.body("Optional map not installed. Run the extraction command in README.md, or choose Upload map.", 13, UI.WARN)
+		setup.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		setup.clip_text = false
+		box.add_child(setup)
 	box.add_child(UI.micro("Hovered district"))
 	box.add_child(UI.display(String(district["name"]), 30))
 
@@ -301,6 +397,39 @@ func _build_district_panel() -> Control:
 	var control_tile := _stat_tile("Control", control)
 	UI.expand(control_tile, true, false)
 	box.add_child(control_tile)
+	box.add_child(UI.micro("Edit region"))
+	var control_edit := LineEdit.new()
+	control_edit.placeholder_text = "Controlling faction"
+	control_edit.text = control
+	box.add_child(control_edit)
+	var danger_edit := SpinBox.new()
+	danger_edit.min_value = 1
+	danger_edit.max_value = 5
+	danger_edit.value = danger
+	danger_edit.prefix = "Danger  "
+	box.add_child(danger_edit)
+	var note_edit := TextEdit.new()
+	note_edit.placeholder_text = "GM notes for this region"
+	note_edit.text = String(overrides.get("note", ""))
+	note_edit.custom_minimum_size.y = 72
+	box.add_child(note_edit)
+	var save_region := UI.primary_button("Save region changes")
+	save_region.pressed.connect(func() -> void:
+		var districts: Dictionary = Store.campaign.get("districts", {})
+		var changed: Dictionary = districts.get(_focus_id, {})
+		changed["control"] = control_edit.text.strip_edges()
+		changed["danger"] = int(danger_edit.value)
+		if note_edit.text.strip_edges() == "":
+			changed.erase("note")
+		else:
+			changed["note"] = note_edit.text.strip_edges()
+		districts[_focus_id] = changed
+		Store.campaign["districts"] = districts
+		Store.mark_dirty()
+		Store.set_status("Region updated")
+		_refresh()
+	)
+	box.add_child(save_region)
 
 	box.add_child(UI.micro("Job hooks here"))
 	var found := 0
@@ -413,7 +542,9 @@ class _MapView extends Control:
 	var _custom_size := Vector2.ONE
 	var _custom_zones: Array = []
 	var _custom_signature := 0
+	var _custom_opacity := 0.72
 	var _drawing_zone := false
+	var _map_visible := true
 	var _draft_points: Array[Vector2] = []
 
 	func _init() -> void:
@@ -432,10 +563,17 @@ class _MapView extends Control:
 
 	func set_custom_map(data: Dictionary) -> void:
 		_custom_zones = (data.get("zones", []) as Array).duplicate(true)
+		_custom_opacity = clampf(float(data.get("opacity", 0.72)), 0.2, 1.0)
 		var encoded := String(data.get("png_base64", ""))
 		var signature := encoded.hash()
 		if encoded == "":
-			_custom_texture = null
+			var external := MapAsset.load_external()
+			if bool(external.get("ok", false)):
+				var image: Image = external["image"]
+				_custom_texture = ImageTexture.create_from_image(image)
+				_custom_size = Vector2(image.get_width(), image.get_height())
+			else:
+				_custom_texture = null
 			_custom_signature = 0
 			queue_redraw()
 			return
@@ -448,6 +586,10 @@ class _MapView extends Control:
 			_custom_texture = ImageTexture.create_from_image(image)
 			_custom_size = Vector2(image.get_width(), image.get_height())
 			_custom_signature = signature
+		queue_redraw()
+
+	func toggle_map() -> void:
+		_map_visible = not _map_visible
 		queue_redraw()
 
 	func start_zone() -> void:
@@ -504,7 +646,7 @@ class _MapView extends Control:
 		return (point - _origin) / maxf(_scale, 0.0001)
 
 	func _gui_input(event: InputEvent) -> void:
-		if _custom_texture != null:
+		if _custom_texture != null and _map_visible:
 			if not _drawing_zone:
 				return
 			if event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
@@ -551,9 +693,9 @@ class _MapView extends Control:
 			draw_line(Vector2(0, y), Vector2(size.x, y), grid_colour, 1.0)
 			y += step
 
-		if _custom_texture != null:
+		if _custom_texture != null and _map_visible:
 			var rect := _custom_rect()
-			draw_texture_rect(_custom_texture, rect, false)
+			draw_texture_rect(_custom_texture, rect, false, Color(1, 1, 1, _custom_opacity))
 			_draw_custom_zones()
 			return
 
