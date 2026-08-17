@@ -16,3 +16,6 @@ release/
 tmp/
 .gstack/
 .DS_Store
+
+# Rendered screenshots are build output.
+.shots/

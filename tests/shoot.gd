@@ -41,10 +41,18 @@ func _ready() -> void:
 		_errors.append("could not open Blackwall Sunrise")
 	await _settle(20)
 
-	for pair in [["city", "1b-city"], ["location", "1c-location"], ["forge", "1d-forge"]]:
-		app.call("_show", String(pair[0]))
-		await _settle(30)
-		await _shoot(String(pair[1]))
+	app.call("_show", "city")
+	await _settle(30)
+	await _shoot("1b-city")
+
+	app.call("_show", "location")
+	await _settle(30)
+	await _shoot("1c-location")
+	await _drive_combat(app)
+
+	app.call("_show", "forge")
+	await _settle(30)
+	await _shoot("1d-forge")
 
 	if _errors.is_empty():
 		print("\nall screens rendered to %s" % ProjectSettings.globalize_path(OUT_DIR))
@@ -54,6 +62,40 @@ func _ready() -> void:
 		for error in _errors:
 			print(" - " + error)
 		get_tree().quit(1)
+
+
+## Walk the combat path the GM walks: roll initiative, shoot across the deck,
+## answer the cover prompt, then check the card actually says something.
+func _drive_combat(app: Control) -> void:
+	var screen: Node = app.get("_screen")
+	if screen == null or not screen.has_method("roll_initiative"):
+		_errors.append("location screen did not expose the combat path")
+		return
+
+	screen.call("roll_initiative")
+	await _settle(10)
+	await _shoot("1c-initiative")
+
+	var ids: PackedStringArray = screen.call("unit_ids")
+	if ids.size() < 2:
+		_errors.append("expected at least two units on the board")
+		return
+
+	# Spike and Nine-Volt are on opposite sides of the deck with pillars between
+	# them, which is the case the cover prompt exists for.
+	screen.call("select_unit", ids[0])
+	await _settle(4)
+	screen.call("begin_attack", ids[3] if ids.size() > 3 else ids[1], "single")
+	await _settle(10)
+
+	if bool(screen.call("has_cover_prompt")):
+		await _shoot("1c-cover-prompt")
+		screen.call("answer_cover_prompt", "absorb")
+		await _settle(12)
+	else:
+		_errors.append("no cover was found in the line of fire — expected the parkade pillars")
+
+	await _shoot("1c-resolution")
 
 
 func _settle(frames: int) -> void:

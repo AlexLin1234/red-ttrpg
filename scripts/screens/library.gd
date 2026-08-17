@@ -121,16 +121,20 @@ func _build_row(row: Dictionary) -> Control:
 	content.add_child(text)
 
 	if bool(row.get("ok", false)):
-		text.add_child(UI.display(String(row["name"]), 13))
+		text.add_child(UI.elide(UI.display(String(row["name"]), 13)))
 		var session_text := (
 			"Session %d" % int(row["sessions"]) if int(row["sessions"]) > 0 else String(row["arc"])
 		)
 		text.add_child(
-			UI.micro("%s · %d players · %s" % [row["city"], int(row["players"]), session_text])
+			UI.elide(
+				UI.micro("%s · %d players · %s" % [row["city"], int(row["players"]), session_text])
+			)
 		)
 	else:
-		text.add_child(UI.display(String(row["name"]), 13))
-		text.add_child(UI.micro("Unreadable — %s" % String(row.get("error", "")), UI.ALERT_BRIGHT))
+		text.add_child(UI.elide(UI.display(String(row["name"]), 13)))
+		text.add_child(
+			UI.elide(UI.micro("Unreadable — %s" % String(row.get("error", "")), UI.ALERT_BRIGHT))
+		)
 
 	var meta := UI.vbox(1)
 	meta.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -270,6 +274,8 @@ func _build_party_and_log(loaded: Dictionary) -> Control:
 		var text := UI.body(String(line["text"]), 11)
 		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		# Autowrap needs the full width, so clipping has to come back off.
+		text.clip_text = false
 		row.add_child(text)
 		log_box.add_child(UI.margins(row, 4))
 	if entries.is_empty():

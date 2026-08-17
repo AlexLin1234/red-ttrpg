@@ -120,7 +120,7 @@ static func micro(text: String, color := MUTED) -> Label:
 	label.add_theme_color_override("font_color", color)
 	label.add_theme_constant_override("line_spacing", 2)
 	# Godot has no letter-spacing property, so the effect is approximated with
-	# thin spaces between characters for the short labels that carry it.
+	# spaces between characters for the short labels that carry it.
 	label.text = _letterspace(label.text)
 	return label
 
@@ -160,9 +160,24 @@ static func value(text: String, size := 11, color := TEXT) -> Label:
 	return label
 
 
+## Let a label shrink below its text width and elide.
+##
+## A Label's minimum size is its full text, so one long character name in a
+## narrow rail pushes every neighbouring panel off the screen. Applied only where
+## a name genuinely may be too long, never to tiles whose text is the content.
+static func elide(label: Label) -> Label:
+	label.clip_text = true
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.custom_minimum_size.x = 0
+	return label
+
+
 static func panel(bg := PANEL, border := HAIRLINE) -> PanelContainer:
 	var container := PanelContainer.new()
 	container.add_theme_stylebox_override("panel", flat(bg, border, 1))
+	# Panels own a fixed slot in the screen grid; content that overruns is
+	# clipped rather than allowed to shove the neighbouring rail off screen.
+	container.clip_contents = true
 	return container
 
 
