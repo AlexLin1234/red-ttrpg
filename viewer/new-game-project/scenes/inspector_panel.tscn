@@ -90,6 +90,12 @@ unique_name_in_owner = true
 theme_override_font_sizes/font_size = 24
 text = "RELEVANT SKILLS\n—"
 
+[node name="Lifestyle" type="Label" parent="VBox"]
+unique_name_in_owner = true
+theme_override_colors/font_color = Color(1, 0.89, 0.36, 1)
+theme_override_font_sizes/font_size = 23
+text = "LIFESTYLE\n—"
+
 [node name="Cover" type="Label" parent="VBox"]
 unique_name_in_owner = true
 theme_override_colors/font_color = Color(0, 0.898, 1, 1)

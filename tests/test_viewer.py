@@ -53,8 +53,31 @@ def test_stream_card_and_inspector_meet_minimum_information_contract():
     card_scene = (VIEWER / "scenes" / "resolution_card.tscn").read_text(encoding="utf-8")
     inspector = (VIEWER / "scripts" / "inspector_panel.gd").read_text(encoding="utf-8")
     assert "font_size = 24" in card_scene
-    for label in ("Seriously Wounded", "ARMOR", "AMMO", "RELEVANT SKILLS", "COVER"):
+    for label in (
+        "Seriously Wounded",
+        "ARMOR",
+        "AMMO",
+        "RELEVANT SKILLS",
+        "LIFESTYLE",
+        "COVER",
+    ):
         assert label in inspector
+
+
+def test_map_upload_zones_and_month_end_use_server_rules():
+    main = (VIEWER / "scripts" / "main.gd").read_text(encoding="utf-8")
+    client = (VIEWER / "scripts" / "api_client.gd").read_text(encoding="utf-8")
+    zone_canvas = (VIEWER / "scripts" / "map_zone_canvas.gd").read_text(encoding="utf-8")
+    assert "FileDialog.ACCESS_FILESYSTEM" in main
+    assert "api.upload_map(path)" in main
+    assert "ImageTexture.create_from_image" in main
+    assert 'event.keycode == KEY_M' in main
+    assert '"/map/image?filename="' in client
+    assert '"/map/zones"' in client
+    assert "normalized" in zone_canvas
+    assert "_finish_zone" in zone_canvas
+    assert '"/encounter/month-end"' in client
+    assert "api.close_month()" in main
 
 
 def test_vfx_are_created_after_resolver_events_return():

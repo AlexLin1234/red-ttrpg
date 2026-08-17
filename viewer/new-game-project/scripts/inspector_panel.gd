@@ -10,6 +10,7 @@ extends PanelContainer
 @onready var armor_label: Label = %Armor
 @onready var ammo_label: Label = %Ammo
 @onready var skills_label: Label = %Skills
+@onready var lifestyle_label: Label = %Lifestyle
 @onready var cover_label: Label = %Cover
 
 
@@ -37,6 +38,7 @@ func clear() -> void:
 	armor_label.text = "ARMOR\n—"
 	ammo_label.text = "AMMO\n—"
 	skills_label.text = "RELEVANT SKILLS\n—"
+	lifestyle_label.text = "LIFESTYLE\n—"
 	cover_label.text = "COVER\n—"
 
 
@@ -80,6 +82,29 @@ func show_actor(name: String, state: Dictionary, cover_info: Dictionary, evading
 	skills_label.text = (
 		"RELEVANT SKILLS\n" + ("\n".join(skill_lines) if not skill_lines.is_empty() else "—")
 	)
+
+	var lifestyle: Dictionary = state.get("lifestyle", {})
+	var lifestyle_status := str(state.get("lifestyle_status", "current")).to_upper()
+	var lifestyle_line := (
+		"%s  •  %deb/MO  •  %s"
+		% [
+			str(lifestyle.get("label", "Kibble")),
+			int(lifestyle.get("monthly_cost", 100)),
+			lifestyle_status,
+		]
+	)
+	var payment_line := "Cash %deb" % int(state.get("cash", 0))
+	if lifestyle_status == "UNPAID":
+		payment_line += (
+			"  •  %deb due  •  %d-day grace"
+			% [
+				int(state.get("lifestyle_balance_due", 0)),
+				int(state.get("lifestyle_grace_days", 0)),
+			]
+		)
+	elif state.get("lifestyle_paid_through") != null:
+		payment_line += "  •  Paid through %s" % str(state.get("lifestyle_paid_through"))
+	lifestyle_label.text = "LIFESTYLE\n%s\n%s" % [lifestyle_line, payment_line]
 
 	var classification := str(cover_info.get("classification", "none")).to_upper()
 	if classification == "NONE":

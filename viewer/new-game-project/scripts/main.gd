@@ -7,6 +7,7 @@ const DAMAGE_FLOAT_SCENE := preload("res://scenes/damage_float.tscn")
 const GUNSHOT_SCENE := preload("res://scenes/gunshot_vfx.tscn")
 const SOLO_PORTRAIT := preload("res://assets/token_solo.svg")
 const GOON_PORTRAIT := preload("res://assets/token_goon.svg")
+const MAP_ZONE_CANVAS := preload("res://scripts/map_zone_canvas.gd")
 
 const TILE_METERS := 2.0
 const BOARD_HALF_SIZE := 10
@@ -17,6 +18,19 @@ var inspector: TokenInspector
 var resolution_card: ResolutionCard
 var service_status: Label
 var instruction_label: Label
+var calendar_label: Label
+var month_end_button: Button
+var map_button: Button
+var map_upload_button: Button
+var zone_draw_button: Button
+var zone_clear_button: Button
+var map_overlay: PanelContainer
+var map_title: Label
+var map_image: TextureRect
+var map_missing: Label
+var map_zone_canvas: Control
+var map_file_dialog: FileDialog
+var map_manifest: Dictionary = {}
 var action_buttons: Dictionary = {}
 
 var session_state: Dictionary = {}
@@ -46,12 +60,29 @@ func _ready() -> void:
 	_spawn_demo_tokens()
 	api.request_succeeded.connect(_on_api_success)
 	api.request_failed.connect(_on_api_failure)
+	api.map_image_succeeded.connect(_on_map_image_success)
 	_select_token(tokens["solo"])
 	service_status.text = "CONNECTING TO RULES SERVICE…"
 	api.fetch_session()
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if (
+		event is InputEventKey
+		and event.pressed
+		and not event.echo
+		and event.keycode == KEY_ESCAPE
+		and bool(map_zone_canvas.get("drawing"))
+	):
+		map_zone_canvas.call("cancel_drawing")
+		zone_draw_button.disabled = false
+		instruction_label.text = "Zone drawing cancelled."
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_M:
+		_toggle_map()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("redo", true):
 		api.redo()
 		get_viewport().set_input_as_handled()
@@ -194,6 +225,7 @@ func _build_hud() -> void:
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	$HUD.add_child(hud)
+	_build_map_overlay()
 
 	var brand := Label.new()
 	brand.position = Vector2(28, 24)
@@ -208,6 +240,64 @@ func _build_hud() -> void:
 	service_status.add_theme_font_size_override("font_size", 17)
 	service_status.add_theme_color_override("font_color", Color("ffe45c"))
 	hud.add_child(service_status)
+
+	var utility_bar := HBoxContainer.new()
+	utility_bar.position = Vector2(28, 142)
+	utility_bar.add_theme_constant_override("separation", 10)
+	utility_bar.mouse_filter = Control.MOUSE_FILTER_STOP
+	hud.add_child(utility_bar)
+
+	map_button = Button.new()
+	map_button.text = "HIDE MAP (M)"
+	map_button.custom_minimum_size = Vector2(175, 42)
+	map_button.add_theme_font_size_override("font_size", 16)
+	map_button.pressed.connect(_toggle_map)
+	utility_bar.add_child(map_button)
+
+	map_upload_button = Button.new()
+	map_upload_button.text = "UPLOAD MAP"
+	map_upload_button.custom_minimum_size = Vector2(165, 42)
+	map_upload_button.add_theme_font_size_override("font_size", 16)
+	map_upload_button.pressed.connect(_choose_map_image)
+	utility_bar.add_child(map_upload_button)
+
+	zone_draw_button = Button.new()
+	zone_draw_button.text = "DRAW ZONE"
+	zone_draw_button.custom_minimum_size = Vector2(155, 42)
+	zone_draw_button.add_theme_font_size_override("font_size", 16)
+	zone_draw_button.pressed.connect(_start_zone_drawing)
+	utility_bar.add_child(zone_draw_button)
+
+	zone_clear_button = Button.new()
+	zone_clear_button.text = "CLEAR ZONES"
+	zone_clear_button.custom_minimum_size = Vector2(155, 42)
+	zone_clear_button.add_theme_font_size_override("font_size", 16)
+	zone_clear_button.pressed.connect(_clear_map_zones)
+	utility_bar.add_child(zone_clear_button)
+
+	month_end_button = Button.new()
+	month_end_button.text = "CLOSE MONTH • AUTO PAY"
+	month_end_button.custom_minimum_size = Vector2(255, 42)
+	month_end_button.add_theme_font_size_override("font_size", 16)
+	month_end_button.pressed.connect(_close_current_month)
+	utility_bar.add_child(month_end_button)
+
+	map_file_dialog = FileDialog.new()
+	map_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	map_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	map_file_dialog.title = "Choose a map image"
+	map_file_dialog.filters = PackedStringArray(
+		["*.png, *.jpg, *.jpeg, *.webp, *.bmp, *.tif, *.tiff ; Map images"]
+	)
+	map_file_dialog.file_selected.connect(_upload_selected_map)
+	hud.add_child(map_file_dialog)
+
+	calendar_label = Label.new()
+	calendar_label.position = Vector2(30, 192)
+	calendar_label.add_theme_font_size_override("font_size", 17)
+	calendar_label.add_theme_color_override("font_color", Color("ffe45c"))
+	calendar_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(calendar_label)
 
 	resolution_card = CARD_SCENE.instantiate() as ResolutionCard
 	hud.add_child(resolution_card)
@@ -259,6 +349,112 @@ func _build_hud() -> void:
 	_set_action("Fire")
 
 
+func _build_map_overlay() -> void:
+	map_overlay = PanelContainer.new()
+	map_overlay.position = Vector2(28, 232)
+	map_overlay.size = Vector2(720, 710)
+	map_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	map_overlay.modulate.a = 0.9
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.008, 0.014, 0.03, 0.94)
+	panel_style.border_color = Color("00e5ff")
+	panel_style.set_border_width_all(2)
+	panel_style.corner_radius_top_right = 18
+	panel_style.corner_radius_bottom_left = 18
+	panel_style.content_margin_left = 14
+	panel_style.content_margin_right = 14
+	panel_style.content_margin_top = 12
+	panel_style.content_margin_bottom = 14
+	map_overlay.add_theme_stylebox_override("panel", panel_style)
+	hud.add_child(map_overlay)
+
+	var stack := VBoxContainer.new()
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_theme_constant_override("separation", 8)
+	map_overlay.add_child(stack)
+	map_title = Label.new()
+	map_title.text = "GM MAP  •  NO IMAGE UPLOADED"
+	map_title.add_theme_font_size_override("font_size", 22)
+	map_title.add_theme_color_override("font_color", Color("00e5ff"))
+	map_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_child(map_title)
+
+	var image_area := Control.new()
+	image_area.custom_minimum_size = Vector2(690, 650)
+	image_area.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_child(image_area)
+
+	map_image = TextureRect.new()
+	map_image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	map_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	map_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	map_image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	image_area.add_child(map_image)
+
+	map_missing = Label.new()
+	map_missing.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	map_missing.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	map_missing.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	map_missing.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	map_missing.add_theme_font_size_override("font_size", 22)
+	map_missing.text = "NO MAP UPLOADED\n\nChoose UPLOAD MAP to use any raster image."
+	map_missing.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	image_area.add_child(map_missing)
+
+	map_zone_canvas = MAP_ZONE_CANVAS.new() as Control
+	map_zone_canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	map_zone_canvas.zones_changed.connect(_save_map_zones)
+	image_area.add_child(map_zone_canvas)
+
+
+func _toggle_map() -> void:
+	if bool(map_zone_canvas.get("drawing")):
+		map_zone_canvas.call("cancel_drawing")
+		zone_draw_button.disabled = false
+	map_overlay.visible = not map_overlay.visible
+	map_button.text = (
+		"HIDE MAP (M)" if map_overlay.visible else "SHOW MAP (M)"
+	)
+
+
+func _choose_map_image() -> void:
+	map_file_dialog.popup_centered_ratio(0.72)
+
+
+func _upload_selected_map(path: String) -> void:
+	map_upload_button.disabled = true
+	instruction_label.text = "Uploading and normalizing map image…"
+	api.upload_map(path)
+
+
+func _start_zone_drawing() -> void:
+	if map_image.texture == null:
+		instruction_label.text = "Upload a map before drawing zones."
+		return
+	map_zone_canvas.start_drawing()
+	zone_draw_button.disabled = true
+	instruction_label.text = "ZONE DRAW • left-click vertices • right-click to finish"
+
+
+func _clear_map_zones() -> void:
+	map_zone_canvas.clear_zones()
+	instruction_label.text = "Clearing map zones…"
+
+
+func _save_map_zones(zones: Array) -> void:
+	zone_draw_button.disabled = false
+	api.save_map_zones(zones)
+
+
+func _close_current_month() -> void:
+	if api.is_busy():
+		instruction_label.text = "Rules service is busy."
+		return
+	month_end_button.disabled = true
+	instruction_label.text = "Closing month and processing Lifestyle payments…"
+	api.close_month()
+
+
 func _spawn_demo_tokens() -> void:
 	var solo := TOKEN_SCENE.instantiate() as CombatToken
 	solo.configure("solo", "Rogue Signal", SOLO_PORTRAIT, Color("00e5ff"))
@@ -281,6 +477,7 @@ func _spawn_demo_tokens() -> void:
 
 func _initial_session_state() -> Dictionary:
 	return {
+		"current_month": "2045-01",
 		"actors":
 		{
 			"solo":
@@ -294,6 +491,8 @@ func _initial_session_state() -> Dictionary:
 				"attack_base": 14,
 				"evasion_base": 12,
 				"selected_weapon": "Heavy Pistol",
+				"cash": 5000,
+				"lifestyle": "fresh_food",
 				"skills": {"Handgun": 14, "Evasion": 12, "Athletics": 11, "Perception": 13},
 				"weapons":
 				{
@@ -320,6 +519,8 @@ func _initial_session_state() -> Dictionary:
 				"attack_base": 11,
 				"evasion_base": 10,
 				"selected_weapon": "SMG",
+				"cash": 500,
+				"lifestyle": "kibble",
 				"skills": {"Handgun": 11, "Evasion": 10, "Athletics": 8, "Perception": 9},
 				"weapons":
 				{
@@ -346,6 +547,8 @@ func _initial_session_state() -> Dictionary:
 				"attack_base": 10,
 				"evasion_base": 9,
 				"selected_weapon": "Medium Pistol",
+				"cash": 250,
+				"lifestyle": "generic_prepak",
 				"skills": {"Handgun": 10, "Evasion": 9, "Athletics": 8, "Perception": 10},
 				"weapons":
 				{
@@ -531,6 +734,17 @@ func _reload_selected() -> void:
 func _on_api_success(kind: String, payload: Dictionary) -> void:
 	service_status.text = "RULES SERVICE • ONLINE • LOCALHOST:8000"
 	service_status.add_theme_color_override("font_color", Color("68ff9b"))
+	month_end_button.disabled = false
+	map_upload_button.disabled = false
+	if kind in ["map_fetch", "map_upload", "map_zones"]:
+		_apply_map_manifest(payload)
+		if kind in ["map_fetch", "map_upload"] and bool(payload.get("available", false)):
+			api.fetch_map_image(str(payload.get("image_url", "/map/image")))
+		elif kind == "map_fetch":
+			instruction_label.text = "No map uploaded • choose UPLOAD MAP"
+		else:
+			instruction_label.text = "Map zones saved."
+		return
 	if kind == "fetch" and payload.get("actors", []).is_empty():
 		instruction_label.text = "No encounter loaded • creating the demo alley"
 		api.reset_session(_initial_session_state())
@@ -539,9 +753,10 @@ func _on_api_success(kind: String, payload: Dictionary) -> void:
 	if kind in ["fetch", "reset"]:
 		_sync_cover_state(payload.get("covers", {}))
 		_refresh_inspector()
-		instruction_label.text = "Ready • select an action"
+		instruction_label.text = "Loading GM map…"
+		api.fetch_map()
 		return
-	if kind in ["resolve", "reload", "undo", "redo"]:
+	if kind in ["resolve", "reload", "month_end", "undo", "redo"]:
 		var card: Variant = payload.get("card")
 		if card is Dictionary:
 			resolution_card.show_card(card)
@@ -554,6 +769,9 @@ func _on_api_success(kind: String, payload: Dictionary) -> void:
 
 
 func _on_api_failure(kind: String, message: String, transport_failure: bool) -> void:
+	month_end_button.disabled = false
+	map_upload_button.disabled = false
+	zone_draw_button.disabled = false
 	service_status.text = (
 		"RULES SERVICE • OFFLINE" if transport_failure else "RULES SERVICE • COMMAND REJECTED"
 	)
@@ -579,6 +797,35 @@ func _on_api_failure(kind: String, message: String, transport_failure: bool) -> 
 	)
 	if kind == "resolve":
 		pending_shot.clear()
+	if kind == "map_zones" and not transport_failure:
+		api.fetch_map()
+
+
+func _apply_map_manifest(payload: Dictionary) -> void:
+	map_manifest = payload.duplicate(true)
+	var available := bool(payload.get("available", false))
+	map_missing.visible = not available
+	map_title.text = (
+		"GM MAP  •  %s  •  %s ZONES"
+		% [str(payload.get("original_name", "UPLOADED MAP")).to_upper(), payload.get("zones", []).size()]
+		if available
+		else "GM MAP  •  NO IMAGE UPLOADED"
+	)
+	map_zone_canvas.set_map_size(
+		int(payload.get("width", 1)),
+		int(payload.get("height", 1)),
+	)
+	map_zone_canvas.set_zones(payload.get("zones", []))
+	zone_clear_button.disabled = payload.get("zones", []).is_empty()
+	if not available:
+		map_image.texture = null
+
+
+func _on_map_image_success(image: Image) -> void:
+	map_image.texture = ImageTexture.create_from_image(image)
+	map_missing.visible = false
+	map_zone_canvas.set_map_size(image.get_width(), image.get_height())
+	instruction_label.text = "Map ready • DRAW ZONE adds polygon overlays"
 
 
 func _consume_snapshot(snapshot: Dictionary) -> void:
@@ -594,9 +841,21 @@ func _consume_snapshot(snapshot: Dictionary) -> void:
 				weapon_map[str(weapon.get("name", ""))] = weapon
 		actor["weapons"] = weapon_map
 		actor_map[str(actor.get("id", ""))] = actor
-	session_state = {"actors": actor_map}
+	session_state = {
+		"actors": actor_map,
+		"calendar": snapshot.get("calendar", {}).duplicate(true),
+		"lifestyles": snapshot.get("lifestyles", []).duplicate(true),
+	}
 	_sync_tokens(actor_map)
 	_apply_session_state()
+	_refresh_calendar()
+
+
+func _refresh_calendar() -> void:
+	var calendar: Dictionary = session_state.get("calendar", {})
+	var month := str(calendar.get("current_month", "UNSET"))
+	calendar_label.text = "GAME MONTH  %s  •  Lifestyle auto-bills the upcoming month" % month
+	month_end_button.text = "CLOSE %s • AUTO PAY" % month
 
 
 func _sync_tokens(actors: Dictionary) -> void:

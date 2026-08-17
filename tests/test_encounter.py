@@ -111,6 +111,9 @@ def test_load_fills_defaults_and_reports_a_drawable_snapshot():
     assert solo["evasion_base"] == 10
     assert solo["selected_weapon"] == "Heavy Pistol"
     assert solo["skills"] == {}
+    assert solo["cash"] == 0
+    assert solo["lifestyle"]["key"] == "kibble"
+    assert solo["lifestyle"]["monthly_cost"] == 100
     assert snapshot["card"] is None
     assert snapshot["can_undo"] is False
 
@@ -297,6 +300,60 @@ def test_unknown_actors_and_weapons_are_rejected():
 def test_loading_an_encounter_requires_actors():
     with pytest.raises(ValueError, match="at least one actor"):
         encounter().load({})
+
+
+def test_month_end_auto_pays_lifestyles_marks_debt_and_is_reversible():
+    session = Encounter(
+        FakeTables(),
+        {
+            "rich": {
+                "name": "Rogue",
+                "max_hp": 40,
+                "cash": 1_000,
+                "lifestyle": "good_prepak",
+            },
+            "poor": {
+                "name": "Redeye",
+                "max_hp": 30,
+                "cash": 99,
+                "lifestyle": "kibble",
+            },
+        },
+        current_month="2045-01",
+    )
+
+    closed = session.close_month()
+    rich = actor(closed, "rich")
+    poor = actor(closed, "poor")
+    assert rich["cash"] == 400
+    assert rich["lifestyle_status"] == "current"
+    assert rich["lifestyle_paid_through"] == "2045-02"
+    assert poor["cash"] == 99
+    assert poor["lifestyle_status"] == "unpaid"
+    assert poor["lifestyle_balance_due"] == 100
+    assert poor["lifestyle_grace_days"] == 7
+    assert closed["calendar"]["current_month"] == "2045-02"
+    assert closed["result"]["total_deducted"] == 600
+    assert [event["kind"] for event in closed["events"]] == [
+        "lifestyle_charged",
+        "lifestyle_unpaid",
+        "month_closed",
+    ]
+
+    undone = session.undo()
+    assert actor(undone, "rich")["cash"] == 1_000
+    assert actor(undone, "poor")["lifestyle_status"] == "current"
+    assert undone["calendar"]["current_month"] == "2045-01"
+
+    redone = session.redo()
+    assert actor(redone, "rich")["cash"] == 400
+    assert redone["calendar"]["current_month"] == "2045-02"
+
+
+def test_months_must_close_in_order():
+    session = encounter()
+    with pytest.raises(ValueError, match="next month to close is 2045-01"):
+        session.close_month(month="2045-02")
 
 
 def test_hp_cannot_start_above_max():

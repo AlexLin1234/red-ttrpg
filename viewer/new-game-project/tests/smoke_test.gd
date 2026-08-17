@@ -10,6 +10,9 @@ func _run() -> void:
 	var scene := packed_scene.instantiate()
 	root.add_child(scene)
 	await _wait_for_api(scene)
+	var api := scene.get("api") as GMApiClient
+	api.reset_session(scene.call("_initial_session_state"))
+	await _wait_for_api(scene)
 	await physics_frame
 	await process_frame
 
@@ -22,10 +25,29 @@ func _run() -> void:
 	var action_buttons: Dictionary = scene.get("action_buttons")
 	assert(action_buttons.size() == 7, "Expected exactly seven v1 actions")
 	assert(scene.get("selected_token") != null, "Expected a selected token")
+	var map_overlay := scene.get("map_overlay") as PanelContainer
+	assert(map_overlay.visible, "Night City map overlay should start visible")
+	scene.call("_toggle_map")
+	assert(not map_overlay.visible, "Night City map overlay did not hide")
+	scene.call("_toggle_map")
+	var zone_canvas := scene.get("map_zone_canvas") as Control
+	zone_canvas.call("set_zones", [])
+	zone_canvas.set("drawing", true)
+	var draft_points: Array[Vector2] = [
+		Vector2(0.1, 0.1), Vector2(0.7, 0.15), Vector2(0.45, 0.75)
+	]
+	zone_canvas.set("draft_points", draft_points)
+	zone_canvas.call("_finish_zone")
+	await _wait_for_api(scene)
+	assert(zone_canvas.get("zones").size() == 1, "Drawn map zone was not saved")
+	zone_canvas.call("clear_zones")
+	await _wait_for_api(scene)
+	assert(zone_canvas.get("zones").is_empty(), "Map zones did not clear")
 
 	var tokens: Dictionary = scene.get("tokens")
 	var solo := tokens["solo"] as CombatToken
 	var goon := tokens["goon"] as CombatToken
+	scene.call("_select_token", solo)
 	var cover := CoverDetector.classify(scene.get_world_3d(), solo, goon)
 	assert(cover.has("classification"), "Cover raycast did not return a classification")
 	assert(not solo.actor_state.is_empty(), "Encounter snapshot did not populate token state")
@@ -35,7 +57,6 @@ func _run() -> void:
 	var weapon: Dictionary = solo.actor_state["weapons"]["Heavy Pistol"]
 	assert(int(weapon["ammo"]) == 7, "Resolved attack did not spend ammo through the API")
 
-	var api := scene.get("api") as GMApiClient
 	api.undo()
 	await _wait_for_api(scene)
 	assert(
@@ -75,6 +96,22 @@ func _run() -> void:
 	scene.call("_on_action_pressed", "Dodge")
 	var evading: Dictionary = scene.get("evading")
 	assert(bool(evading.get("goon", false)), "Dodge did not toggle evasion")
+
+	api.close_month()
+	await _wait_for_api(scene)
+	var calendar: Dictionary = scene.get("session_state").get("calendar", {})
+	assert(calendar.get("current_month") == "2045-02", "Month end did not advance the calendar")
+	assert(int(solo.actor_state["cash"]) == 3500, "Fresh Food Lifestyle was not auto-paid")
+	assert(
+		str(tokens["lookout"].actor_state["lifestyle_status"]) == "unpaid",
+		"Unaffordable Lifestyle was not marked unpaid",
+	)
+	api.undo()
+	await _wait_for_api(scene)
+	assert(int(solo.actor_state["cash"]) == 5000, "Undo did not restore Lifestyle cash")
+	api.redo()
+	await _wait_for_api(scene)
+	assert(int(solo.actor_state["cash"]) == 3500, "Redo did not reapply Lifestyle cash")
 
 	(
 		api

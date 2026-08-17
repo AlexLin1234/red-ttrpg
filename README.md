@@ -67,6 +67,11 @@ viewers as a full snapshot.
 | `POST /encounter/attack` | Resolve one attack and broadcast the outcome card  |
 | `POST /encounter/reload` | Refill a magazine                                  |
 | `POST /encounter/clear-jam` | Clear a jammed weapon                           |
+| `POST /encounter/month-end` | Close the month and auto-pay every Lifestyle    |
+| `GET /map`               | Read the active map metadata and zones             |
+| `PUT /map/image`         | Upload and normalize a GM-selected raster map      |
+| `GET /map/image`         | Read the active map as a normalized PNG            |
+| `PUT /map/zones`         | Replace the active map's normalized polygon zones  |
 | `POST /encounter/undo`   | Reverse the last action                            |
 | `POST /encounter/redo`   | Reapply the last undone action                     |
 | `POST /resolve`          | Resolve an attack (tactical-viewer compatibility) |
@@ -76,13 +81,17 @@ Attack commands may include `cover_hp`; the tactical viewer supplies this from
 its shooter-to-target raycasts. The cover assignment and resulting damage are
 recorded as one reversible event action.
 
-An actor carries its own HP, armour SP, cover, and weapons. Weapon stats come
-from the validated tables by name, or inline on the actor when you want a
-one-off:
+An actor carries its own HP, armour SP, cover, cash, Lifestyle, and weapons.
+The four Lifestyle costs and entitlements follow the sourcebook table on page
+377. Closing a month bills the upcoming month as one reversible event action;
+characters who cannot afford it are marked unpaid with a seven-day grace
+period. Weapon stats come from the validated tables by name, or inline on the
+actor when you want a one-off:
 
 ```json
-{"actors": {"solo": {
+{"current_month": "2045-01", "actors": {"solo": {
   "name": "Rache", "max_hp": 40, "attack_base": 14,
+  "cash": 2400, "lifestyle": "good_prepak",
   "weapons": {"Heavy Pistol": {"ammo": 8}}
 }}}
 ```
@@ -108,3 +117,19 @@ undo/redo. Encounter snapshots dynamically create tokens and persist cover HP
 by prop ID; Move mode also supports Shift-dragging cover props. The included
 modular geometry and SVG portraits are original
 placeholders that can be replaced with a licensed environment kit.
+
+The tactical HUD lets the GM upload a PNG, JPEG, WebP, BMP, or TIFF as the
+active map. Uploads are capped at 32 MB/40 megapixels, normalized to RGB PNG,
+and stored with polygon zones under the ignored `data/maps/` directory. Press
+**M** to show or hide the map, choose **Draw Zone**, left-click its vertices,
+and right-click to finish. Zone coordinates are normalized, so they stay
+aligned when the viewer changes size.
+
+The sourcebook's Night City 2045 map remains an optional starting image. Keep
+book content out of Git, extract it from a local PDF, and select the resulting
+PNG through **Upload Map**:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\extract_night_city_map.py `
+  --pdf "C:\Users\skylo\Downloads\Books\Cyberpunk Red.pdf"
+```

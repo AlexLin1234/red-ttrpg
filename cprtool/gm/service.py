@@ -10,12 +10,14 @@ from pathlib import Path
 from typing import Any, Iterator, Literal
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
+from starlette.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
 from cprtool.gm.agent import Agent, AnthropicAgent, OfflineAgent
 from cprtool.gm.encounter import Encounter
+from cprtool.gm.maps import MapStore
 from cprtool.gm.tools import GMTools
 from cprtool.index.query import RulesIndex
 from cprtool.rules.tables import JSONTables
@@ -53,6 +55,7 @@ class AdjudicateResponse(BaseModel):
 
 class EncounterRequest(BaseModel):
     actors: dict[str, dict[str, Any]]
+    current_month: str | None = Field(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
 class AttackCommand(BaseModel):
@@ -77,6 +80,22 @@ class ReloadCommand(BaseModel):
 class JamCommand(BaseModel):
     actor_id: str
     weapon: str
+
+
+class MonthEndCommand(BaseModel):
+    month: str | None = Field(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+
+
+class MapZone(BaseModel):
+    id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    label: str = Field(default="Zone", min_length=1, max_length=80)
+    color: str = Field(default="#00E5FF", pattern=r"^#[0-9A-Fa-f]{6}$")
+    opacity: float = Field(default=0.24, ge=0, le=1, allow_inf_nan=False)
+    points: list[tuple[float, float]] = Field(min_length=3, max_length=100)
+
+
+class MapZonesCommand(BaseModel):
+    zones: list[MapZone] = Field(default_factory=list, max_length=100)
 
 
 class ViewerHub:
@@ -146,11 +165,13 @@ def create_app(
     tables_path: str | Path = "cprtool/rules/tables.json",
     agent: Agent | None = None,
     encounter: Encounter | None = None,
+    map_directory: str | Path = "data/maps",
 ) -> FastAPI:
     application = FastAPI(title="Cyberpunk RED Stream GM Tool", version="0.1.0")
     application.state.viewers = ViewerHub()
     cached_agent = agent
     cached_encounter = encounter
+    map_store = MapStore(map_directory)
 
     def current_agent() -> Agent:
         nonlocal cached_agent
@@ -171,6 +192,41 @@ def create_app(
     @application.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @application.get("/map")
+    def read_map() -> dict[str, Any]:
+        return map_store.manifest()
+
+    @application.get("/map/image")
+    def read_map_image() -> FileResponse:
+        image = map_store.current_image()
+        if image is None:
+            raise HTTPException(status_code=404, detail="no map image has been uploaded")
+        return FileResponse(image, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+    @application.put("/map/image")
+    async def upload_map_image(
+        request: Request,
+        filename: str = Query(default="uploaded-map", min_length=1, max_length=200),
+    ) -> dict[str, Any]:
+        content = bytearray()
+        async for chunk in request.stream():
+            content.extend(chunk)
+            if len(content) > map_store.max_upload_bytes:
+                raise HTTPException(status_code=413, detail="map upload exceeds the 32 MB limit")
+        with _domain_errors():
+            manifest = map_store.upload(bytes(content), filename)
+        await application.state.viewers.broadcast({"type": "map", "map": manifest})
+        return manifest
+
+    @application.put("/map/zones")
+    async def replace_map_zones(command: MapZonesCommand) -> dict[str, Any]:
+        with _domain_errors():
+            manifest = map_store.replace_zones(
+                [zone.model_dump(mode="json") for zone in command.zones]
+            )
+        await application.state.viewers.broadcast({"type": "map", "map": manifest})
+        return manifest
 
     @application.post("/ask", response_model=AskResponse)
     async def ask(request: AskRequest) -> AskResponse:
@@ -210,7 +266,10 @@ def create_app(
     @application.post("/encounter")
     async def load_encounter(request: EncounterRequest) -> dict[str, Any]:
         with _domain_errors():
-            snapshot = current_encounter().load(request.actors)
+            snapshot = current_encounter().load(
+                request.actors,
+                current_month=request.current_month,
+            )
         return await publish(snapshot)
 
     @application.post("/encounter/attack")
@@ -235,6 +294,12 @@ def create_app(
     async def clear_jam(command: JamCommand) -> dict[str, Any]:
         with _domain_errors():
             snapshot = current_encounter().clear_jam(**command.model_dump())
+        return await publish(snapshot)
+
+    @application.post("/encounter/month-end")
+    async def close_month(command: MonthEndCommand) -> dict[str, Any]:
+        with _domain_errors():
+            snapshot = current_encounter().close_month(month=command.month)
         return await publish(snapshot)
 
     @application.post("/encounter/undo")

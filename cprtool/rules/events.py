@@ -19,6 +19,9 @@ EVENT_KINDS: Final[frozenset[str]] = frozenset(
         "critical_injury",
         "seriously_wounded",
         "death_save_due",
+        "lifestyle_charged",
+        "lifestyle_unpaid",
+        "month_closed",
     }
 )
 
@@ -53,6 +56,81 @@ def _apply_one(state: dict[str, Any], event: Mapping[str, Any]) -> dict[str, Any
             "actor_id": event["actor_id"],
             "weapon": event["weapon"],
         }
+    if kind in {"lifestyle_charged", "lifestyle_unpaid"}:
+        actor = _actor(state, str(event["actor_id"]))
+        fields = (
+            "cash",
+            "lifestyle_status",
+            "lifestyle_paid_through",
+            "lifestyle_balance_due",
+            "lifestyle_grace_days",
+            "last_lifestyle_charge",
+        )
+        previous = {field: deepcopy(actor[field]) for field in fields if field in actor}
+        present = [field for field in fields if field in actor]
+        amount = int(event["amount"])
+        if amount < 0:
+            raise ValueError("Lifestyle amount cannot be negative")
+        if kind == "lifestyle_charged":
+            if int(actor.get("cash", 0)) < amount:
+                raise ValueError(f"{event['actor_id']} cannot afford their Lifestyle")
+            actor["cash"] = int(actor.get("cash", 0)) - amount
+            actor["lifestyle_status"] = "current"
+            actor["lifestyle_paid_through"] = str(event["month"])
+            actor["lifestyle_balance_due"] = 0
+            actor["lifestyle_grace_days"] = None
+            actor["last_lifestyle_charge"] = amount
+        else:
+            actor["lifestyle_status"] = "unpaid"
+            actor["lifestyle_balance_due"] = amount
+            actor["lifestyle_grace_days"] = 7
+            actor["last_lifestyle_charge"] = 0
+        return {
+            "kind": "lifestyle_restored",
+            "actor_id": event["actor_id"],
+            "previous": previous,
+            "present": present,
+        }
+    if kind == "lifestyle_restored":
+        actor = _actor(state, str(event["actor_id"]))
+        previous = dict(event.get("previous", {}))
+        present = set(event.get("present", ()))
+        for field in (
+            "cash",
+            "lifestyle_status",
+            "lifestyle_paid_through",
+            "lifestyle_balance_due",
+            "lifestyle_grace_days",
+            "last_lifestyle_charge",
+        ):
+            if field in present:
+                actor[field] = deepcopy(previous[field])
+            else:
+                actor.pop(field, None)
+        return {"kind": "noop"}
+    if kind == "month_closed":
+        calendar_existed = "calendar" in state
+        previous = deepcopy(state.get("calendar", {}))
+        calendar = state.setdefault("calendar", {})
+        closed_months = list(calendar.get("closed_months", []))
+        month = str(event["month"])
+        if month in closed_months:
+            raise ValueError(f"month already closed: {month}")
+        closed_months.append(month)
+        calendar["closed_months"] = closed_months
+        calendar["last_closed_month"] = month
+        calendar["current_month"] = str(event["next_month"])
+        return {
+            "kind": "month_reopened",
+            "calendar_existed": calendar_existed,
+            "previous": previous,
+        }
+    if kind == "month_reopened":
+        if event.get("calendar_existed", False):
+            state["calendar"] = deepcopy(dict(event.get("previous", {})))
+        else:
+            state.pop("calendar", None)
+        return {"kind": "noop"}
     target = _actor(state, str(event.get("target_id", "")))
     if kind == "cover_set":
         previous = int(target.get("cover_hp", 0))

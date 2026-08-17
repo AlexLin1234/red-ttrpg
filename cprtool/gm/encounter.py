@@ -12,6 +12,13 @@ from dataclasses import asdict
 from typing import Any, Mapping
 
 from cprtool.rules.events import Session
+from cprtool.rules.lifestyle import (
+    LIFESTYLES,
+    lifestyle_view,
+    next_month,
+    normalize_lifestyle,
+    validate_month,
+)
 from cprtool.rules.resolver import (
     AttackRequest,
     AttackResult,
@@ -53,6 +60,23 @@ def _normalise_actor(actor_id: str, entry: Mapping[str, Any]) -> dict[str, Any]:
     actor["wound_state"] = str(actor.get("wound_state", "unhurt"))
     actor["death_save_due"] = bool(actor.get("death_save_due", False))
     actor["critical_injuries"] = [str(injury) for injury in actor.get("critical_injuries", [])]
+    actor["cash"] = int(actor.get("cash", 0))
+    if actor["cash"] < 0:
+        raise ValueError(f"{actor_id}: cash cannot be negative")
+    actor["lifestyle"] = normalize_lifestyle(str(actor.get("lifestyle", "kibble")))
+    actor["lifestyle_status"] = str(actor.get("lifestyle_status", "current"))
+    if actor["lifestyle_status"] not in {"current", "unpaid"}:
+        raise ValueError(f"{actor_id}: Lifestyle status must be current or unpaid")
+    paid_through = actor.get("lifestyle_paid_through")
+    actor["lifestyle_paid_through"] = (
+        validate_month(str(paid_through)) if paid_through is not None else None
+    )
+    actor["lifestyle_balance_due"] = int(actor.get("lifestyle_balance_due", 0))
+    if actor["lifestyle_balance_due"] < 0:
+        raise ValueError(f"{actor_id}: Lifestyle balance cannot be negative")
+    grace_days = actor.get("lifestyle_grace_days")
+    actor["lifestyle_grace_days"] = int(grace_days) if grace_days is not None else None
+    actor["last_lifestyle_charge"] = int(actor.get("last_lifestyle_charge", 0))
     actor["weapons"] = {
         str(name): _normalise_weapon(weapon) for name, weapon in dict(actor.get("weapons", {})).items()
     }
@@ -72,20 +96,33 @@ class Encounter:
         tables: Any,
         actors: Mapping[str, Mapping[str, Any]] | None = None,
         rng: RandomSource | None = None,
+        current_month: str = "2045-01",
     ) -> None:
         self.tables = tables
         self.rng = rng
-        self.session = Session({"actors": {}, "covers": {}})
+        self.default_month = validate_month(current_month)
+        self.session = Session(
+            {
+                "actors": {},
+                "covers": {},
+                "calendar": {"current_month": self.default_month, "closed_months": []},
+            }
+        )
         self.revision = 0
         self.card: dict[str, Any] | None = None
         self.events: list[dict[str, Any]] = []
         self.result: dict[str, Any] | None = None
         if actors is not None:
-            self.load(actors)
+            self.load(actors, current_month=self.default_month)
 
     # -- state ---------------------------------------------------------------
 
-    def load(self, actors: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    def load(
+        self,
+        actors: Mapping[str, Mapping[str, Any]],
+        *,
+        current_month: str | None = None,
+    ) -> dict[str, Any]:
         """Replace the encounter. Loading clears undo history by design."""
 
         if not actors:
@@ -93,6 +130,10 @@ class Encounter:
         state = {
             "actors": {str(key): _normalise_actor(str(key), value) for key, value in actors.items()},
             "covers": {},
+            "calendar": {
+                "current_month": validate_month(current_month or self.default_month),
+                "closed_months": [],
+            },
         }
         self.session = Session(state)
         self.revision += 1
@@ -299,6 +340,82 @@ class Encounter:
         self.result = {"jam_cleared": True}
         return self.snapshot()
 
+    def close_month(self, *, month: str | None = None) -> dict[str, Any]:
+        """Close one game month and automatically bill every actor's Lifestyle.
+
+        The book bills at the start of a month. Closing a month therefore pays
+        for the upcoming month, which gives the requested end-of-month flow
+        without changing the sourcebook's monthly cadence.
+        """
+
+        calendar = self.session.state.setdefault(
+            "calendar", {"current_month": self.default_month, "closed_months": []}
+        )
+        closing_month = validate_month(month or str(calendar["current_month"]))
+        if closing_month != str(calendar["current_month"]):
+            raise ValueError(f"next month to close is {calendar['current_month']}")
+        if closing_month in calendar.get("closed_months", []):
+            raise ValueError(f"month already closed: {closing_month}")
+        billed_month = next_month(closing_month)
+
+        events: list[dict[str, Any]] = []
+        lines: list[str] = []
+        paid: list[str] = []
+        unpaid: list[str] = []
+        total_deducted = 0
+        for actor_id, actor in self.session.state["actors"].items():
+            profile = LIFESTYLES[str(actor["lifestyle"])]
+            event = {
+                "kind": "lifestyle_charged",
+                "actor_id": actor_id,
+                "month": billed_month,
+                "lifestyle": profile.key,
+                "amount": profile.monthly_cost,
+            }
+            if int(actor["cash"]) >= profile.monthly_cost:
+                events.append(event)
+                paid.append(actor_id)
+                total_deducted += profile.monthly_cost
+                remaining = int(actor["cash"]) - profile.monthly_cost
+                lines.append(
+                    f"{actor['name']}: {profile.label} -{profile.monthly_cost}eb ({remaining}eb left)"
+                )
+            else:
+                events.append({**event, "kind": "lifestyle_unpaid"})
+                unpaid.append(actor_id)
+                lines.append(
+                    f"{actor['name']}: {profile.label} {profile.monthly_cost}eb DUE (7-day grace)"
+                )
+        events.append(
+            {
+                "kind": "month_closed",
+                "month": closing_month,
+                "next_month": billed_month,
+            }
+        )
+        self.session.record(
+            {"kind": "month_end", "month": closing_month, "billed_month": billed_month},
+            events,
+        )
+        self.revision += 1
+        self.card = {
+            "kind": "month_end",
+            "title": f"{closing_month} CLOSED",
+            "lines": lines,
+            "tone": "miss" if unpaid else "neutral",
+            "duration_seconds": 8.0,
+        }
+        self.events = [deepcopy(event) for event in events]
+        self.result = {
+            "closed_month": closing_month,
+            "billed_month": billed_month,
+            "total_deducted": total_deducted,
+            "paid": paid,
+            "unpaid": unpaid,
+            "source_page": 377,
+        }
+        return self.snapshot()
+
     def undo(self) -> dict[str, Any]:
         inverse = [deepcopy(event) for event in self.session.log[-1].inverse]
         self.session.undo()
@@ -373,6 +490,13 @@ class Encounter:
             "evasion_base": int(actor.get("evasion_base", 0)),
             "selected_weapon": str(actor.get("selected_weapon", next(iter(actor["weapons"]), ""))),
             "skills": deepcopy(dict(actor.get("skills", {}))),
+            "cash": int(actor["cash"]),
+            "lifestyle": lifestyle_view(str(actor["lifestyle"])),
+            "lifestyle_status": str(actor["lifestyle_status"]),
+            "lifestyle_paid_through": actor.get("lifestyle_paid_through"),
+            "lifestyle_balance_due": int(actor["lifestyle_balance_due"]),
+            "lifestyle_grace_days": actor.get("lifestyle_grace_days"),
+            "last_lifestyle_charge": int(actor["last_lifestyle_charge"]),
             "weapons": [self._weapon_view(actor_id, name, weapon) for name, weapon in actor["weapons"].items()],
         }
 
@@ -417,6 +541,8 @@ class Encounter:
             "events": deepcopy(self.events),
             "result": deepcopy(self.result),
             "covers": deepcopy(self.session.state.get("covers", {})),
+            "calendar": deepcopy(self.session.state.get("calendar", {})),
+            "lifestyles": [lifestyle_view(key) for key in LIFESTYLES],
         }
 
 

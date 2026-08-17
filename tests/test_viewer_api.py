@@ -154,3 +154,21 @@ def test_cover_detected_by_the_tactical_viewer_reaches_the_resolver():
         cover_repair = next(event for event in undone["events"] if event["kind"] == "cover_repaired")
         assert cover_repair["cover_id"] == "BlueBarrier"
         assert undone["covers"] == {}
+
+
+def test_month_end_route_auto_pays_and_broadcasts_the_snapshot():
+    actors = {
+        "solo": {**ACTORS["solo"], "cash": 700, "lifestyle": "good_prepak"},
+        "goon": {**ACTORS["goon"], "cash": 50, "lifestyle": "kibble"},
+    }
+    with client() as http:
+        http.post("/encounter", json={"actors": actors, "current_month": "2045-06"})
+        with http.websocket_connect("/viewer") as socket:
+            socket.receive_json()
+            response = http.post("/encounter/month-end", json={})
+            assert response.status_code == 200
+            snapshot = response.json()
+            assert actor(snapshot, "solo")["cash"] == 100
+            assert actor(snapshot, "goon")["lifestyle_status"] == "unpaid"
+            assert snapshot["calendar"]["current_month"] == "2045-07"
+            assert socket.receive_json()["card"]["kind"] == "month_end"
