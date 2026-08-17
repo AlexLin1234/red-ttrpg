@@ -296,6 +296,7 @@ static func blackwall_sunrise() -> Dictionary:
 			"players": 4,
 			"sessions": 14,
 			"clock": {"year": 2045, "month": 9, "day": 14, "hour": 21, "minute": 47},
+			"current_month": "2045-09", "closed_months": [],
 			"weather": {"condition": "Acid Rain", "temperature_c": 18, "visibility_pct": 40},
 			"session_log":
 			[
@@ -349,6 +350,7 @@ static func library_fillers() -> Array:
 					"id": row[0], "name": row[1], "arc": row[5], "city": row[2],
 					"gm": "V. Okonkwo", "players": row[3], "sessions": row[4],
 					"clock": {"year": 2045, "month": 6, "day": 2, "hour": 14, "minute": 0},
+					"current_month": "2045-06", "closed_months": [],
 					"weather": {"condition": "Smog", "temperature_c": 24, "visibility_pct": 65},
 					"session_log": [], "hooks": [], "districts": {},
 					"cover_palette": cover_palette(), "restore_points": [],
@@ -372,6 +374,7 @@ static func new_campaign(name: String) -> Dictionary:
 			"players": 0,
 			"sessions": 0,
 			"clock": {"year": 2045, "month": 1, "day": 1, "hour": 20, "minute": 0},
+			"current_month": "2045-01", "closed_months": [],
 			"weather": {"condition": "Clear", "temperature_c": 20, "visibility_pct": 90},
 			"session_log": [], "hooks": [], "districts": {},
 			"lifestyle_closed_months": [], "last_lifestyle_report": {}, "gm_map": {},

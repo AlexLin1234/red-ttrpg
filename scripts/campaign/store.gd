@@ -24,6 +24,8 @@ var status := ""
 
 var active_location_id := ""
 var active_character_id := ""
+var _month_undo: Array[Dictionary] = []
+var _month_redo: Array[Dictionary] = []
 
 
 func is_open() -> bool:
@@ -125,6 +127,9 @@ func _normalize_downtime_state() -> void:
 		campaign["lifestyle_closed_months"] = []
 	if not campaign.has("gm_map"):
 		campaign["gm_map"] = {}
+	campaign["current_month"] = Lifestyle.month_key(campaign["clock"])
+	if not campaign.has("closed_months"):
+		campaign["closed_months"] = campaign["lifestyle_closed_months"]
 	for value in characters():
 		var character: Dictionary = value
 		if String(character.get("kind", "npc")) == "pc" or character.has("lifestyle"):
@@ -141,12 +146,16 @@ func advance_clock(minutes: int) -> void:
 		mark_dirty()
 
 
-func close_month() -> Dictionary:
+func close_month(requested_month: String = "") -> Dictionary:
 	var before: Dictionary = campaign["clock"].duplicate(true)
 	var closing := Lifestyle.month_key(before)
+	if requested_month != "" and requested_month != closing:
+		return {"ok": false, "error": "requested month is not the current month"}
 	if (campaign.get("lifestyle_closed_months", []) as Array).has(closing):
 		set_status("Month %s is already closed" % closing)
-		return campaign.get("last_lifestyle_report", {})
+		return {"ok": false, "error": "month already closed", "month": closing}
+	_month_undo.append({"campaign": campaign.duplicate(true), "roster": roster.duplicate(true)})
+	_month_redo.clear()
 	var after := Lifestyle.next_month_clock(before)
 	campaign["clock"] = after
 	return _process_month_end(closing, Lifestyle.month_key(after))
@@ -159,8 +168,12 @@ func _process_month_end(closing_month: String, billed_month: String) -> Dictiona
 		return campaign.get("last_lifestyle_report", {})
 	var report := Lifestyle.settle(characters(), billed_month)
 	report["closed_month"] = closing_month
+	report["new_month"] = billed_month
+	report["ok"] = true
 	closed.append(closing_month)
 	campaign["lifestyle_closed_months"] = closed
+	campaign["closed_months"] = closed.duplicate()
+	campaign["current_month"] = billed_month
 	campaign["last_lifestyle_report"] = report
 	(campaign.get("session_log", []) as Array).push_front(
 		{
@@ -174,6 +187,38 @@ func _process_month_end(closing_month: String, billed_month: String) -> Dictiona
 		"Lifestyle: %d paid · %d unpaid" % [int(report["paid"]), int(report["unpaid"])]
 	)
 	return report
+
+
+func can_undo_month() -> bool:
+	return not _month_undo.is_empty()
+
+
+func can_redo_month() -> bool:
+	return not _month_redo.is_empty()
+
+
+func undo_month() -> bool:
+	if not can_undo_month():
+		return false
+	_month_redo.append({"campaign": campaign.duplicate(true), "roster": roster.duplicate(true)})
+	var snapshot: Dictionary = _month_undo.pop_back()
+	campaign = snapshot["campaign"]
+	roster = snapshot["roster"]
+	mark_dirty()
+	set_status("Month close undone")
+	return true
+
+
+func redo_month() -> bool:
+	if not can_redo_month():
+		return false
+	_month_undo.append({"campaign": campaign.duplicate(true), "roster": roster.duplicate(true)})
+	var snapshot: Dictionary = _month_redo.pop_back()
+	campaign = snapshot["campaign"]
+	roster = snapshot["roster"]
+	mark_dirty()
+	set_status("Month close redone")
+	return true
 
 
 func save() -> bool:
