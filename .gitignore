@@ -1,21 +1,19 @@
-# Rulebook PDFs and any operator-extracted book data stay local.
-*.pdf
-!docs/mockups/*.pdf
 data/
+*.pdf
+cprtool/rules/tables.json
 
-node_modules/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 dist/
-dist-electron/
-release/
-.vite/
+build/
+*.egg-info/
 
-coverage/
-e2e/__screenshots__/*.actual.png
-playwright-report/
-test-results/
+.godot/
+tmp/
 
-.DS_Store
-*.local
-.env
-.env.*
-!.env.example
+.gstack/

@@ -1,120 +1,110 @@
-# Redline
+# Cyberpunk RED Stream GM Tool
 
-A standalone desktop GM console for Cyberpunk RED. Four screens: a campaign
-library, a Night City map, a 3D isometric location with combat, and a character
-forge.
+A local, single-GM tool for resolving combat, retrieving cited rules, and
+presenting readable outcomes in an OBS-captured Godot scene.
 
-Electron + React + TypeScript. Everything runs locally — no server, no account,
-no network. Campaigns are files on your disk.
+Phases 0-8 are implemented: deterministic combat resolution, local validated
+tables, reversible state, cited hybrid retrieval, the local GM HTTP service,
+the OBS overlay, and an interactive Godot tactical viewer.
 
-![The campaign library](docs/mockups/1a-library.png)
+## Development
 
-## The four screens
+Python 3.11 or newer is required.
 
-**Library** — every campaign in `~/Documents/Redline/saves` as a `.red` file,
-with its real size, format version and a checksum-verified integrity state. The
-active save gets a hero panel: party HP and humanity, last session's log, and
-named restore points.
-
-**City** — Night City as hover-inspectable districts. Each reports who holds it,
-danger, population, law response and net density. The in-world clock, date,
-shift and weather are campaign state: advance an hour or a day and the save
-changes with it. Diamond markers flag districts carrying open job hooks.
-
-**Location** — an isometric board. Drag tiles, props and units from the palette
-onto the grid (Alt raises elevation). Roll 1d10 + REF for initiative, then fire.
-Every attack writes its arithmetic out longhand so you can see — and override —
-what the engine did.
-
-**Forge** — one editor for PCs, named NPCs and mook templates; they differ by a
-tag, not by a screen. Ten stats with a point total, skills with computed totals,
-gear and cyberware costed in humanity, and armour SP tracked across six hit
-locations. The cover builder alongside it writes props straight into the board's
-palette.
-
-## Cover is a question, not an answer
-
-When you shoot, the board raycasts the line of fire across the target's
-silhouette. If something is in the way it stops and asks you what that means:
-
-- **Cover takes the hit** — the barrier absorbs the damage at its own SP and HP.
-  This is the default and what the rules engine implements.
-- **Partial cover** — a −2 penalty to the attack, damage carries through.
-- **Ignore cover** — clear shot.
-
-The geometry proposes; you dispose.
-
-## Rules data
-
-**No book data ships with Redline.** It boots on a homebrew placeholder table set
-so a fresh install can resolve a fight immediately. If you own the book, replace
-any value in the in-app table editor or import a JSON document in the same shape
-(`src/core/rules/tables.ts` documents it).
-
-The combat resolver is pure and separately tested: exploding and fumbling d10s,
-defender wins ties, armour ablates only after damage gets through, and cover
-absorbs overflow rather than passing it on. Constants carry the page they were
-checked against, in `src/core/rules/resolver.ts`.
-
-Undo is exact. Every action records the events it applied and the inverse of
-each one, so stepping back restores the previous state structurally — not a
-snapshot approximation. A fuzz test round-trips a thousand random attacks.
-
-## Running it
-
-```bash
-npm install
-npm run dev          # renderer in a browser at :5173, in-memory save library
-npm run dev:electron # the real desktop app
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+pytest
 ```
 
-`npm run dev` is useful on its own: with no Electron preload present the app
-falls back to an in-memory library seeded with the demo campaign, so every
-screen works in a browser.
+Book-derived data is local-only. PDFs, extracted chunks, indexes, and the
+operator's `cprtool/rules/tables.json` are ignored by Git.
 
-```bash
-npm test             # Vitest over the rules core
-npm run test:e2e     # Playwright over the four-screen flow
-npm run build        # typecheck + renderer + Electron shell
-npm run package      # electron-builder → release/
+To extract bookmark-aware chunks from a legally obtained rulebook:
+
+```powershell
+python -m cprtool.index.extract "C:\path\to\book.pdf" --output data\chunks.jsonl
 ```
 
-## Layout
+Build the local rules index:
 
-```
-electron/           shell: window, save IPC. Thin on purpose.
-src/platform/       the only seam to the OS — electron.ts and web.ts
-src/core/           pure logic, no DOM
-  rules/            dice, resolver, reversible events, tables
-  campaign/         .red container, schema, demo content
-  encounter/        initiative, rounds, turns
-  city/             district data
-src/screens/        library, city, location, forge
-tests/              Vitest
-e2e/                Playwright + screenshots
-docs/mockups/       the UI direction these screens are built against
+```powershell
+python -m cprtool.index.build_index
+python -m cprtool.index.query "When does armor ablate?"
+python scripts\evaluate_retrieval.py
 ```
 
-Every OS call goes through `src/platform/bridge.ts`. Electron implements it over
-the preload bridge; the browser implements it in memory. Swapping the desktop
-shell means rewriting those two files and nothing else.
+Extract table candidates and create side-by-side review previews:
 
-## The save format
-
-A `.red` file is a zip:
-
-```
-manifest.json          format, version, timestamps, SHA-256 + size per entry
-campaign.json          identity, clock, weather, session log, hooks, districts
-roster.json            characters
-locations/<id>.json    board layouts
+```powershell
+python -m cprtool.index.extract "C:\path\to\book.pdf" --tables --table-pages 173,183,185,187,188,341
+python scripts\promote_table.py data\tables\page-173-table-1.csv --page-image data\tables\page-173.png --page 173 --key candidate_review.ranged_dv
 ```
 
-The library reads only `manifest.json` and `campaign.json` to draw a card, so
-listing stays fast regardless of how much is in the file. Integrity re-hashes
-every entry against the manifest — "Verified" means it checked.
+Run the local GM service:
 
-## Licence
+```powershell
+python -m uvicorn cprtool.gm.service:app --host 127.0.0.1 --port 8000
+```
 
-MIT, see `LICENSE`. Cyberpunk RED is a trademark of R. Talsorian Games; this is
-an unaffiliated tool that ships none of their content.
+`POST /ask` returns grounded rules answers and citations. `POST /adjudicate`
+returns a suggested DV for explicit GM approval. Without an API key, the service
+uses a deterministic extractive fallback. To enable the optional Anthropic agent,
+set both `ANTHROPIC_API_KEY` and `CPR_ANTHROPIC_MODEL`; no model name is silently
+selected for you.
+
+## Encounters and the viewer
+
+The service also holds one live encounter. Every command resolves through the
+pure resolver, is applied as reversible events, and is broadcast to attached
+viewers as a full snapshot.
+
+| Route                    | Purpose                                            |
+| ------------------------ | -------------------------------------------------- |
+| `POST /encounter`        | Load actors; clears undo history                   |
+| `GET /encounter`         | Current snapshot                                   |
+| `POST /encounter/attack` | Resolve one attack and broadcast the outcome card  |
+| `POST /encounter/reload` | Refill a magazine                                  |
+| `POST /encounter/clear-jam` | Clear a jammed weapon                           |
+| `POST /encounter/undo`   | Reverse the last action                            |
+| `POST /encounter/redo`   | Reapply the last undone action                     |
+| `POST /resolve`          | Resolve an attack (tactical-viewer compatibility) |
+| `WS /viewer`             | Snapshot stream for the Godot viewer               |
+
+Attack commands may include `cover_hp`; the tactical viewer supplies this from
+its shooter-to-target raycasts. The cover assignment and resulting damage are
+recorded as one reversible event action.
+
+An actor carries its own HP, armour SP, cover, and weapons. Weapon stats come
+from the validated tables by name, or inline on the actor when you want a
+one-off:
+
+```json
+{"actors": {"solo": {
+  "name": "Rache", "max_hp": 40, "attack_base": 14,
+  "weapons": {"Heavy Pistol": {"ammo": 8}}
+}}}
+```
+
+`POST /ask` with `"broadcast": true` also pushes the cited answer to the viewer.
+
+Start the viewer once the service is running:
+
+```powershell
+godot --path viewer
+python scripts\viewer_smoke.py
+```
+
+`viewer_smoke.py` drives a sample fight through the public routes so you can
+confirm an OBS scene before going live. See `viewer/README.md` for the OBS
+source settings and the layout map.
+
+For the interactive isometric board, open
+`viewer/new-game-project/project.godot` in Godot 4.7. It includes a 20×20
+GridMap alley, three draggable billboard tokens, cover raycasts, the seven v1
+actions, a compact inspector, resolution cards, combat VFX, and server-backed
+undo/redo. Encounter snapshots dynamically create tokens and persist cover HP
+by prop ID; Move mode also supports Shift-dragging cover props. The included
+modular geometry and SVG portraits are original
+placeholders that can be replaced with a licensed environment kit.
