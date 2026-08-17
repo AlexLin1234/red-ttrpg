@@ -1,19 +1,27 @@
-data/
-*.pdf
-cprtool/rules/tables.json
+# Godot
+.godot/
+export_presets.cfg
+*.translation
 
-.venv/
+# Book-derived data stays local.
+*.pdf
+!docs/mockups/*.pdf
+data/
+
+# Build output
+build/
+export/
+release/
+
+tmp/
+.gstack/
+.DS_Store
 __pycache__/
 *.py[cod]
-.pytest_cache/
-.ruff_cache/
-.coverage
-htmlcov/
-dist/
-build/
-*.egg-info/
 
-.godot/
-tmp/
+# Legacy sidecar worktrees were removed in the single-project rebuild.
+/cprtool/
+/viewer/
 
-.gstack/
+# Rendered screenshots are build output.
+.shots/

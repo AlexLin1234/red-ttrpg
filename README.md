@@ -1,135 +1,106 @@
-# Cyberpunk RED Stream GM Tool
+# Redline
 
-A local, single-GM tool for resolving combat, retrieving cited rules, and
-presenting readable outcomes in an OBS-captured Godot scene.
+A standalone desktop GM console for Cyberpunk RED, built as a single Godot 4.7
+project. Four screens cover the campaign library, City map, isometric combat
+location, and character Forge.
 
-Phases 0-8 are implemented: deterministic combat resolution, local validated
-tables, reversible state, cited hybrid retrieval, the local GM HTTP service,
-the OBS overlay, and an interactive Godot tactical viewer.
+No server, sidecar, or network connection is required. Rules run in GDScript
+and campaigns are portable `.red` files stored on disk.
 
-## Development
+![The campaign library](docs/mockups/1a-library.png)
 
-Python 3.11 or newer is required.
+## Features
 
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-pytest
+**Library** — lists campaign saves with real file size, format version, and
+checksum-verified integrity. The active save shows party status, the latest
+session log, and restore points.
+
+**City** — provides the built-in Night City district view or any raster image
+selected by the GM. Uploaded images are normalized to PNG, embedded in the
+campaign save, and support persistent polygon zones. Choose **Draw zone**,
+left-click vertices, and right-click to finish.
+
+The in-world clock, date, shift, and weather are campaign state. Crossing a
+month boundary automatically bills every configured character for the upcoming
+month. **Close month** is available when the GM wants to advance explicitly.
+
+**Location** — provides an isometric encounter board with tile, prop, and unit
+placement, initiative, combat resolution, cover raycasts, and exact event-based
+undo.
+
+**Forge** — edits PCs, NPCs, and mook templates. Alongside stats, skills, gear,
+Humanity, armor, and cover, each character can carry cash and one of the four
+Lifestyle levels:
+
+- Kibble — 100eb/month
+- Generic Prepak — 300eb/month
+- Good Prepak — 600eb/month
+- Fresh Food — 1,500eb/month
+
+An affordable month close deducts the cost and records the paid-through month.
+An unaffordable payment never makes cash negative; it records the balance and a
+seven-day grace period instead.
+
+## Rules and owned content
+
+No sourcebook pages or extracted images ship with Redline. The built-in combat
+table is a homebrew placeholder so a fresh install can resolve a fight. A GM
+who owns a map image can import it through the City screen; the image remains
+inside their local campaign save.
+
+The combat resolver handles exploding and fumbling d10s, defender-wins ties,
+armor ablation, critical injuries, and cover. Each action records its exact
+inverse so undo restores previous state structurally.
+
+## Running it
+
+Open `project.godot` in Godot 4.7, or run:
+
+```bash
+godot --path .
+./run-tests.sh
+./run-shots.sh
 ```
 
-Book-derived data is local-only. PDFs, extracted chunks, indexes, and the
-operator's `cprtool/rules/tables.json` are ignored by Git.
+Both scripts accept `GODOT=/path/to/godot`. The test script performs the import
+pass required to register global GDScript classes and then runs the headless
+suite. Screenshot tests require a graphical renderer or Xvfb.
 
-To extract bookmark-aware chunks from a legally obtained rulebook:
+## Layout
 
-```powershell
-python -m cprtool.index.extract "C:\path\to\book.pdf" --output data\chunks.jsonl
+```text
+project.godot        one Godot project with the Store autoload
+scenes/              app and screenshot-runner scenes
+scripts/
+  app.gd             shell, screen routing, shortcuts
+  rules/             dice, resolver, events, tables, Lifestyle billing
+  campaign/          .red container, schema, store, fixtures
+  encounter/         initiative, rounds, turns
+  city/              built-in Night City district data
+  board/             isometric board
+  screens/           library, city, location, forge
+  ui/theme.gd        palette, fonts, widget factories
+tests/               headless runner and suites
+docs/mockups/        visual design references
 ```
 
-Build the local rules index:
+## Save format
 
-```powershell
-python -m cprtool.index.build_index
-python -m cprtool.index.query "When does armor ablate?"
-python scripts\evaluate_retrieval.py
+A `.red` file is a zip containing:
+
+```text
+manifest.json          version, timestamps, SHA-256 and size per entry
+campaign.json          identity, clock, map image/zones, logs and districts
+roster.json            characters, cash and Lifestyle state
+locations/<id>.json    board layouts
+assets/map.png          optional normalized GM-uploaded map
 ```
 
-Extract table candidates and create side-by-side review previews:
+The library reads only the manifest and campaign metadata when listing saves.
+Opening a save verifies every entry against the recorded SHA-256 checksum.
 
-```powershell
-python -m cprtool.index.extract "C:\path\to\book.pdf" --tables --table-pages 173,183,185,187,188,341
-python scripts\promote_table.py data\tables\page-173-table-1.csv --page-image data\tables\page-173.png --page 173 --key candidate_review.ranged_dv
-```
+## License
 
-Run the local GM service:
-
-```powershell
-python -m uvicorn cprtool.gm.service:app --host 127.0.0.1 --port 8000
-```
-
-`POST /ask` returns grounded rules answers and citations. `POST /adjudicate`
-returns a suggested DV for explicit GM approval. Without an API key, the service
-uses a deterministic extractive fallback. To enable the optional Anthropic agent,
-set both `ANTHROPIC_API_KEY` and `CPR_ANTHROPIC_MODEL`; no model name is silently
-selected for you.
-
-## Encounters and the viewer
-
-The service also holds one live encounter. Every command resolves through the
-pure resolver, is applied as reversible events, and is broadcast to attached
-viewers as a full snapshot.
-
-| Route                    | Purpose                                            |
-| ------------------------ | -------------------------------------------------- |
-| `POST /encounter`        | Load actors; clears undo history                   |
-| `GET /encounter`         | Current snapshot                                   |
-| `POST /encounter/attack` | Resolve one attack and broadcast the outcome card  |
-| `POST /encounter/reload` | Refill a magazine                                  |
-| `POST /encounter/clear-jam` | Clear a jammed weapon                           |
-| `POST /encounter/month-end` | Close the month and auto-pay every Lifestyle    |
-| `GET /map`               | Read the active map metadata and zones             |
-| `PUT /map/image`         | Upload and normalize a GM-selected raster map      |
-| `GET /map/image`         | Read the active map as a normalized PNG            |
-| `PUT /map/zones`         | Replace the active map's normalized polygon zones  |
-| `POST /encounter/undo`   | Reverse the last action                            |
-| `POST /encounter/redo`   | Reapply the last undone action                     |
-| `POST /resolve`          | Resolve an attack (tactical-viewer compatibility) |
-| `WS /viewer`             | Snapshot stream for the Godot viewer               |
-
-Attack commands may include `cover_hp`; the tactical viewer supplies this from
-its shooter-to-target raycasts. The cover assignment and resulting damage are
-recorded as one reversible event action.
-
-An actor carries its own HP, armour SP, cover, cash, Lifestyle, and weapons.
-The four Lifestyle costs and entitlements follow the sourcebook table on page
-377. Closing a month bills the upcoming month as one reversible event action;
-characters who cannot afford it are marked unpaid with a seven-day grace
-period. Weapon stats come from the validated tables by name, or inline on the
-actor when you want a one-off:
-
-```json
-{"current_month": "2045-01", "actors": {"solo": {
-  "name": "Rache", "max_hp": 40, "attack_base": 14,
-  "cash": 2400, "lifestyle": "good_prepak",
-  "weapons": {"Heavy Pistol": {"ammo": 8}}
-}}}
-```
-
-`POST /ask` with `"broadcast": true` also pushes the cited answer to the viewer.
-
-Start the viewer once the service is running:
-
-```powershell
-godot --path viewer
-python scripts\viewer_smoke.py
-```
-
-`viewer_smoke.py` drives a sample fight through the public routes so you can
-confirm an OBS scene before going live. See `viewer/README.md` for the OBS
-source settings and the layout map.
-
-For the interactive isometric board, open
-`viewer/new-game-project/project.godot` in Godot 4.7. It includes a 20×20
-GridMap alley, three draggable billboard tokens, cover raycasts, the seven v1
-actions, a compact inspector, resolution cards, combat VFX, and server-backed
-undo/redo. Encounter snapshots dynamically create tokens and persist cover HP
-by prop ID; Move mode also supports Shift-dragging cover props. The included
-modular geometry and SVG portraits are original
-placeholders that can be replaced with a licensed environment kit.
-
-The tactical HUD lets the GM upload a PNG, JPEG, WebP, BMP, or TIFF as the
-active map. Uploads are capped at 32 MB/40 megapixels, normalized to RGB PNG,
-and stored with polygon zones under the ignored `data/maps/` directory. Press
-**M** to show or hide the map, choose **Draw Zone**, left-click its vertices,
-and right-click to finish. Zone coordinates are normalized, so they stay
-aligned when the viewer changes size.
-
-The sourcebook's Night City 2045 map remains an optional starting image. Keep
-book content out of Git, extract it from a local PDF, and select the resulting
-PNG through **Upload Map**:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\extract_night_city_map.py `
-  --pdf "C:\Users\skylo\Downloads\Books\Cyberpunk Red.pdf"
-```
+MIT, see `LICENSE`. Cyberpunk RED is a trademark of R. Talsorian Games; Redline
+is an unaffiliated tool and includes none of the sourcebook's copyrighted
+content.
