@@ -1,0 +1,49 @@
+; Redline — a standalone Cyberpunk RED GM console.
+;
+; One Godot project holds all four screens. There is no server, no sidecar and
+; no network: the rules engine is GDScript in scripts/rules, and campaigns are
+; .red files on disk.
+
+config_version=5
+
+[application]
+
+config/name="Redline"
+config/description="A standalone Cyberpunk RED GM console."
+run/main_scene="res://scenes/app.tscn"
+config/features=PackedStringArray("4.7", "Forward Plus")
+config/icon="res://assets/icon.svg"
+
+[display]
+
+window/size/viewport_width=1600
+window/size/viewport_height=980
+window/size/window_width_override=1440
+window/size/window_height_override=900
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[input]
+
+undo={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":90,"ctrl_pressed":true)]
+}
+redo={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":90,"ctrl_pressed":true,"shift_pressed":true)]
+}
+save_campaign={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":83,"ctrl_pressed":true)]
+}
+
+[physics]
+
+3d/physics_engine="Jolt Physics"
+
+[rendering]
+
+textures/default_filters/use_nearest_mipmap_filter=false
+environment/defaults/default_clear_color=Color(0.039, 0.058, 0.082, 1)
+anti_aliasing/quality/msaa_3d=2
