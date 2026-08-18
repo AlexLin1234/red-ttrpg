@@ -376,3 +376,45 @@ static func new_poi(point: Vector2, area_id: String) -> Dictionary:
 
 static func poi_position(poi: Dictionary) -> Vector2:
 	return Vector2(float(poi.get("x", 0.0)), float(poi.get("y", 0.0)))
+
+
+# -- reshaping ----------------------------------------------------------------
+
+
+static func set_points(area: Dictionary, points: PackedVector2Array) -> void:
+	area["polygon"] = flatten(points)
+
+
+## Slide the whole zone, label included, so a moved district keeps its name in
+## the same spot relative to its outline.
+static func move_area(area: Dictionary, delta: Vector2) -> void:
+	var moved := PackedVector2Array()
+	for point in points_of(area):
+		moved.append(point + delta)
+	set_points(area, moved)
+	var label := label_of(area) + delta
+	area["label"] = [label.x, label.y]
+
+
+## Add a corner after [param index]. Used when the GM clicks an edge midpoint.
+static func insert_corner(points: PackedVector2Array, index: int, at: Vector2) -> PackedVector2Array:
+	var out := points.duplicate()
+	out.insert(clampi(index + 1, 0, out.size()), at)
+	return out
+
+
+## Drop a corner. A polygon needs three, so the last three are held.
+static func remove_corner(points: PackedVector2Array, index: int) -> PackedVector2Array:
+	if points.size() <= 3 or index < 0 or index >= points.size():
+		return points
+	var out := points.duplicate()
+	out.remove_at(index)
+	return out
+
+
+## Midpoint of every edge, in order, for drawing the "add a corner" handles.
+static func edge_midpoints(points: PackedVector2Array) -> PackedVector2Array:
+	var mids := PackedVector2Array()
+	for index in points.size():
+		mids.append((points[index] + points[(index + 1) % points.size()]) * 0.5)
+	return mids

@@ -102,6 +102,7 @@ func _drive_city(app: Control) -> void:
 		_errors.append("closing the shape did not add an area (%d -> %d)" % [before, after])
 	await _shoot("1b-new-zone")
 
+	await _drive_reshape(screen)
 	await _drive_pins(app, screen)
 
 	# _drive_pins navigates away and back, which frees the old screen node.
@@ -109,6 +110,42 @@ func _drive_city(app: Control) -> void:
 	if screen != null and screen.has_method("set_tab"):
 		screen.call("set_tab", "map")
 	await _settle(10)
+
+
+## Reshaping is the other half of editing a zone: not just what it says, but
+## where it sits. Drag a corner, slide the plate, and check the outline moved.
+func _drive_reshape(screen: Node) -> void:
+	if not screen.has_method("start_reshape"):
+		_errors.append("city screen did not expose the reshape path")
+		return
+
+	screen.call("start_reshape", "pacifica")
+	await _settle(10)
+	await _shoot("1b-reshape")
+
+	var corners: int = screen.call("reshape_corner_count")
+	if corners < 3:
+		_errors.append("pacifica should have at least three corners, has %d" % corners)
+		return
+
+	var before: PackedVector2Array = NightCity.points_of(Store.area_by_id("pacifica"))
+	screen.call("drag_corner", 1, Vector2(910, 330))
+	await _settle(8)
+	var after: PackedVector2Array = NightCity.points_of(Store.area_by_id("pacifica"))
+	if after[1] == before[1]:
+		_errors.append("dragging a corner did not move it")
+	await _shoot("1b-reshape-dragged")
+
+	var label_before := NightCity.label_of(Store.area_by_id("pacifica"))
+	screen.call("nudge_zone", Vector2(0, -30))
+	await _settle(8)
+	var label_after := NightCity.label_of(Store.area_by_id("pacifica"))
+	if label_after == label_before:
+		_errors.append("moving the zone did not carry its label")
+
+	screen.call("finish_reshape")
+	await _settle(10)
+	await _shoot("1b-reshaped")
 
 
 ## Pins are the link between the city map and a playable board, so this checks

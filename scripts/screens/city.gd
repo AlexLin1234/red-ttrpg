@@ -12,7 +12,7 @@ const TABS: PackedStringArray = ["map", "areas", "places", "control", "jobs", "n
 const CLOSE_RADIUS := 18.0
 
 var _tab := "map"
-## "inspect", "edit", "draw" or "pin".
+## "inspect", "edit", "draw", "pin" or "reshape".
 var _mode := "inspect"
 ## Whether the rail is showing a zone or a point of interest.
 var _focus_kind := "area"
@@ -47,6 +47,7 @@ func _ready() -> void:
 	_map.poi_hovered.connect(_on_poi_hovered)
 	_map.poi_picked.connect(_on_poi_picked)
 	_map.poi_placed.connect(_on_poi_placed)
+	_map.reshape_changed.connect(_on_reshape_changed)
 	map_shell.add_child(_map)
 
 	var rail_shell := UI.panel()
@@ -168,6 +169,44 @@ func _on_poi_placed(point: Vector2) -> void:
 	_refresh()
 
 
+## Reshaping writes to the campaign on every drag frame, so the plate follows
+## the pointer and the save is honestly marked dirty as it happens.
+func _on_reshape_changed(area_id: String, points: PackedVector2Array, delta: Vector2) -> void:
+	var area := Store.area_by_id(area_id)
+	if area.is_empty():
+		return
+	if delta != Vector2.ZERO:
+		NightCity.move_area(area, delta)
+	else:
+		NightCity.set_points(area, points)
+	Store.mark_dirty()
+	_map.set_areas(Store.areas(), _hooked_areas())
+	_refresh_rail()
+
+
+func start_reshape(area_id: String) -> void:
+	_pinned_id = area_id
+	_focus_id = area_id
+	_focus_kind = "area"
+	_mode = "reshape"
+	_tab = "map"
+	for key in _tab_buttons:
+		(_tab_buttons[key] as Button).button_pressed = key == "map"
+	_map.set_focus(area_id)
+	_map.set_reshape_target(area_id)
+	_refresh_rail()
+
+
+func finish_reshape() -> void:
+	_mode = "inspect"
+	_map.set_reshape_target("")
+	# A reshaped boundary can leave pins on the wrong side of it.
+	var moved := CampaignSchema.rehome_pois(Store.campaign)
+	if moved > 0:
+		Store.set_status("%d place(s) re-homed" % moved)
+	_refresh()
+
+
 func start_pin() -> void:
 	_mode = "pin"
 	_map.set_pin_mode(true)
@@ -184,6 +223,7 @@ func _cancel_draw() -> void:
 	_mode = "inspect"
 	_map.set_draw_mode(false)
 	_map.set_pin_mode(false)
+	_map.set_reshape_target("")
 	_refresh_rail()
 
 
@@ -210,6 +250,29 @@ func draft_corner_count() -> int:
 
 func close_draft() -> void:
 	_map.close_draft()
+
+
+func reshape_corner_count() -> int:
+	return NightCity.points_of(Store.area_by_id(_pinned_id)).size()
+
+
+## Same effect as dragging corner [param index] to this point.
+func drag_corner(index: int, point: Vector2) -> void:
+	if _mode != "reshape":
+		return
+	var area := Store.area_by_id(_pinned_id)
+	var points := NightCity.points_of(area)
+	if index < 0 or index >= points.size():
+		return
+	points[index] = point
+	_on_reshape_changed(_pinned_id, points, Vector2.ZERO)
+
+
+## Same effect as dragging the plate itself.
+func nudge_zone(delta: Vector2) -> void:
+	if _mode != "reshape":
+		return
+	_on_reshape_changed(_pinned_id, NightCity.points_of(Store.area_by_id(_pinned_id)), delta)
 
 
 func poi_ids() -> PackedStringArray:
@@ -245,6 +308,7 @@ func _refresh() -> void:
 	_map.set_focus_poi(_focus_poi if _focus_kind == "poi" else "")
 	_map.set_draw_mode(_mode == "draw")
 	_map.set_pin_mode(_mode == "pin")
+	_map.set_reshape_target(_pinned_id if _mode == "reshape" else "")
 	_refresh_rail()
 
 
@@ -290,6 +354,9 @@ func _refresh_rail() -> void:
 		return
 	if _mode == "pin":
 		_rail.add_child(_build_pin_panel())
+		return
+	if _mode == "reshape":
+		_rail.add_child(_build_reshape_panel())
 		return
 
 	match _tab:
@@ -435,6 +502,10 @@ func _build_area_panel() -> Control:
 	delete_button.pressed.connect(confirm_delete.bind(_focus_id))
 	actions.add_child(delete_button)
 	box.add_child(actions)
+
+	var reshape_button := UI.plain_button("Reshape on the map")
+	reshape_button.pressed.connect(start_reshape.bind(_focus_id))
+	box.add_child(reshape_button)
 
 	var add_place := UI.plain_button("+ Add a place here")
 	add_place.pressed.connect(start_pin)
@@ -587,6 +658,10 @@ func _build_editor() -> Control:
 	delete_button.pressed.connect(confirm_delete.bind(_pinned_id))
 	actions.add_child(delete_button)
 	box.add_child(actions)
+
+	var reshape_button := UI.plain_button("Reshape on the map")
+	reshape_button.pressed.connect(start_reshape.bind(_pinned_id))
+	box.add_child(reshape_button)
 
 	return _scrolled(box)
 
@@ -872,6 +947,62 @@ func _confirm(kicker: String, subject: String, message: String, on_confirm: Call
 	cancel.pressed.connect(scrim.queue_free)
 	actions.add_child(cancel)
 	box.add_child(actions)
+
+
+
+func _build_reshape_panel() -> Control:
+	var area := Store.area_by_id(_pinned_id)
+	if area.is_empty():
+		_mode = "inspect"
+		return UI.margins(UI.micro("That zone is gone."), UI.GAP_3)
+
+	var points := NightCity.points_of(area)
+	var box := UI.vbox(UI.GAP_2)
+	box.add_child(UI.micro("Reshaping zone"))
+	box.add_child(UI.display(String(area["name"]), 26))
+
+	var instructions := UI.body(
+		(
+			"Drag a corner to move it. Click a cross on an edge to add a corner there. "
+			+ "Right-click a corner to remove it. Drag inside the shape to move the whole zone."
+		),
+		11,
+		UI.MUTED,
+	)
+	instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	instructions.clip_text = false
+	box.add_child(instructions)
+
+	box.add_child(UI.rule_line())
+	box.add_child(UI.field_row("Corners", str(points.size())))
+	box.add_child(
+		UI.field_row(
+			"Can remove one", "Yes" if points.size() > 3 else "No, three is the minimum",
+			UI.TEXT if points.size() > 3 else UI.MUTED
+		)
+	)
+	var pins := Store.pois_in_area(_pinned_id).size()
+	box.add_child(UI.field_row("Places inside", str(pins)))
+	box.add_child(
+		UI.micro("Places are re-checked against the new boundary when you finish.", UI.MUTED_DIM)
+	)
+
+	box.add_child(UI.rule_line())
+	var recentre := UI.plain_button("Recentre the name")
+	recentre.pressed.connect(
+		func() -> void:
+			var label := NightCity.suggest_label(NightCity.points_of(area))
+			area["label"] = [label.x, label.y]
+			Store.mark_dirty()
+			_map.set_areas(Store.areas(), _hooked_areas())
+	)
+	box.add_child(recentre)
+
+	var done := UI.primary_button("Done reshaping")
+	done.pressed.connect(finish_reshape)
+	box.add_child(done)
+
+	return _scrolled(box)
 
 
 # -- points of interest ------------------------------------------------------------
@@ -1191,9 +1322,13 @@ class _MapView extends Control:
 	signal poi_hovered(poi_id: String)
 	signal poi_picked(poi_id: String)
 	signal poi_placed(point: Vector2)
+	## delta is the movement when the whole zone was dragged, zero otherwise.
+	signal reshape_changed(area_id: String, points: PackedVector2Array, delta: Vector2)
 
 	## How close, in map units, the pointer has to be to hit a pin.
 	const PIN_RADIUS := 14.0
+	## Grab radius for a corner handle while reshaping.
+	const HANDLE_RADIUS := 13.0
 
 	var _areas: Array = []
 	var _pois: Array = []
@@ -1202,6 +1337,10 @@ class _MapView extends Control:
 	var _hooked: PackedStringArray = []
 	var _drawing := false
 	var _pinning := false
+	var _reshape_id := ""
+	var _drag_corner := -1
+	var _dragging_body := false
+	var _drag_last := Vector2.ZERO
 	var _draft := PackedVector2Array()
 	var _cursor := Vector2.ZERO
 	var _scale := 1.0
@@ -1234,6 +1373,18 @@ class _MapView extends Control:
 	func set_pin_mode(on: bool) -> void:
 		_pinning = on
 		queue_redraw()
+
+	func set_reshape_target(area_id: String) -> void:
+		_reshape_id = area_id
+		_drag_corner = -1
+		_dragging_body = false
+		queue_redraw()
+
+	func _reshape_area() -> Dictionary:
+		for area in _areas:
+			if String((area as Dictionary)["id"]) == _reshape_id:
+				return area
+		return {}
 
 	func set_draw_mode(on: bool) -> void:
 		_drawing = on
@@ -1273,6 +1424,79 @@ class _MapView extends Control:
 	func _to_map(point: Vector2) -> Vector2:
 		return (point - _origin) / maxf(_scale, 0.0001)
 
+	## Dragging corners, inserting them on an edge, and sliding the whole plate.
+	func _reshape_input(event: InputEvent) -> void:
+		var area := _reshape_area()
+		if area.is_empty():
+			return
+		var points := NightCity.points_of(area)
+
+		if event is InputEventMouseMotion:
+			var at := _to_map((event as InputEventMouseMotion).position)
+			_cursor = at
+			if _drag_corner >= 0 and _drag_corner < points.size():
+				points[_drag_corner] = at.snapped(Vector2(5, 5))
+				reshape_changed.emit(_reshape_id, points, Vector2.ZERO)
+			elif _dragging_body:
+				var delta := (at - _drag_last).snapped(Vector2(5, 5))
+				if delta != Vector2.ZERO:
+					_drag_last += delta
+					reshape_changed.emit(_reshape_id, points, delta)
+			queue_redraw()
+			return
+
+		if not (event is InputEventMouseButton):
+			return
+		var button := event as InputEventMouseButton
+		var at := _to_map(button.position)
+
+		if not button.pressed:
+			_drag_corner = -1
+			_dragging_body = false
+			return
+
+		if button.button_index == MOUSE_BUTTON_RIGHT:
+			var doomed := _corner_at(points, at)
+			if doomed >= 0:
+				reshape_changed.emit(_reshape_id, NightCity.remove_corner(points, doomed), Vector2.ZERO)
+				queue_redraw()
+			return
+
+		if button.button_index != MOUSE_BUTTON_LEFT:
+			return
+
+		var corner := _corner_at(points, at)
+		if corner >= 0:
+			_drag_corner = corner
+			return
+
+		var edge := _edge_at(points, at)
+		if edge >= 0:
+			var grown := NightCity.insert_corner(points, edge, at.snapped(Vector2(5, 5)))
+			_drag_corner = edge + 1
+			reshape_changed.emit(_reshape_id, grown, Vector2.ZERO)
+			queue_redraw()
+			return
+
+		if Geometry2D.is_point_in_polygon(at, points):
+			_dragging_body = true
+			_drag_last = at
+
+	func _corner_at(points: PackedVector2Array, at: Vector2) -> int:
+		var radius := HANDLE_RADIUS / maxf(_scale, 0.0001)
+		for index in points.size():
+			if at.distance_to(points[index]) <= radius:
+				return index
+		return -1
+
+	func _edge_at(points: PackedVector2Array, at: Vector2) -> int:
+		var radius := HANDLE_RADIUS / maxf(_scale, 0.0001)
+		var mids := NightCity.edge_midpoints(points)
+		for index in mids.size():
+			if at.distance_to(mids[index]) <= radius:
+				return index
+		return -1
+
 	## Pins sit on top of zones, so they are hit-tested first.
 	func _poi_at(at: Vector2) -> String:
 		var best := ""
@@ -1293,6 +1517,10 @@ class _MapView extends Control:
 		return ""
 
 	func _gui_input(event: InputEvent) -> void:
+		if _reshape_id != "":
+			_reshape_input(event)
+			return
+
 		if event is InputEventMouseMotion:
 			var at := _to_map((event as InputEventMouseMotion).position)
 			if _drawing or _pinning:
@@ -1409,7 +1637,9 @@ class _MapView extends Control:
 
 		_draw_pins()
 
-		if _drawing:
+		if _reshape_id != "":
+			_draw_handles()
+		elif _drawing:
 			_draw_draft()
 		elif _pinning:
 			_draw_pin_cursor()
@@ -1442,6 +1672,26 @@ class _MapView extends Control:
 				9,
 				colour if focused else UI.TEXT,
 			)
+
+	## Square handles on the corners, small crosses on the edge midpoints where a
+	## new corner would go.
+	func _draw_handles() -> void:
+		var area := _reshape_area()
+		if area.is_empty():
+			return
+		var points := NightCity.points_of(area)
+
+		for mid in NightCity.edge_midpoints(points):
+			var at := _to_screen(mid)
+			draw_line(at - Vector2(4, 0), at + Vector2(4, 0), UI.ACCENT_FILL, 1.0)
+			draw_line(at - Vector2(0, 4), at + Vector2(0, 4), UI.ACCENT_FILL, 1.0)
+
+		for index in points.size():
+			var at := _to_screen(points[index])
+			var held := index == _drag_corner
+			var box := Rect2(at - Vector2(5, 5), Vector2(10, 10))
+			draw_rect(box, UI.ACCENT if held else UI.PANEL_INSET, true)
+			draw_rect(box, UI.ACCENT, false, 1.5)
 
 	func _draw_pin_cursor() -> void:
 		var at := _to_screen(_cursor)

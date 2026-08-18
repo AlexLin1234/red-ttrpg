@@ -29,6 +29,13 @@ and says so before it does. The eight Night City districts are only the seed —
 a campaign saved before zones were editable is migrated on open, keeping any
 overrides it already carried.
 
+What a zone occupies is editable too, not just what it says. **Reshape on the
+map** puts handles on its corners: drag one to move it, click a cross on an edge
+to add a corner there, right-click a corner to remove it, or drag inside the
+shape to slide the whole plate — name included. Three corners is the floor. When
+you finish, every pin is re-checked against the new boundary, so a district that
+grew over a clinic now claims it.
+
 Points of interest are pins dropped inside those zones — a clinic, a fixer's
 booth, a corp tower. Each carries a name, a kind and notes, and can link to a
 location: pick an existing board or build a fresh one on the spot. A linked pin
@@ -85,7 +92,7 @@ Open `project.godot` in Godot 4.7, or:
 
 ```bash
 godot --path .                # run the app
-./run-tests.sh                # 230 checks, headless
+./run-tests.sh                # 253 checks, headless
 ./run-shots.sh                # render every screen to .shots/ (needs Xvfb)
 ```
 

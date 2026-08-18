@@ -152,5 +152,92 @@ static func run(h: Harness) -> void:
 	h.equal((board["tiles"] as Array).size(), 256, "16 x 16 of deck")
 	h.equal((board["units"] as Array), [], "starts empty")
 
+	h.describe("reshaping zones")
+
+	var square := PackedVector2Array([
+		Vector2(0, 0), Vector2(100, 0), Vector2(100, 100), Vector2(0, 100)
+	])
+
+	h.it("writes moved corners back onto the zone")
+	var shaped := NightCity.new_area(square)
+	var pulled := square.duplicate()
+	pulled[2] = Vector2(160, 140)
+	NightCity.set_points(shaped, pulled)
+	h.equal(NightCity.points_of(shaped), pulled, "corner moved")
+	h.equal(shaped["polygon"].size(), 8, "still stored flat")
+
+	h.it("moves the whole zone with its name")
+	var slid := NightCity.new_area(square)
+	slid["label"] = [10.0, 90.0]
+	NightCity.move_area(slid, Vector2(50, -20))
+	h.equal(NightCity.points_of(slid)[0], Vector2(50, -20), "first corner slid")
+	h.equal(NightCity.points_of(slid)[2], Vector2(150, 80), "third corner slid")
+	h.equal(NightCity.label_of(slid), Vector2(60, 70), "label came along")
+
+	h.it("adds a corner on the edge that was clicked")
+	var grown := NightCity.insert_corner(square, 0, Vector2(50, -30))
+	h.equal(grown.size(), 5, "one more corner")
+	h.equal(grown[1], Vector2(50, -30), "inserted after the clicked edge")
+	h.equal(grown[2], Vector2(100, 0), "the rest shifted along")
+
+	h.it("removes a corner but never drops below three")
+	var trimmed := NightCity.remove_corner(square, 1)
+	h.equal(trimmed.size(), 3, "one fewer")
+	h.equal(trimmed[1], Vector2(100, 100), "the right corner went")
+	h.equal(NightCity.remove_corner(trimmed, 0).size(), 3, "held at three")
+	h.equal(NightCity.remove_corner(square, 99).size(), 4, "out of range is a no-op")
+
+	h.it("offers a midpoint per edge for adding corners")
+	var mids := NightCity.edge_midpoints(square)
+	h.equal(mids.size(), 4, "one per edge")
+	h.equal(mids[0], Vector2(50, 0), "first edge")
+	h.equal(mids[3], Vector2(0, 50), "closing edge wraps around")
+
+	h.it("re-homes places when a boundary is redrawn under them")
+	var redrawn: Dictionary = CampaignFixtures.blackwall_sunrise()["campaign"]
+	CampaignSchema.migrate_areas(redrawn)
+	h.equal(CampaignSchema.pois_in_area(redrawn, "watson").size(), 2, "watson pins before")
+	# Shrink Watson to a corner that contains neither of its pins.
+	var watson_area := CampaignSchema.area_by_id(redrawn, "watson")
+	NightCity.set_points(
+		watson_area,
+		PackedVector2Array([Vector2(40, 380), Vector2(70, 380), Vector2(70, 410), Vector2(40, 410)])
+	)
+	var rehomed := CampaignSchema.rehome_pois(redrawn)
+	h.equal(rehomed, 2, "both pins re-checked")
+	h.equal(CampaignSchema.pois_in_area(redrawn, "watson").size(), 0, "neither is inside now")
+	h.equal(CampaignSchema.points_of_interest(redrawn).size(), 5, "no pins lost")
+
+	h.it("re-homes a place into a zone that grew over it")
+	# Stretch Heywood across the clinic's position.
+	var heywood := CampaignSchema.area_by_id(redrawn, "heywood")
+	NightCity.set_points(
+		heywood,
+		PackedVector2Array([Vector2(40, 500), Vector2(560, 500), Vector2(560, 660), Vector2(40, 660)])
+	)
+	CampaignSchema.rehome_pois(redrawn)
+	h.equal(
+		String(CampaignSchema.poi_by_id(redrawn, "poi-clinic")["area_id"]),
+		"heywood",
+		"clinic picked up by the grown zone",
+	)
+
+	h.it("survives a reshape through the container")
+	var shape_bundle := CampaignFixtures.blackwall_sunrise()
+	CampaignSchema.migrate_areas(shape_bundle["campaign"])
+	var target := CampaignSchema.area_by_id(shape_bundle["campaign"], "pacifica")
+	NightCity.move_area(target, Vector2(15, 25))
+	var expected := NightCity.points_of(target)
+	var shape_path := "user://test_reshape.red"
+	h.equal(CampaignContainer.save(shape_path, shape_bundle)["ok"], true, "saved")
+	var shape_loaded := CampaignContainer.load_file(shape_path)
+	h.equal(shape_loaded["integrity"]["verified"], true, "integrity verified")
+	h.equal(
+		NightCity.points_of(CampaignSchema.area_by_id(shape_loaded["campaign"], "pacifica")),
+		expected,
+		"moved outline survived",
+	)
+
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(pin_path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(shape_path))
