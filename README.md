@@ -76,7 +76,7 @@ Open `project.godot` in Godot 4.7, or:
 
 ```bash
 godot --path .                # run the app
-./run-tests.sh                # 174 checks, headless
+./run-tests.sh                # 203 checks, headless
 ./run-shots.sh                # render every screen to .shots/ (needs Xvfb)
 ```
 
@@ -98,7 +98,7 @@ scripts/
   rules/             dice, resolver, reversible events, tables
   campaign/          .red container, schema, store, demo content
   encounter/         initiative, rounds, turns
-  city/              district data
+  city/              zone data and the built-in Night City seed
   board/             the isometric board
   screens/           library, city, location, forge
   ui/theme.gd        palette, fonts, widget factories
