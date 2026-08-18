@@ -11,6 +11,11 @@ var _selected := ""
 var _list_box: VBoxContainer
 var _hero_holder: Control
 var _count_label: Label
+var _new_dialog: ConfirmationDialog
+var _new_name: LineEdit
+var _new_city: LineEdit
+var _new_gm: LineEdit
+var _new_month: LineEdit
 
 
 func _ready() -> void:
@@ -18,6 +23,7 @@ func _ready() -> void:
 	add_child(UI.fill_margins(grid, UI.GAP_3))
 
 	grid.add_child(_build_list())
+	_build_new_campaign_dialog()
 
 	_hero_holder = Control.new()
 	UI.expand(_hero_holder)
@@ -370,12 +376,62 @@ func _build_save_facts(row: Dictionary, loaded: Dictionary) -> Control:
 
 
 func _create_campaign() -> void:
-	var name := "New Campaign %s" % Time.get_date_string_from_system()
+	_new_name.text = "New Campaign"
+	_new_city.text = "Night City"
+	_new_gm.text = ""
+	_new_month.text = "2045-01"
+	_new_dialog.popup_centered(Vector2i(520, 390))
+
+
+func _build_new_campaign_dialog() -> void:
+	_new_dialog = ConfirmationDialog.new()
+	_new_dialog.title = "Create campaign"
+	_new_dialog.get_ok_button().text = "Create & open"
+	var form := UI.vbox(UI.GAP_3)
+	_new_name = _dialog_field(form, "Campaign name")
+	_new_city = _dialog_field(form, "City / setting")
+	_new_gm = _dialog_field(form, "Game master")
+	_new_month = _dialog_field(form, "Starting month · YYYY-MM")
+	_new_dialog.add_child(UI.margins(form, UI.GAP_4))
+	_new_dialog.confirmed.connect(_confirm_create_campaign)
+	add_child(_new_dialog)
+
+
+func _dialog_field(form: VBoxContainer, label: String) -> LineEdit:
+	form.add_child(UI.micro(label))
+	var field := LineEdit.new()
+	field.custom_minimum_size.y = 38
+	form.add_child(field)
+	return field
+
+
+func _confirm_create_campaign() -> void:
+	var name := _new_name.text.strip_edges()
+	if name == "":
+		Store.set_status("Campaign name is required")
+		return
+	if not Lifestyle.is_month(_new_month.text):
+		Store.set_status("Starting month must use YYYY-MM")
+		return
 	var bundle := CampaignFixtures.new_campaign(name)
+	var campaign: Dictionary = bundle["campaign"]
+	campaign["city"] = _new_city.text.strip_edges() if _new_city.text.strip_edges() != "" else "Night City"
+	campaign["gm"] = _new_gm.text.strip_edges()
+	campaign["current_month"] = _new_month.text
+	var parts := _new_month.text.split("-")
+	campaign["clock"]["year"] = int(parts[0])
+	campaign["clock"]["month"] = int(parts[1])
 	var path := Store.library_dir().path_join(CampaignSchema.suggest_file_name(name))
-	CampaignContainer.save(path, bundle)
+	var suffix := 2
+	while FileAccess.file_exists(path):
+		path = Store.library_dir().path_join("%s_%d.red" % [CampaignSchema.suggest_file_name(name).trim_suffix(".red"), suffix])
+		suffix += 1
+	if not bool(CampaignContainer.save(path, bundle).get("ok", false)):
+		Store.set_status("Campaign could not be created")
+		return
 	_selected = path
 	_refresh()
+	Store.open(path)
 
 
 func _import_campaign() -> void:

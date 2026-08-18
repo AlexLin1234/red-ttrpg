@@ -401,6 +401,54 @@ func _build_skills_tab(body: VBoxContainer, character: Dictionary) -> void:
 
 
 func _build_gear_tab(body: VBoxContainer, character: Dictionary) -> void:
+	Lifestyle.ensure_character(character)
+	var selected_lifestyle := Lifestyle.profile(String(character["lifestyle"]))
+	body.add_child(
+		_section_head(
+			"Lifestyle & cash",
+			"%s · %deb/month" % [selected_lifestyle["label"], selected_lifestyle["cost"]],
+		)
+	)
+	var lifestyle_row := UI.hbox(UI.GAP_2)
+	var picker := OptionButton.new()
+	UI.expand(picker, true, false)
+	for index in Lifestyle.CATALOG.size():
+		var entry: Dictionary = Lifestyle.CATALOG[index]
+		picker.add_item("%s · %deb/month" % [entry["label"], entry["cost"]])
+		picker.set_item_metadata(index, entry["key"])
+		if String(entry["key"]) == String(character["lifestyle"]):
+			picker.select(index)
+	picker.item_selected.connect(
+		func(index: int) -> void:
+			Store.active_character()["lifestyle"] = String(picker.get_item_metadata(index))
+			Store.mark_dirty()
+			_refresh_sheet()
+	)
+	lifestyle_row.add_child(picker)
+	var cash := SpinBox.new()
+	cash.min_value = 0
+	cash.max_value = 1_000_000
+	cash.step = 1
+	cash.value = int(character["cash"])
+	cash.suffix = " eb"
+	cash.custom_minimum_size = Vector2(150, 0)
+	cash.value_changed.connect(
+		func(value: float) -> void:
+			Store.active_character()["cash"] = int(value)
+			Store.mark_dirty()
+	)
+	lifestyle_row.add_child(cash)
+	body.add_child(lifestyle_row)
+	var payment := "Status · %s" % String(character["lifestyle_status"]).to_upper()
+	if String(character["lifestyle_status"]) == "unpaid":
+		payment += " · %deb due · %d grace days" % [
+			int(character["lifestyle_balance_due"]), int(character.get("lifestyle_grace_days", 0))
+		]
+	elif character.get("lifestyle_paid_through") != null:
+		payment += " · paid through %s" % character["lifestyle_paid_through"]
+	body.add_child(UI.micro(payment, UI.WARN if String(character["lifestyle_status"]) == "unpaid" else UI.GOOD))
+	body.add_child(UI.rule_line())
+
 	var gear: Array = character.get("gear", [])
 	body.add_child(
 		_section_head("Gear & cyberware", "%d humanity spent" % CampaignSchema.humanity_spent(gear))
@@ -691,6 +739,13 @@ func _blank_character() -> Dictionary:
 		"max_hp": 30,
 		"humanity": 40,
 		"max_humanity": 50,
+		"cash": 0,
+		"lifestyle": "kibble",
+		"lifestyle_status": "paid",
+		"lifestyle_paid_through": null,
+		"lifestyle_balance_due": 0,
+		"lifestyle_grace_days": 0,
+		"last_lifestyle_charge": null,
 		"weapons": [],
 	}
 

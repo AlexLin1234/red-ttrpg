@@ -102,6 +102,7 @@ static func _party() -> Array:
 			],
 			"armor": _armor(11),
 			"hp": 42, "max_hp": 45, "humanity": 32, "max_humanity": 40,
+			"cash": 5000, "lifestyle": "fresh_food",
 			"weapons": [_weapon("Heavy Sidearm", 8, "pistol", 3)],
 		},
 		{
@@ -116,6 +117,7 @@ static func _party() -> Array:
 			],
 			"armor": _armor(7),
 			"hp": 28, "max_hp": 38, "humanity": 40, "max_humanity": 50,
+			"cash": 1000, "lifestyle": "good_prepak",
 			"weapons": [_weapon("Service Sidearm", 12, "pistol", 2)],
 		},
 		{
@@ -130,6 +132,7 @@ static func _party() -> Array:
 			],
 			"armor": _armor(7),
 			"hp": 11, "max_hp": 40, "humanity": 38, "max_humanity": 50,
+			"cash": 250, "lifestyle": "generic_prepak",
 			"weapons": [_weapon("Light Sidearm", 12, "pistol", 1)],
 		},
 		{
@@ -144,6 +147,7 @@ static func _party() -> Array:
 			],
 			"armor": _armor(13),
 			"hp": 50, "max_hp": 50, "humanity": 28, "max_humanity": 40,
+			"cash": 500, "lifestyle": "kibble",
 			"weapons": [_weapon("Service Rifle", 25, "assault_rifle", 5, 1, 4)],
 		},
 	]
@@ -292,6 +296,7 @@ static func blackwall_sunrise() -> Dictionary:
 			"players": 4,
 			"sessions": 14,
 			"clock": {"year": 2045, "month": 9, "day": 14, "hour": 21, "minute": 47},
+			"current_month": "2045-09", "closed_months": [],
 			"weather": {"condition": "Acid Rain", "temperature_c": 18, "visibility_pct": 40},
 			"session_log":
 			[
@@ -395,6 +400,7 @@ static func library_fillers() -> Array:
 					"id": row[0], "name": row[1], "arc": row[5], "city": row[2],
 					"gm": "V. Okonkwo", "players": row[3], "sessions": row[4],
 					"clock": {"year": 2045, "month": 6, "day": 2, "hour": 14, "minute": 0},
+					"current_month": "2045-06", "closed_months": [],
 					"weather": {"condition": "Smog", "temperature_c": 24, "visibility_pct": 65},
 					"session_log": [], "hooks": [], "districts": {},
 					"cover_palette": cover_palette(), "restore_points": [],
@@ -418,8 +424,10 @@ static func new_campaign(name: String) -> Dictionary:
 			"players": 0,
 			"sessions": 0,
 			"clock": {"year": 2045, "month": 1, "day": 1, "hour": 20, "minute": 0},
+			"current_month": "2045-01", "closed_months": [],
 			"weather": {"condition": "Clear", "temperature_c": 20, "visibility_pct": 90},
 			"session_log": [], "hooks": [], "districts": {},
+			"lifestyle_closed_months": [], "last_lifestyle_report": {}, "gm_map": {},
 			"cover_palette": cover_palette(), "restore_points": [],
 		},
 		"roster": {"characters": []},

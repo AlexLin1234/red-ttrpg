@@ -6,7 +6,17 @@ export_presets.cfg
 # Book-derived data stays local.
 *.pdf
 !docs/mockups/*.pdf
-data/
+# Private source and extracted map assets (keep the mount point in Git).
+data/maps/*.png
+data/maps/*.jpg
+data/maps/*.jpeg
+data/maps/*.pdf
+!data/maps/.gitkeep
+!data/.gdignore
+# Extracted rulebook text, tables and page scans.
+data/chunks.jsonl
+data/rules.db
+data/tables/
 
 # Build output
 build/
@@ -16,6 +26,12 @@ release/
 tmp/
 .gstack/
 .DS_Store
+__pycache__/
+*.py[cod]
+
+# Legacy sidecar worktrees were removed in the single-project rebuild.
+/cprtool/
+/viewer/
 
 # Rendered screenshots are build output.
 .shots/

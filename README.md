@@ -1,25 +1,28 @@
 # Redline
 
 A standalone desktop GM console for Cyberpunk RED, built as a single Godot 4.7
-project. Four screens: a campaign library, a Night City map, a 3D isometric
-location with combat, and a character forge.
+project. Four screens cover the campaign library, City map, isometric combat
+location, and character Forge.
 
-No server, no sidecar, no network. The rules engine is GDScript; campaigns are
-`.red` files on your disk.
+No server, sidecar, API, or network connection is required. Rules, campaign
+editing, Lifestyle month closing, and undo/redo all run in GDScript. Campaigns
+are portable `.red` files stored on disk.
+
+An optional FastAPI service and container are included for a persistent cloud
+session. `POST /encounter/month-end` performs the same in-game month close as
+one atomic operation and `/ws` broadcasts the resulting campaign state.
 
 ![The campaign library](docs/mockups/1a-library.png)
 
-## The four screens
+## Features
 
-**Library** — every campaign in `~/Documents/Redline/saves` as a `.red` file,
-with its real size, format version and a checksum-verified integrity state. The
-active save gets a hero panel: party HP and humanity, last session's log, and
-named restore points.
+**Library** — lists campaign saves with real file size, format version, and
+checksum-verified integrity. The active save shows party status, the latest
+session log, and restore points.
 
 **City** — Night City as hover-inspectable zone plates. Each reports who holds
-it, what it is, danger, population, law response and net density. The in-world
-clock, date, shift and weather are campaign state: advance an hour or a day and
-the save changes with it. Diamond markers flag zones carrying open job hooks.
+it, what it is, danger, population, law response and net density. Diamond
+markers flag zones carrying open job hooks.
 
 Zones are campaign data, not a fixed list. Draw a new one corner by corner
 straight onto the map and it becomes an area with the same fields as every
@@ -45,105 +48,122 @@ The Places tab lists them all. Deleting a zone re-homes its pins rather than
 deleting them — a place the party knows about does not stop existing because
 the GM redrew a boundary.
 
-**Location** — an isometric board. Pick tiles, props or units from the palette
-and click the grid to place them. Roll 1d10 + REF for initiative, then fire.
-Every attack writes its arithmetic out longhand so you can see — and override —
-what the engine did.
+**Upload map** puts the GM's own image behind those plates. It is normalized to
+PNG, stored inside the campaign save, and drawn as a *backdrop* rather than a
+separate mode — zones, pins and reshaping all keep working on top of it, so a
+zone drawn over a real landmark stays on that landmark. A slider sets how
+strongly it reads, and `M` hides it. A campaign carrying label-only zones from
+the earlier annotation tool has them adopted into `areas` on open, so they gain
+the district fields instead of being dropped.
 
-**Forge** — one editor for PCs, named NPCs and mook templates; they differ by a
-tag, not by a screen. Ten stats with a point total, skills with computed totals,
-gear and cyberware costed in Humanity, and armour SP tracked across six hit
-locations. The cover builder alongside it writes props straight into the board's
-palette.
+The in-world clock, date, shift, and weather are campaign state. Crossing a
+month boundary automatically bills every configured character for the upcoming
+month. **Close month** is available when the GM wants to advance explicitly.
 
-## Cover is a question, not an answer
+**Location** — provides an isometric encounter board with tile, prop, and unit
+placement, initiative, combat resolution, cover raycasts, and exact event-based
+undo.
 
-When you shoot, the board raycasts the line of fire across five points on the
-target's silhouette. If something is in the way it stops and asks what that
-means:
+**Forge** — edits PCs, NPCs, and mook templates. Alongside stats, skills, gear,
+Humanity, armor, and cover, each character can carry cash and one of the four
+Lifestyle levels:
 
-- **Cover takes the hit** — the barrier absorbs the damage at its own SP and HP.
-  This is the default, and what the rules engine implements.
-- **Partial cover** — a −2 penalty to the attack, damage carries through.
-- **Ignore cover** — clear shot.
+- Kibble — 100eb/month
+- Generic Prepak — 300eb/month
+- Good Prepak — 600eb/month
+- Fresh Food — 1,500eb/month
 
-The geometry proposes; you dispose.
+An affordable month close deducts the cost and records the paid-through month.
+An unaffordable payment never makes cash negative; it records the balance and a
+seven-day grace period instead.
 
-## Rules data
+## Rules and owned content
 
-**No book data ships with Redline.** It boots on a homebrew placeholder table
-set so a fresh install can resolve a fight immediately. If you own the book,
-replace any value or import a JSON document in the same shape —
-`scripts/rules/tables.gd` documents it, and `Tables.validate()` reports what is
-missing before an import is accepted.
+No sourcebook pages or extracted images ship with Redline. The built-in combat
+table is a homebrew placeholder so a fresh install can resolve a fight. A GM
+who owns a map image can import it through the City screen; the image remains
+inside their local campaign save.
 
-The combat resolver is pure and separately tested: exploding and fumbling d10s,
-defender wins ties, armour ablates only after damage gets through, and cover
-absorbs overflow rather than passing it on. Each constant carries the page it
-was checked against, in `scripts/rules/resolver.gd`.
-
-Undo is exact. Every action records the events it applied and the inverse of
-each one, so stepping back restores the previous state structurally rather than
-approximately. A fuzz test round-trips a thousand random attacks.
+The combat resolver handles exploding and fumbling d10s, defender-wins ties,
+armor ablation, critical injuries, and cover. Each action records its exact
+inverse so undo restores previous state structurally.
 
 ## Running it
 
-Open `project.godot` in Godot 4.7, or:
+Open `project.godot` in Godot 4.7, or run:
 
 ```bash
 godot --path .                # run the app
-./run-tests.sh                # 253 checks, headless
+./run-tests.sh                # headless logic suite
 ./run-shots.sh                # render every screen to .shots/ (needs Xvfb)
 ```
 
-Both scripts take `GODOT=/path/to/godot` if the binary is not on your `PATH`.
+Both scripts accept `GODOT=/path/to/godot`. The test script performs the import
+pass required to register global GDScript classes and then runs the headless
+suite. Screenshot tests require a graphical renderer or Xvfb.
 
-Godot cannot draw under `--headless`, so `run-shots.sh` uses a virtual
-framebuffer. It is the visual half of verification: `run-tests.sh` proves the
-rules hold, `run-shots.sh` proves the screens draw — and it drives the real
-combat path, rolling initiative and answering the cover prompt, rather than only
-photographing a static scene.
+## Private Night City map
+
+The sourcebook and map are deliberately ignored by Git. With a user-owned PDF
+mounted read-only, extract the largest embedded image (optionally constrain the
+search with `--page N`):
+
+```bash
+python scripts/extract_night_city_map.py \
+  --pdf "/input/Cyberpunk Red.pdf" \
+  --output "data/maps/night_city_2045.png"
+```
+
+Install the extraction-only dependencies with `python -m pip install -r
+requirements.txt`. The City screen loads the resulting RGB-compatible PNG at
+runtime, preserves its aspect ratio, and toggles it with **M** or **Map [M]**.
+When absent, the built-in map remains usable.
+
+The committed `data/.gdignore` prevents Godot from trying to import private
+runtime tables as translation catalogs. If the project was previously opened
+with extracted tables present, close Godot and remove the `.godot/` directory
+once to clear the old failed import records; Godot will rebuild that cache.
+The City screen loads that RGB-compatible PNG at runtime, preserves its aspect
+ratio, and toggles it with **M** or **Map [M]**. When absent, the built-in map
+remains usable. For cloud use, `docker compose up --build` provides persistent
+`/data` campaign storage, a writable map mount, a read-only sourcebook mount,
+and the API health check. Set `SOURCEBOOK_PDF` to the host PDF path.
 
 ## Layout
 
-```
-project.godot        one project, Store autoload
-scenes/              app.tscn, shoot.tscn
+```text
+project.godot        one Godot project with the Store autoload
+scenes/              app and screenshot-runner scenes
 scripts/
-  app.gd             shell: header, screen routing, shortcuts
-  rules/             dice, resolver, reversible events, tables
-  campaign/          .red container, schema, store, demo content
+  app.gd             shell, screen routing, shortcuts
+  rules/             dice, resolver, events, tables, Lifestyle billing
+  campaign/          .red container, schema, store, fixtures
   encounter/         initiative, rounds, turns
-  city/              zone data and the built-in Night City seed
+  city/              zone data, the Night City seed, map images
   board/             the isometric board
   screens/           library, city, location, forge
   ui/theme.gd        palette, fonts, widget factories
 tests/               headless runner and suites
-docs/mockups/        the UI direction these screens are built against
+docs/mockups/        visual design references
 ```
 
-Screens are assembled in GDScript rather than authored as `.tscn` trees. They
-are dense, data-driven grids whose contents come from the campaign file, so the
-layout has to be built in a loop either way; keeping it in code puts the
-structure in one readable place.
+## Save format
 
-## The save format
+A `.red` file is a zip containing:
 
-A `.red` file is a zip:
-
-```
-manifest.json          format, version, timestamps, SHA-256 + size per entry
-campaign.json          identity, clock, weather, session log, hooks, districts
-roster.json            characters
+```text
+manifest.json          version, timestamps, SHA-256 and size per entry
+campaign.json          identity, clock, map image/zones, logs and districts
+roster.json            characters, cash and Lifestyle state
 locations/<id>.json    board layouts
+assets/map.png          optional normalized GM-uploaded map
 ```
 
-The library reads only `manifest.json` and `campaign.json` to draw a card, so
-listing stays fast however large the file is. Integrity re-hashes every entry
-against the manifest — "Verified" means it checked, and a test proves it fails
-on a save edited behind the app's back.
+The library reads only the manifest and campaign metadata when listing saves.
+Opening a save verifies every entry against the recorded SHA-256 checksum.
 
-## Licence
+## License
 
-MIT, see `LICENSE`. Cyberpunk RED is a trademark of R. Talsorian Games; this is
-an unaffiliated tool that ships none of their content.
+MIT, see `LICENSE`. Cyberpunk RED is a trademark of R. Talsorian Games; Redline
+is an unaffiliated tool and includes none of the sourcebook's copyrighted
+content.

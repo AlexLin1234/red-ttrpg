@@ -5,7 +5,7 @@ extends RefCounted
 ## calculations the sheets and headers share.
 
 const SAVE_FORMAT := "redline-campaign"
-const SAVE_VERSION := "0.4"
+const SAVE_VERSION := "0.6"
 
 const STAT_KEYS: PackedStringArray = [
 	"INT", "REF", "DEX", "TECH", "COOL", "WILL", "LUCK", "MOVE", "BODY", "EMP"
@@ -151,6 +151,7 @@ static func suggest_file_name(campaign_name: String) -> String:
 ## the GM had already changed is lost.
 static func migrate_areas(campaign: Dictionary) -> void:
 	if campaign.has("areas") and not (campaign["areas"] as Array).is_empty():
+		adopt_map_zones(campaign)
 		return
 	var overrides: Dictionary = campaign.get("districts", {})
 	var seeded: Array = []
@@ -161,6 +162,42 @@ static func migrate_areas(campaign: Dictionary) -> void:
 			entry[key] = override[key]
 		seeded.append(entry)
 	campaign["areas"] = seeded
+	adopt_map_zones(campaign)
+
+
+## Fold annotation polygons drawn on an uploaded backdrop into `areas`.
+##
+## An earlier build kept map zones in `gm_map.zones` as bare label-and-colour
+## outlines in 0..1 image coordinates, separate from the districts and carrying
+## none of their fields. They are the same thing the GM now draws with the zone
+## tool, so they are converted once, on open, and the old list is cleared rather
+## than maintained in parallel. Returns how many were adopted.
+static func adopt_map_zones(campaign: Dictionary) -> int:
+	var gm_map: Dictionary = campaign.get("gm_map", {})
+	var zones: Array = gm_map.get("zones", [])
+	if zones.is_empty():
+		return 0
+
+	var areas: Array = campaign.get("areas", [])
+	var adopted := 0
+	for value in zones:
+		var zone: Dictionary = value
+		var points := PackedVector2Array()
+		for pair in zone.get("points", []):
+			points.append(Vector2(float(pair[0]), float(pair[1])) * NightCity.MAP_SIZE)
+		if points.size() < 3:
+			continue
+		var area := NightCity.new_area(points)
+		area["id"] = String(zone.get("id", area["id"]))
+		area["name"] = String(zone.get("label", "Map Zone"))
+		area["subtitle"] = "Drawn on the backdrop"
+		areas.append(area)
+		adopted += 1
+
+	campaign["areas"] = areas
+	gm_map["zones"] = []
+	campaign["gm_map"] = gm_map
+	return adopted
 
 
 static func area_by_id(campaign: Dictionary, id: String) -> Dictionary:

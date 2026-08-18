@@ -23,6 +23,13 @@ var _map: _MapView
 var _rail: VBoxContainer
 var _tab_buttons: Dictionary = {}
 var _count_label: Label
+var _map_dialog: FileDialog
+var _month_dialog: ConfirmationDialog
+var _campaign_dialog: ConfirmationDialog
+var _campaign_name: LineEdit
+var _campaign_city: LineEdit
+var _campaign_gm: LineEdit
+var _closing_month := false
 
 
 func _ready() -> void:
@@ -63,6 +70,24 @@ func _ready() -> void:
 	elif Store.area_by_id(_focus_id).is_empty():
 		_focus_id = String((Store.areas()[0] as Dictionary)["id"])
 	_pinned_id = _focus_id
+
+	_map_dialog = FileDialog.new()
+	_map_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_map_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	_map_dialog.title = "Choose a map image"
+	_map_dialog.filters = PackedStringArray(
+		["*.png, *.jpg, *.jpeg, *.webp, *.bmp, *.tga, *.svg ; Map images", "*.* ; All files"]
+	)
+	_map_dialog.file_selected.connect(_on_map_selected)
+	add_child(_map_dialog)
+
+	_month_dialog = ConfirmationDialog.new()
+	_month_dialog.title = "Close campaign month?"
+	_month_dialog.dialog_text = "Pay every character's Lifestyle for the upcoming in-game month?"
+	_month_dialog.confirmed.connect(_confirm_month_close)
+	add_child(_month_dialog)
+
+	_build_campaign_dialog()
 	_refresh()
 
 
@@ -81,12 +106,82 @@ func _build_bar() -> Control:
 		tabs.add_child(button)
 		_tab_buttons[tab] = button
 
+	var upload_button := UI.plain_button("Upload map")
+	upload_button.pressed.connect(func() -> void: _map_dialog.popup_centered_ratio(0.72))
+	bar.add_child(upload_button)
+	var map_toggle := UI.plain_button("Backdrop [M]")
+	map_toggle.pressed.connect(func() -> void: _map.toggle_map())
+	bar.add_child(map_toggle)
+	var settings_button := UI.plain_button("Campaign")
+	settings_button.pressed.connect(_open_campaign_dialog)
+	bar.add_child(settings_button)
+
 	var right := UI.micro("GM · %s" % String(Store.campaign.get("gm", "unset")))
 	right.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	UI.expand(right, true, false)
 	bar.add_child(right)
 
 	return bar
+
+
+## The GM can drop any raster map in behind the zone plates. It is normalized to
+## PNG, stored in the save, and drawn under the polygons rather than instead of
+## them, so hovering, drawing and reshaping keep working over a real map.
+func _on_map_selected(path: String) -> void:
+	var loaded := MapAsset.from_file(path)
+	if not bool(loaded.get("ok", false)):
+		Store.set_status(String(loaded.get("error", "Map image could not be read")))
+		return
+	var existing: Dictionary = Store.campaign.get("gm_map", {})
+	var uploaded: Dictionary = loaded["map"]
+	uploaded["opacity"] = float(existing.get("opacity", 0.72))
+	Store.campaign["gm_map"] = uploaded
+	Store.mark_dirty()
+	Store.set_status("Map uploaded")
+	_refresh()
+
+
+func _build_campaign_dialog() -> void:
+	_campaign_dialog = ConfirmationDialog.new()
+	_campaign_dialog.title = "Campaign settings"
+	_campaign_dialog.get_ok_button().text = "Save changes"
+	var form := UI.vbox(UI.GAP_3)
+	for pair in [["Campaign name", "name"], ["City / setting", "city"], ["Game master", "gm"]]:
+		form.add_child(UI.micro(String(pair[0])))
+		var field := LineEdit.new()
+		field.custom_minimum_size.y = 38
+		form.add_child(field)
+		match String(pair[1]):
+			"name": _campaign_name = field
+			"city": _campaign_city = field
+			"gm": _campaign_gm = field
+	_campaign_dialog.add_child(UI.margins(form, UI.GAP_4))
+	_campaign_dialog.confirmed.connect(_save_campaign_settings)
+	add_child(_campaign_dialog)
+
+
+func _open_campaign_dialog() -> void:
+	_campaign_name.text = String(Store.campaign.get("name", ""))
+	_campaign_city.text = String(Store.campaign.get("city", ""))
+	_campaign_gm.text = String(Store.campaign.get("gm", ""))
+	_campaign_dialog.popup_centered(Vector2i(520, 330))
+
+
+func _save_campaign_settings() -> void:
+	if _campaign_name.text.strip_edges() == "":
+		Store.set_status("Campaign name is required")
+		return
+	Store.campaign["name"] = _campaign_name.text.strip_edges()
+	Store.campaign["city"] = _campaign_city.text.strip_edges()
+	Store.campaign["gm"] = _campaign_gm.text.strip_edges()
+	Store.mark_dirty()
+	_refresh()
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_M:
+		_map.toggle_map()
+		get_viewport().set_input_as_handled()
 
 
 func set_tab(tab: String) -> void:
@@ -302,6 +397,7 @@ func area_ids() -> PackedStringArray:
 
 func _refresh() -> void:
 	_refresh_count()
+	_map.set_custom_map(Store.campaign.get("gm_map", {}))
 	_map.set_areas(Store.areas(), _hooked_areas())
 	_map.set_pois(Store.points_of_interest())
 	_map.set_focus(_focus_id)
@@ -349,6 +445,11 @@ func _refresh_rail() -> void:
 	_rail.add_child(_build_clock())
 	_rail.add_child(UI.rule_line())
 
+	var backdrop := _build_backdrop_row()
+	if backdrop != null:
+		_rail.add_child(backdrop)
+		_rail.add_child(UI.rule_line())
+
 	if _mode == "draw":
 		_rail.add_child(_build_draw_panel())
 		return
@@ -379,13 +480,46 @@ func _refresh_rail() -> void:
 			_rail.add_child(_build_simple_list("Net density", "net_density"))
 
 
+## Shown only once a map image is behind the plates: its name and how strongly it
+## reads under them.
+func _build_backdrop_row() -> Control:
+	var gm_map: Dictionary = Store.campaign.get("gm_map", {})
+	if not gm_map.has("png_base64"):
+		if not FileAccess.file_exists(MapAsset.EXTERNAL_PATH):
+			return null
+		var installed := UI.vbox(3)
+		installed.add_child(UI.micro("Backdrop · installed map"))
+		installed.add_child(UI.micro("Press M to hide it", UI.MUTED_DIM))
+		return UI.margins(installed, UI.GAP_3)
+
+	var box := UI.vbox(3)
+	box.add_child(UI.micro("Backdrop · %s" % String(gm_map.get("name", "Campaign map"))))
+	var opacity := HSlider.new()
+	opacity.min_value = 0.2
+	opacity.max_value = 1.0
+	opacity.step = 0.05
+	opacity.value = float(gm_map.get("opacity", 0.72))
+	opacity.tooltip_text = "Map opacity"
+	opacity.value_changed.connect(
+		func(value: float) -> void:
+			var edited: Dictionary = Store.campaign.get("gm_map", {})
+			edited["opacity"] = value
+			Store.campaign["gm_map"] = edited
+			Store.mark_dirty()
+			_map.set_custom_map(edited)
+	)
+	box.add_child(opacity)
+	box.add_child(UI.micro("Press M to hide it", UI.MUTED_DIM))
+	return UI.margins(box, UI.GAP_3)
+
+
 func _build_clock() -> Control:
 	var clock: Dictionary = Store.campaign["clock"]
 	var weather: Dictionary = Store.campaign["weather"]
 	var shift := CampaignSchema.shift_of(clock)
 
 	var box := UI.vbox(3)
-	box.add_child(UI.micro("In-world clock"))
+	box.add_child(UI.micro("Campaign month · %s" % Lifestyle.month_key(clock)))
 	box.add_child(UI.display(CampaignSchema.format_clock(clock), 40))
 	box.add_child(UI.micro("%s · Shift %d" % [shift["label"], int(shift["shift"])]))
 	box.add_child(UI.micro(CampaignSchema.format_date(clock), UI.MUTED_DIM))
@@ -403,8 +537,7 @@ func _build_clock() -> Control:
 		var minutes := int(pair[1])
 		button.pressed.connect(
 			func() -> void:
-				Store.campaign["clock"] = CampaignSchema.advance_clock(Store.campaign["clock"], minutes)
-				Store.mark_dirty()
+				Store.advance_clock(minutes)
 				_refresh_rail()
 		)
 		actions.add_child(button)
@@ -419,7 +552,51 @@ func _build_clock() -> Control:
 	actions.add_child(weather_button)
 	box.add_child(actions)
 
+	box.add_child(_build_month_close(clock))
+
 	return UI.margins(box, UI.GAP_3)
+
+
+## Downtime billing. Closing a month pays every character's Lifestyle for the
+## month ahead and reports who could not cover it.
+func _build_month_close(clock: Dictionary) -> Control:
+	var box := UI.vbox(3)
+	var month := Lifestyle.month_key(clock)
+	var close_button := UI.primary_button("Close month · auto-pay Lifestyles")
+	close_button.disabled = _closing_month or (Store.campaign.get("closed_months", []) as Array).has(month)
+	close_button.pressed.connect(func() -> void: _month_dialog.popup_centered())
+	box.add_child(close_button)
+
+	var report: Dictionary = Store.campaign.get("last_lifestyle_report", {})
+	if report.is_empty():
+		return box
+
+	var unpaid := int(report.get("unpaid", 0))
+	box.add_child(
+		UI.micro(
+			"Last close · %s billed · %d paid · %d unpaid"
+			% [report.get("billed_month", ""), int(report.get("paid", 0)), unpaid],
+			UI.WARN if unpaid > 0 else UI.GOOD,
+		)
+	)
+	for value in report.get("results", []):
+		var item: Dictionary = value
+		var owed := String(item.get("status", "")) == "unpaid"
+		var summary := (
+			"%s · UNPAID · %deb due · 7-day grace" % [item.get("name", "Character"), int(item.get("balance_due", 0))]
+			if owed
+			else "%s · -%deb" % [item.get("name", "Character"), int(item.get("deducted", 0))]
+		)
+		box.add_child(UI.micro(summary, UI.WARN if owed else UI.GOOD))
+	return box
+
+
+func _confirm_month_close() -> void:
+	_closing_month = true
+	_refresh_rail()
+	Store.close_month(Lifestyle.month_key(Store.campaign["clock"]))
+	_closing_month = false
+	_refresh()
 
 
 # -- inspect -------------------------------------------------------------------
@@ -1345,9 +1522,48 @@ class _MapView extends Control:
 	var _cursor := Vector2.ZERO
 	var _scale := 1.0
 	var _origin := Vector2.ZERO
+	var _backdrop: ImageTexture
+	var _backdrop_size := Vector2.ONE
+	var _backdrop_signature := 0
+	var _backdrop_opacity := 0.72
+	var _backdrop_visible := true
 
 	func _init() -> void:
 		mouse_filter = Control.MOUSE_FILTER_STOP
+
+	## The GM's own map, drawn behind the zone plates. An empty dictionary falls
+	## back to the optional map installed under data/maps, and failing that to the
+	## bare grid.
+	func set_custom_map(data: Dictionary) -> void:
+		_backdrop_opacity = clampf(float(data.get("opacity", 0.72)), 0.2, 1.0)
+		var encoded := String(data.get("png_base64", ""))
+		if encoded == "":
+			if _backdrop_signature != 0 or _backdrop == null:
+				var external := MapAsset.load_external()
+				if bool(external.get("ok", false)):
+					_adopt(external["image"])
+				else:
+					_backdrop = null
+				_backdrop_signature = 0
+			queue_redraw()
+			return
+		var signature := encoded.hash()
+		if signature != _backdrop_signature or _backdrop == null:
+			var image := MapAsset.decode(data)
+			if image == null:
+				_backdrop = null
+			else:
+				_adopt(image)
+			_backdrop_signature = signature
+		queue_redraw()
+
+	func _adopt(image: Image) -> void:
+		_backdrop = ImageTexture.create_from_image(image)
+		_backdrop_size = Vector2(image.get_width(), image.get_height())
+
+	func toggle_map() -> void:
+		_backdrop_visible = not _backdrop_visible
+		queue_redraw()
 
 	func set_areas(areas: Array, hooked: PackedStringArray) -> void:
 		_areas = areas
@@ -1585,6 +1801,18 @@ class _MapView extends Control:
 		while y < size.y:
 			draw_line(Vector2(0, y), Vector2(size.x, y), grid_colour, 1.0)
 			y += step
+
+		if _backdrop != null and _backdrop_visible:
+			# The backdrop occupies the same letterboxed rect the zones map into, so
+			# a zone drawn over a landmark stays on that landmark.
+			var fit := minf(size.x / _backdrop_size.x, size.y / _backdrop_size.y)
+			var drawn := _backdrop_size * fit
+			draw_texture_rect(
+				_backdrop,
+				Rect2((size - drawn) * 0.5, drawn),
+				false,
+				Color(1, 1, 1, _backdrop_opacity),
+			)
 
 		for area in _areas:
 			var entry: Dictionary = area

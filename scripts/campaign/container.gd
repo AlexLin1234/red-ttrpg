@@ -12,6 +12,7 @@ const MANIFEST := "manifest.json"
 const CAMPAIGN := "campaign.json"
 const ROSTER := "roster.json"
 const LOCATION_PREFIX := "locations/"
+const MAP_IMAGE := "assets/map.png"
 
 
 static func _sha256(bytes: PackedByteArray) -> String:
@@ -36,10 +37,18 @@ static func _decode(bytes: PackedByteArray, what: String) -> Variant:
 ## Write a bundle to [param path]. [param bundle] holds campaign, roster and
 ## locations; the manifest is recomputed here.
 static func save(path: String, bundle: Dictionary) -> Dictionary:
+	var campaign: Dictionary = (bundle["campaign"] as Dictionary).duplicate(true)
+	var gm_map: Dictionary = campaign.get("gm_map", {})
 	var files := {
-		CAMPAIGN: _encode(bundle["campaign"]),
 		ROSTER: _encode(bundle.get("roster", {"characters": []})),
 	}
+	var encoded_map := String(gm_map.get("png_base64", ""))
+	if encoded_map != "":
+		files[MAP_IMAGE] = Marshalls.base64_to_raw(encoded_map)
+		gm_map.erase("png_base64")
+		gm_map["image_entry"] = MAP_IMAGE
+		campaign["gm_map"] = gm_map
+	files[CAMPAIGN] = _encode(campaign)
 	for location in bundle.get("locations", []):
 		files["%s%s.json" % [LOCATION_PREFIX, String((location as Dictionary)["id"])]] = _encode(location)
 
@@ -111,9 +120,33 @@ static func load_file(path: String) -> Dictionary:
 		return {"ok": false, "error": "container has no campaign.json"}
 
 	var campaign: Variant = _decode(reader.read_file(CAMPAIGN), CAMPAIGN)
+	if typeof(campaign) == TYPE_DICTIONARY:
+		var gm_map: Dictionary = (campaign as Dictionary).get("gm_map", {})
+		var image_entry := String(gm_map.get("image_entry", ""))
+		if image_entry != "" and names.has(image_entry):
+			gm_map["png_base64"] = Marshalls.raw_to_base64(reader.read_file(image_entry))
+			(campaign as Dictionary)["gm_map"] = gm_map
 	var roster: Variant = (
 		_decode(reader.read_file(ROSTER), ROSTER) if names.has(ROSTER) else {"characters": []}
 	)
+	if typeof(campaign) != TYPE_DICTIONARY or typeof(roster) != TYPE_DICTIONARY:
+		reader.close()
+		return {"ok": false, "error": "campaign state is unreadable"}
+	var current_month: Variant = (campaign as Dictionary).get(
+		"current_month", Lifestyle.month_key((campaign as Dictionary).get("clock", {}))
+	)
+	if not Lifestyle.is_month(current_month):
+		reader.close()
+		return {"ok": false, "error": "campaign current_month must use YYYY-MM"}
+	(campaign as Dictionary)["current_month"] = current_month
+	for value in (roster as Dictionary).get("characters", []):
+		var character: Dictionary = value
+		if String(character.get("kind", "npc")) == "pc" or character.has("lifestyle"):
+			Lifestyle.ensure_character(character)
+			var problem := Lifestyle.validate_character(character)
+			if problem != "":
+				reader.close()
+				return {"ok": false, "error": "%s: %s" % [character.get("name", "character"), problem]}
 
 	var locations: Array = []
 	for name in names:

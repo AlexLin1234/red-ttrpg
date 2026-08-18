@@ -238,6 +238,40 @@ static func run(h: Harness) -> void:
 		"moved outline survived",
 	)
 
+	h.it("adopts label-only backdrop zones into areas")
+	# An earlier build kept map annotations in gm_map.zones, in 0..1 image
+	# coordinates and with no district fields. They are the same thing the zone
+	# tool now draws, so opening a campaign converts them once.
+	var legacy: Dictionary = CampaignFixtures.blackwall_sunrise()["campaign"]
+	legacy["gm_map"] = {
+		"name": "night-city.png",
+		"png_base64": "stub",
+		"zones":
+		[
+			{
+				"id": "zone-1",
+				"label": "The Glen",
+				"points": [[0.1, 0.1], [0.4, 0.1], [0.4, 0.5], [0.1, 0.5]],
+			},
+			{"id": "zone-short", "label": "Too few corners", "points": [[0.1, 0.1], [0.2, 0.2]]},
+		],
+	}
+	CampaignSchema.migrate_areas(legacy)
+	h.equal((legacy["areas"] as Array).size(), 9, "the drawn zone joined the districts")
+	var adopted := CampaignSchema.area_by_id(legacy, "zone-1")
+	h.equal(adopted["name"], "The Glen", "its label became the area name")
+	h.equal(adopted["control"], "Unclaimed", "it gained the district fields")
+	h.equal(
+		NightCity.points_of(adopted)[0], Vector2(0.1, 0.1) * NightCity.MAP_SIZE, "scaled into map units"
+	)
+	h.equal(CampaignSchema.area_by_id(legacy, "zone-short").is_empty(), true, "a 2-point zone is skipped")
+	h.equal(((legacy["gm_map"] as Dictionary)["zones"] as Array).is_empty(), true, "the old list is cleared")
+	h.equal(String((legacy["gm_map"] as Dictionary)["png_base64"]), "stub", "the backdrop image is kept")
+
+	h.it("does not re-adopt on a second open")
+	CampaignSchema.migrate_areas(legacy)
+	h.equal((legacy["areas"] as Array).size(), 9, "area count unchanged")
+
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(pin_path))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(shape_path))

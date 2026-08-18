@@ -102,6 +102,7 @@ func _drive_city(app: Control) -> void:
 		_errors.append("closing the shape did not add an area (%d -> %d)" % [before, after])
 	await _shoot("1b-new-zone")
 
+	await _drive_backdrop(screen)
 	await _drive_reshape(screen)
 	await _drive_pins(app, screen)
 
@@ -110,6 +111,36 @@ func _drive_city(app: Control) -> void:
 	if screen != null and screen.has_method("set_tab"):
 		screen.call("set_tab", "map")
 	await _settle(10)
+
+
+## An uploaded map goes behind the plates, not instead of them, so this checks a
+## real image loads and the zones still draw over it.
+func _drive_backdrop(screen: Node) -> void:
+	var source := Image.create(640, 448, false, Image.FORMAT_RGBA8)
+	source.fill(Color("1d2b1f"))
+	for x in range(0, 640, 32):
+		for y in 448:
+			source.set_pixel(x, y, Color("3f6b4a"))
+	var path := ProjectSettings.globalize_path("user://backdrop.png")
+	if source.save_png(path) != OK:
+		_errors.append("could not write the test backdrop")
+		return
+
+	screen.call("set_tab", "map")
+	screen.call("_on_map_selected", path)
+	await _settle(14)
+	var gm_map: Dictionary = Store.campaign.get("gm_map", {})
+	if not gm_map.has("png_base64"):
+		_errors.append("uploading a map did not store it in the campaign")
+	if (screen.call("area_ids") as PackedStringArray).is_empty():
+		_errors.append("the backdrop replaced the zones instead of sitting behind them")
+	await _shoot("1b-backdrop")
+
+	# Clear it again so the remaining shots show the built-in diagram.
+	Store.campaign["gm_map"] = {}
+	screen.call("_refresh")
+	await _settle(10)
+	DirAccess.remove_absolute(path)
 
 
 ## Reshaping is the other half of editing a zone: not just what it says, but

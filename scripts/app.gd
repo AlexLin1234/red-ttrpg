@@ -74,7 +74,7 @@ func _build_header() -> Control:
 	var brand := UI.display("Redline", 15)
 	row.add_child(brand)
 
-	_title_label = UI.micro("GM Console · Build 0.4.2")
+	_title_label = UI.micro("GM Console · Build 0.5.0")
 	_title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(_title_label)
 
@@ -156,7 +156,7 @@ func _refresh_header() -> void:
 		_dirty_label.add_theme_color_override("font_color", UI.WARN if Store.dirty else UI.MUTED)
 		_save_button.visible = true
 	else:
-		_title_label.text = UI._letterspace("GM CONSOLE · BUILD 0.4.2")
+		_title_label.text = UI._letterspace("GM CONSOLE · BUILD 0.5.0")
 		_dirty_label.text = UI._letterspace("Local library")
 		_save_button.visible = false
 
