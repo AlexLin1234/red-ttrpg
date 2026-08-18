@@ -18,6 +18,7 @@ const SUITES := [
 	preload("res://tests/test_lifestyle.gd"),
 	preload("res://tests/test_map_asset.gd"),
 	preload("res://tests/test_character_rules.gd"),
+	preload("res://tests/test_gear_market.gd"),
 ]
 
 
