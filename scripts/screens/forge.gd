@@ -6,7 +6,9 @@ extends Control
 ## by a screen. The cover builder alongside writes props straight into the
 ## campaign's palette, which is where screen 1C reads them from.
 
-const TABS: PackedStringArray = ["stats", "skills", "gear", "cover"]
+const TABS: PackedStringArray = [
+	"stats", "skills", "gear", "cyberware", "market", "night market", "cover"
+]
 
 const MATERIAL_COLORS := {
 	"Concrete": Color("3b434c"),
@@ -29,6 +31,7 @@ var _roster_box: VBoxContainer
 var _sheet_box: VBoxContainer
 var _tab_buttons: Dictionary = {}
 var _check_rng := Dice.SeededRandom.new(Time.get_ticks_usec())
+var _market_message := ""
 
 # Cover builder state.
 var _cover_name := "Concrete Jersey Barrier"
@@ -200,6 +203,12 @@ func _refresh_sheet() -> void:
 			_build_skills_tab(body, character)
 		"gear":
 			_build_gear_tab(body, character)
+		"cyberware":
+			_build_cyberware_tab(body, character)
+		"market":
+			_build_market_tab(body, character, false)
+		"night market":
+			_build_market_tab(body, character, true)
 		"cover":
 			var note := UI.body(
 				(
@@ -875,6 +884,130 @@ func _build_gear_tab(body: VBoxContainer, character: Dictionary) -> void:
 		cost_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(cost_label)
 		body.add_child(UI.margins(row, 3))
+
+
+func _build_market_tab(body: VBoxContainer, character: Dictionary, night: bool) -> void:
+	Lifestyle.ensure_character(character)
+	var stock: Array[Dictionary] = GearMarket.night_market(character) if night else GearMarket.CATALOG
+	var title := "Night Market" if night else "Market"
+	var note := "%deb available" % int(character.get("cash", 0))
+	body.add_child(_section_head(title, note))
+	if night:
+		if String(character.get("role_key", "")) != "fixer":
+			body.add_child(UI.body("Choose the Fixer role to use Operator contacts and open this limited market.", 12, UI.MUTED))
+			return
+		var rank := int((character.get("role_ability", {}) as Dictionary).get("rank", 0))
+		body.add_child(UI.micro("Operator Rank %d · limited to goods your contacts can source" % rank, UI.WARN))
+	else:
+		body.add_child(UI.micro("The complete built-in catalog. Purchases are immediately added to this character."))
+	if _market_message != "":
+		body.add_child(UI.body(_market_message, 12, UI.GOOD if _market_message.begins_with("Bought") else UI.ALERT_BRIGHT))
+	for product in stock:
+		body.add_child(UI.rule_line())
+		var row := UI.hbox(UI.GAP_2)
+		var description := UI.vbox(1)
+		UI.expand(description, true, false)
+		description.add_child(UI.body(String(product["name"]), 12))
+		description.add_child(UI.micro("%s · %s" % [product["kind"], product["detail"]]))
+		row.add_child(description)
+		row.add_child(UI.value("%deb" % int(product["price"]), 12))
+		var buy := UI.primary_button("Buy")
+		buy.disabled = int(character.get("cash", 0)) < int(product["price"])
+		buy.tooltip_text = "Not enough cash" if buy.disabled else "Buy and put on character"
+		buy.pressed.connect(_buy_market_item.bind(String(product["id"])))
+		row.add_child(buy)
+		body.add_child(row)
+
+
+func _buy_market_item(item_id: String) -> void:
+	var result := GearMarket.buy(Store.active_character(), item_id)
+	if bool(result.get("ok", false)):
+		_market_message = "Bought %s for %deb." % [result["item"], result["price"]]
+		Store.mark_dirty()
+	else:
+		_market_message = String(result.get("error", "Purchase failed."))
+	_refresh_sheet()
+
+
+func _build_cyberware_tab(body: VBoxContainer, character: Dictionary) -> void:
+	var spent := int(character.get("max_humanity", 0)) - int(character.get("humanity", 0))
+	body.add_child(
+		_section_head(
+			"Cyberware attachment",
+			"%d / %d Humanity · %d lost" % [character["humanity"], character["max_humanity"], spent],
+		)
+	)
+	body.add_child(
+		UI.micro("Buy implants in the Market, then attach one to a compatible empty body part. Detaching does not restore Humanity.", UI.WARN)
+	)
+	if _market_message != "":
+		var message_color := (
+			UI.GOOD
+			if _market_message.begins_with("Attached") or _market_message.begins_with("Detached")
+			else UI.ALERT_BRIGHT
+		)
+		body.add_child(UI.body(_market_message, 12, message_color))
+	var gear: Array = character.get("gear", [])
+	for part in GearMarket.BODY_PARTS:
+		var part_id := String(part["id"])
+		body.add_child(UI.rule_line())
+		var row := UI.hbox(UI.GAP_2)
+		var label := UI.body(String(part["label"]), 12)
+		label.custom_minimum_size = Vector2(90, 0)
+		row.add_child(label)
+		var installed := GearMarket.installed_at(character, part_id)
+		if installed >= 0:
+			var implant: Dictionary = gear[installed]
+			var installed_label := UI.body(
+				"%s · %d Humanity" % [implant["name"], int(implant.get("humanity_cost", 0))], 12
+			)
+			UI.expand(installed_label, true, false)
+			row.add_child(installed_label)
+			var detach := UI.plain_button("Detach")
+			detach.pressed.connect(_detach_cyberware.bind(part_id))
+			row.add_child(detach)
+		else:
+			var picker := OptionButton.new()
+			UI.expand(picker, true, false)
+			picker.add_item("Choose owned cyberware…")
+			picker.set_item_metadata(0, -1)
+			for index in gear.size():
+				var entry: Dictionary = gear[index]
+				if GearMarket.can_install(entry, part_id):
+					picker.add_item("%s · -%d Humanity" % [entry["name"], int(entry.get("humanity_cost", 0))])
+					picker.set_item_metadata(picker.item_count - 1, index)
+			row.add_child(picker)
+			var attach := UI.primary_button("Attach")
+			attach.disabled = picker.item_count == 1
+			picker.item_selected.connect(func(index: int) -> void: attach.disabled = index == 0)
+			attach.pressed.connect(_install_cyberware.bind(picker, part_id))
+			row.add_child(attach)
+		body.add_child(row)
+
+
+func _install_cyberware(picker: OptionButton, body_part: String) -> void:
+	var gear_index := int(picker.get_item_metadata(picker.selected))
+	var result := GearMarket.install_cyberware(Store.active_character(), gear_index, body_part)
+	_market_message = (
+		"Attached %s · %d Humanity lost." % [result["item"], result["humanity_loss"]]
+		if bool(result.get("ok", false))
+		else String(result.get("error", "Installation failed."))
+	)
+	if bool(result.get("ok", false)):
+		Store.mark_dirty()
+	_refresh_sheet()
+
+
+func _detach_cyberware(body_part: String) -> void:
+	var result := GearMarket.detach_cyberware(Store.active_character(), body_part)
+	_market_message = (
+		"Detached %s. Humanity is not restored." % result["item"]
+		if bool(result.get("ok", false))
+		else String(result.get("error", "Detach failed."))
+	)
+	if bool(result.get("ok", false)):
+		Store.mark_dirty()
+	_refresh_sheet()
 
 
 # -- cover builder -------------------------------------------------------------------
