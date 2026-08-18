@@ -70,10 +70,7 @@ rolls initiative.
 ten Roles, configure Role Ability ranks and specialty/allocation points, and
 build a sheet from the complete Skill catalog. Role Ability and Skill Checks
 accept situational modifiers and use the same exploding-10/fumbling-1 d10 rules
-as combat. The Market sells the complete built-in equipment catalog directly
-onto the selected character, deducting their cash and equipping weapon or armor
-profiles for combat. Fixers also receive a limited Night Market whose available
-price tiers grow with their Operator rank. The Cyberware tab attaches owned
+as combat. The Cyberware tab attaches owned
 implants to compatible body parts, applies their Humanity loss on installation,
 and leaves that loss in place when an implant is detached. Alongside stats, skills, gear,
 Humanity, armor, and cover, each
@@ -87,6 +84,17 @@ character can carry cash and one of the four Lifestyle levels:
 An affordable month close deducts the cost and records the paid-through month.
 An unaffordable payment never makes cash negative; it records the balance and a
 seven-day grace period instead.
+
+**Market / Night Market** — top-level screens that buy from the application-wide
+item database onto the selected character. Market exposes the entire database;
+Night Market restricts stock using the selected Fixer's Operator rank.
+
+**Item Workshop** — available from the starting library even before a campaign
+is opened. Browse every built-in or custom item, read its description, and make
+persistent variations by changing price and type-specific stats such as weapon
+damage dice and flat damage, armor SP, or cyberware Humanity loss. Built-ins live
+in `data/items.json` and custom variants in `user://item_variants.json`, outside
+portable campaign saves.
 
 ## Rules and owned content
 
@@ -152,10 +160,11 @@ scripts/
   encounter/         initiative, rounds, turns
   city/              zone data, the Night City seed, map images
   board/             the isometric board
-  screens/           library, city, location, forge
+  screens/           library, item workshop, city, location, forge, markets
   ui/theme.gd        palette, fonts, widget factories
 tests/               headless runner and suites
 docs/mockups/        visual design references
+data/items.json      application-wide built-in item database
 ```
 
 ## Save format

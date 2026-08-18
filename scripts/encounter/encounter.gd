@@ -122,6 +122,7 @@ func weapon(actor_id: String, weapon_name: String) -> Resolver.Weapon:
 			maxi(1, int(entry.get("magazine", 1))),
 			int(entry.get("autofire_rating", -1)),
 			quality,
+			int(entry.get("damage_bonus", 0)),
 		)
 	var profile := tables.weapon(weapon_name)
 	return Resolver.Weapon.new(
@@ -132,6 +133,7 @@ func weapon(actor_id: String, weapon_name: String) -> Resolver.Weapon:
 		maxi(1, int(profile.get("magazine", 1))),
 		int(profile.get("autofire_rating", -1)),
 		quality,
+		int(profile.get("damage_bonus", 0)),
 	)
 
 
@@ -439,6 +441,7 @@ func _weapon_view(actor_id: String, name: String, state: Dictionary) -> Dictiona
 			"jammed": bool(state["jammed"]),
 			"weapon_type": profile.weapon_type,
 			"damage_dice": profile.damage_dice,
+			"damage_bonus": profile.damage_bonus,
 			"rof": profile.rof,
 			"magazine": profile.magazine,
 			"autofire_rating": profile.autofire_rating,
@@ -450,6 +453,7 @@ func _weapon_view(actor_id: String, name: String, state: Dictionary) -> Dictiona
 		"jammed": bool(state["jammed"]),
 		"weapon_type": String(state.get("weapon_type", "unknown")),
 		"damage_dice": int(state.get("damage_dice", 0)),
+		"damage_bonus": int(state.get("damage_bonus", 0)),
 		"rof": int(state.get("rof", 1)),
 		"magazine": int(state.get("magazine", state["ammo"])),
 		"autofire_rating": int(state.get("autofire_rating", -1)),

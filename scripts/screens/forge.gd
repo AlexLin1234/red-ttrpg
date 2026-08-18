@@ -7,7 +7,7 @@ extends Control
 ## campaign's palette, which is where screen 1C reads them from.
 
 const TABS: PackedStringArray = [
-	"stats", "skills", "gear", "cyberware", "market", "night market", "cover"
+	"stats", "skills", "gear", "cyberware", "cover"
 ]
 
 const MATERIAL_COLORS := {
@@ -205,10 +205,6 @@ func _refresh_sheet() -> void:
 			_build_gear_tab(body, character)
 		"cyberware":
 			_build_cyberware_tab(body, character)
-		"market":
-			_build_market_tab(body, character, false)
-		"night market":
-			_build_market_tab(body, character, true)
 		"cover":
 			var note := UI.body(
 				(
@@ -884,49 +880,6 @@ func _build_gear_tab(body: VBoxContainer, character: Dictionary) -> void:
 		cost_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(cost_label)
 		body.add_child(UI.margins(row, 3))
-
-
-func _build_market_tab(body: VBoxContainer, character: Dictionary, night: bool) -> void:
-	Lifestyle.ensure_character(character)
-	var stock: Array[Dictionary] = GearMarket.night_market(character) if night else GearMarket.CATALOG
-	var title := "Night Market" if night else "Market"
-	var note := "%deb available" % int(character.get("cash", 0))
-	body.add_child(_section_head(title, note))
-	if night:
-		if String(character.get("role_key", "")) != "fixer":
-			body.add_child(UI.body("Choose the Fixer role to use Operator contacts and open this limited market.", 12, UI.MUTED))
-			return
-		var rank := int((character.get("role_ability", {}) as Dictionary).get("rank", 0))
-		body.add_child(UI.micro("Operator Rank %d · limited to goods your contacts can source" % rank, UI.WARN))
-	else:
-		body.add_child(UI.micro("The complete built-in catalog. Purchases are immediately added to this character."))
-	if _market_message != "":
-		body.add_child(UI.body(_market_message, 12, UI.GOOD if _market_message.begins_with("Bought") else UI.ALERT_BRIGHT))
-	for product in stock:
-		body.add_child(UI.rule_line())
-		var row := UI.hbox(UI.GAP_2)
-		var description := UI.vbox(1)
-		UI.expand(description, true, false)
-		description.add_child(UI.body(String(product["name"]), 12))
-		description.add_child(UI.micro("%s · %s" % [product["kind"], product["detail"]]))
-		row.add_child(description)
-		row.add_child(UI.value("%deb" % int(product["price"]), 12))
-		var buy := UI.primary_button("Buy")
-		buy.disabled = int(character.get("cash", 0)) < int(product["price"])
-		buy.tooltip_text = "Not enough cash" if buy.disabled else "Buy and put on character"
-		buy.pressed.connect(_buy_market_item.bind(String(product["id"])))
-		row.add_child(buy)
-		body.add_child(row)
-
-
-func _buy_market_item(item_id: String) -> void:
-	var result := GearMarket.buy(Store.active_character(), item_id)
-	if bool(result.get("ok", false)):
-		_market_message = "Bought %s for %deb." % [result["item"], result["price"]]
-		Store.mark_dirty()
-	else:
-		_market_message = String(result.get("error", "Purchase failed."))
-	_refresh_sheet()
 
 
 func _build_cyberware_tab(body: VBoxContainer, character: Dictionary) -> void:

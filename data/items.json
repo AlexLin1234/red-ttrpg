@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "items": [
+    {"id":"agent","name":"Pocket Agent","kind":"electronics","description":"A pocket personal communicator.","price":100},
+    {"id":"audio_recorder","name":"Audio Recorder","kind":"electronics","description":"A compact field recorder.","price":50},
+    {"id":"binoculars","name":"Smart Binoculars","kind":"gear","description":"Low-light magnified optics.","price":100},
+    {"id":"carryall","name":"Carryall","kind":"gear","description":"A weatherproof equipment bag.","price":20},
+    {"id":"flashlight","name":"Tactical Flashlight","kind":"gear","description":"A rechargeable utility light.","price":20},
+    {"id":"medscanner","name":"Medscanner","kind":"medical","description":"A portable diagnostic scanner.","price":500},
+    {"id":"tech_tool","name":"Tech Tool","kind":"tool","description":"An electronic and mechanical toolkit.","price":100},
+    {"id":"grapple","name":"Grapple Launcher","kind":"gear","description":"A powered launcher with climbing line.","price":500},
+    {"id":"light_sidearm","name":"Light Sidearm","kind":"weapon","description":"A compact, easy-to-carry pistol.","price":100,"weapon":{"weapon_type":"pistol","damage_dice":2,"damage_bonus":0,"rof":2,"ammo":12,"magazine":12,"autofire_rating":-1}},
+    {"id":"heavy_sidearm","name":"Heavy Sidearm","kind":"weapon","description":"A hard-hitting service pistol.","price":500,"weapon":{"weapon_type":"pistol","damage_dice":3,"damage_bonus":0,"rof":2,"ammo":8,"magazine":8,"autofire_rating":-1}},
+    {"id":"compact_smg","name":"Compact SMG","kind":"weapon","description":"A concealable automatic weapon.","price":500,"weapon":{"weapon_type":"smg","damage_dice":2,"damage_bonus":0,"rof":1,"ammo":30,"magazine":30,"autofire_rating":3}},
+    {"id":"assault_carbine","name":"Assault Carbine","kind":"weapon","description":"A versatile automatic rifle.","price":1000,"weapon":{"weapon_type":"assault_rifle","damage_dice":4,"damage_bonus":0,"rof":1,"ammo":25,"magazine":25,"autofire_rating":4}},
+    {"id":"precision_rifle","name":"Precision Rifle","kind":"weapon","description":"A long-range precision weapon.","price":5000,"weapon":{"weapon_type":"sniper_rifle","damage_dice":5,"damage_bonus":0,"rof":1,"ammo":4,"magazine":4,"autofire_rating":-1}},
+    {"id":"light_armor","name":"Light Armor Jacket","kind":"armor","description":"Flexible protection for the torso.","price":500,"armor":{"location":"body","sp":11}},
+    {"id":"helmet","name":"Ballistic Helmet","kind":"armor","description":"Armored protection for the head.","price":500,"armor":{"location":"head","sp":11}},
+    {"id":"neural_link","name":"Neural Link","kind":"cyberware","description":"A neural interface foundation.","price":500,"humanity_cost":7,"body_parts":["head"]},
+    {"id":"cybereye","name":"Cybereye","kind":"cyberware","description":"An optical implant platform.","price":500,"humanity_cost":7,"body_parts":["eyes"]},
+    {"id":"cyberaudio","name":"Cyberaudio Suite","kind":"cyberware","description":"An auditory implant platform.","price":500,"humanity_cost":7,"body_parts":["ears"]},
+    {"id":"reflex_booster","name":"Reflex Booster","kind":"cyberware","description":"An experimental reaction implant.","price":5000,"humanity_cost":14,"body_parts":["torso"]},
+    {"id":"cyberarm","name":"Cyberarm","kind":"cyberware","description":"A full replacement arm.","price":500,"humanity_cost":7,"body_parts":["left_arm","right_arm"]},
+    {"id":"subdermal_grip","name":"Subdermal Grip","kind":"cyberware","description":"A palm-mounted neural weapon link.","price":500,"humanity_cost":3,"body_parts":["left_hand","right_hand"]},
+    {"id":"cyberleg","name":"Cyberleg","kind":"cyberware","description":"A full replacement leg.","price":500,"humanity_cost":7,"body_parts":["left_leg","right_leg"]}
+  ]
+}

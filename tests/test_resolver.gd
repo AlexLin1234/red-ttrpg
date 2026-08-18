@@ -111,6 +111,15 @@ static func run(h: Harness) -> void:
 	var tail := _kinds(through).slice(_kinds(through).size() - 2)
 	h.equal(tail, PackedStringArray(["armor_ablated", "damage_taken"]), "trailing events")
 
+	h.it("adds a workshop weapon's flat damage bonus")
+	var custom_weapon := Resolver.Weapon.new("Custom Pistol", "pistol", 1, 1, 8, -1, "standard", 5)
+	var custom_hit := Resolver.resolve_attack(
+		_request({"weapon": custom_weapon, "target": _target({"armor": {"body": 0}})}),
+		_tables(),
+		_rng([8, 3]),
+	)
+	h.equal(custom_hit.raw_damage, 8, "1d6 + 5 damage")
+
 	h.it("applies the head multiplier after armor")
 	var head_shot := Resolver.resolve_attack(
 		_request({"location": "head", "mode": "aimed", "attack_base": 20}),
