@@ -22,9 +22,9 @@ Store="*res://scripts/campaign/store.gd"
 
 window/size/viewport_width=1600
 window/size/viewport_height=980
-window/size/window_width_override=1440
-window/size/window_height_override=900
-window/stretch/mode="canvas_items"
+window/size/window_width_override=1600
+window/size/window_height_override=980
+window/stretch/mode="disabled"
 window/stretch/aspect="expand"
 
 [input]
