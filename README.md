@@ -70,7 +70,13 @@ rolls initiative.
 ten Roles, configure Role Ability ranks and specialty/allocation points, and
 build a sheet from the complete Skill catalog. Role Ability and Skill Checks
 accept situational modifiers and use the same exploding-10/fumbling-1 d10 rules
-as combat. Alongside stats, skills, gear, Humanity, armor, and cover, each
+as combat. The Market sells the complete built-in equipment catalog directly
+onto the selected character, deducting their cash and equipping weapon or armor
+profiles for combat. Fixers also receive a limited Night Market whose available
+price tiers grow with their Operator rank. The Cyberware tab attaches owned
+implants to compatible body parts, applies their Humanity loss on installation,
+and leaves that loss in place when an implant is detached. Alongside stats, skills, gear,
+Humanity, armor, and cover, each
 character can carry cash and one of the four Lifestyle levels:
 
 - Kibble — 100eb/month
