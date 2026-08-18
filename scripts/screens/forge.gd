@@ -28,6 +28,7 @@ var _tab := "stats"
 var _roster_box: VBoxContainer
 var _sheet_box: VBoxContainer
 var _tab_buttons: Dictionary = {}
+var _check_rng := Dice.SeededRandom.new(Time.get_ticks_usec())
 
 # Cover builder state.
 var _cover_name := "Concrete Jersey Barrier"
@@ -176,6 +177,7 @@ func _refresh_sheet() -> void:
 	if character.is_empty():
 		_sheet_box.add_child(UI.margins(UI.micro("No character selected"), UI.GAP_4))
 		return
+	CharacterRules.ensure_character(character)
 
 	_sheet_box.add_child(_build_sheet_head(character))
 	_sheet_box.add_child(UI.rule_line())
@@ -310,6 +312,8 @@ func _section_head(title: String, note: String) -> Control:
 
 
 func _build_stats_tab(body: VBoxContainer, character: Dictionary) -> void:
+	_build_role_section(body, character)
+	body.add_child(UI.rule_line())
 	var stats: Dictionary = character["stats"]
 	body.add_child(
 		_section_head("Stats", "%d points spent" % CampaignSchema.points_spent(stats))
@@ -374,13 +378,239 @@ func _build_stats_tab(body: VBoxContainer, character: Dictionary) -> void:
 		armor_grid.add_child(tile)
 
 
+func _build_role_section(body: VBoxContainer, character: Dictionary) -> void:
+	var role_key := String(character.get("role_key", ""))
+	var profile := CharacterRules.role(role_key)
+	var ability: Dictionary = character.get("role_ability", {})
+	body.add_child(_section_head("Role & ability", "Starting Role Ability rank · 4"))
+
+	var editor := UI.hbox(UI.GAP_2)
+	var picker := OptionButton.new()
+	UI.expand(picker, true, false)
+	picker.add_item("Choose a role…")
+	picker.set_item_metadata(0, "")
+	for index in CharacterRules.ROLES.size():
+		var entry: Dictionary = CharacterRules.ROLES[index]
+		picker.add_item("%s · %s" % [entry["name"], entry["ability"]])
+		picker.set_item_metadata(index + 1, entry["key"])
+		if String(entry["key"]) == role_key:
+			picker.select(index + 1)
+	picker.item_selected.connect(
+		func(index: int) -> void:
+			CharacterRules.select_role(
+				Store.active_character(), String(picker.get_item_metadata(index))
+			)
+			Store.mark_dirty()
+			_refresh_roster()
+			_refresh_sheet()
+	)
+	editor.add_child(picker)
+
+	var rank := SpinBox.new()
+	rank.min_value = 1
+	rank.max_value = 10
+	rank.value = maxi(1, int(ability.get("rank", 4)))
+	rank.prefix = "Rank "
+	rank.custom_minimum_size = Vector2(110, 0)
+	rank.editable = not profile.is_empty()
+	rank.value_changed.connect(
+		func(value: float) -> void:
+			CharacterRules.set_role_rank(Store.active_character(), int(value))
+			Store.mark_dirty()
+			_refresh_sheet()
+	)
+	editor.add_child(rank)
+	body.add_child(editor)
+
+	if profile.is_empty():
+		body.add_child(UI.micro("Choose one of the ten Roles to configure its Role Ability."))
+		return
+
+	var summary := UI.body(String(profile["summary"]), 11, UI.MUTED)
+	summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	summary.clip_text = false
+	body.add_child(summary)
+	for effect in CharacterRules.role_effects(character):
+		body.add_child(UI.micro(String(effect), UI.ACCENT))
+
+	_build_role_allocations(body, character)
+	_build_role_roller(body, character)
+
+
+func _build_role_allocations(body: VBoxContainer, character: Dictionary) -> void:
+	var role_key := String(character.get("role_key", ""))
+	var ability: Dictionary = character["role_ability"]
+	var rank := int(ability["rank"])
+	var options: Dictionary = ability["options"]
+	var fields: Array[Dictionary] = []
+	if role_key == "solo":
+		for key in CharacterRules.SOLO_ALLOCATIONS:
+			var definition: Dictionary = CharacterRules.SOLO_ALLOCATIONS[key]
+			fields.append(
+				{
+					"key": key,
+					"label": definition["label"],
+					"step": definition["step"],
+					"maximum": rank,
+				}
+			)
+	elif role_key == "tech":
+		for key in CharacterRules.MAKER_SPECIALTIES:
+			fields.append(
+				{
+					"key": key,
+					"label": CharacterRules.MAKER_SPECIALTIES[key],
+					"step": 1,
+					"maximum": rank,
+				}
+			)
+	elif role_key == "medtech":
+		fields = [
+			{"key": "surgery", "label": "Surgery", "step": 1, "maximum": 5},
+			{"key": "pharmaceuticals", "label": "Pharmaceuticals", "step": 1, "maximum": 5},
+			{"key": "cryosystems", "label": "Cryosystem Operation", "step": 1, "maximum": 5},
+		]
+	if fields.is_empty():
+		return
+
+	var budget := CharacterRules.role_option_budget(character)
+	body.add_child(
+		_section_head(
+			"Ability allocation", "%d / %d points" % [budget["spent"], budget["maximum"]]
+		)
+	)
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", UI.GAP_2)
+	grid.add_theme_constant_override("v_separation", UI.GAP_1)
+	body.add_child(grid)
+	for field in fields:
+		var row := UI.hbox(UI.GAP_2)
+		UI.expand(row, true, false)
+		var label := UI.micro(String(field["label"]))
+		UI.expand(label, true, false)
+		row.add_child(label)
+		var spin := SpinBox.new()
+		spin.min_value = 0
+		spin.max_value = int(field["maximum"])
+		spin.step = int(field["step"])
+		spin.value = int(options.get(String(field["key"]), 0))
+		spin.custom_minimum_size = Vector2(76, 0)
+		var option_key := String(field["key"])
+		spin.value_changed.connect(
+			func(value: float) -> void:
+				if CharacterRules.set_role_option(
+					Store.active_character(), option_key, int(value)
+				):
+					Store.mark_dirty()
+					_refresh_sheet()
+				else:
+					spin.set_value_no_signal(
+						int(
+							(
+								Store.active_character()["role_ability"]["options"]
+								as Dictionary
+							).get(option_key, 0)
+						)
+					)
+		)
+		row.add_child(spin)
+		grid.add_child(row)
+
+
+func _build_role_roller(body: VBoxContainer, character: Dictionary) -> void:
+	var options := CharacterRules.role_roll_options(character)
+	body.add_child(UI.rule_line())
+	body.add_child(_section_head("Role Ability check", "Modifiers are cumulative"))
+	if options.is_empty():
+		body.add_child(
+			UI.micro(
+				"This ability grants persistent or allocated effects; it does not use a Role Ability roll."
+			)
+		)
+		return
+
+	var row := UI.hbox(UI.GAP_2)
+	var action := OptionButton.new()
+	UI.expand(action, true, false)
+	for index in options.size():
+		var option: Dictionary = options[index]
+		action.add_item(String(option["label"]))
+		action.set_item_metadata(index, option)
+	row.add_child(action)
+	var modifier := _modifier_spin()
+	row.add_child(modifier)
+	var dv := _dv_spin(0)
+	dv.tooltip_text = "0 uses the Role Ability's built-in DV or makes an open check."
+	row.add_child(dv)
+	var roll := UI.primary_button("Roll")
+	row.add_child(roll)
+	body.add_child(row)
+	var result := UI.body("No Role Ability check rolled yet.", 11, UI.MUTED)
+	body.add_child(result)
+	roll.pressed.connect(
+		func() -> void:
+			var rolled := CharacterRules.roll_role(
+				Store.active_character(),
+				action.get_item_metadata(action.selected),
+				int(modifier.value),
+				int(dv.value),
+				_check_rng,
+			)
+			_show_roll_result(result, rolled)
+	)
+
+
 func _build_skills_tab(body: VBoxContainer, character: Dictionary) -> void:
-	body.add_child(_section_head("Skills", "Level + stat = total"))
+	CharacterRules.ensure_character(character)
 	var stats: Dictionary = character["stats"]
 	var skills: Array = character.get("skills", [])
+	body.add_child(
+		_section_head(
+			"Skill checks",
+			"%d points recorded · STAT + Skill + 1d10" % CharacterRules.skill_points(character),
+		)
+	)
+	var check_row := UI.hbox(UI.GAP_2)
+	var selected := OptionButton.new()
+	UI.expand(selected, true, false)
+	for index in skills.size():
+		var listed: Dictionary = skills[index]
+		selected.add_item(
+			"%s · %s +%d"
+			% [listed["name"], listed["stat"], CampaignSchema.skill_total(stats, listed)]
+		)
+		selected.set_item_metadata(index, listed["name"])
 	if skills.is_empty():
-		body.add_child(UI.micro("No skills recorded."))
-		return
+		selected.add_item("Add a Skill to roll")
+		selected.disabled = true
+	check_row.add_child(selected)
+	var modifier := _modifier_spin()
+	check_row.add_child(modifier)
+	var dv := _dv_spin(13)
+	check_row.add_child(dv)
+	var roll := UI.primary_button("Roll")
+	roll.disabled = skills.is_empty()
+	check_row.add_child(roll)
+	body.add_child(check_row)
+	var result := UI.body("No Skill Check rolled yet.", 11, UI.MUTED)
+	body.add_child(result)
+	roll.pressed.connect(
+		func() -> void:
+			var rolled := CharacterRules.roll_skill(
+				Store.active_character(),
+				String(selected.get_item_metadata(selected.selected)),
+				int(modifier.value),
+				int(dv.value),
+				_check_rng,
+			)
+			_show_roll_result(result, rolled)
+	)
+
+	body.add_child(UI.rule_line())
+	body.add_child(_section_head("Chosen Skills", "Basic Skills stay at Level 2 or higher"))
+	if skills.is_empty():
+		body.add_child(UI.micro("No Skills selected."))
 	for skill in skills:
 		var entry: Dictionary = skill
 		body.add_child(UI.rule_line())
@@ -388,16 +618,135 @@ func _build_skills_tab(body: VBoxContainer, character: Dictionary) -> void:
 		var name_label := UI.body(String(entry["name"]), 12)
 		UI.expand(name_label, true, false)
 		row.add_child(name_label)
-		row.add_child(UI.micro(String(entry["stat"])))
-		var level := UI.value(str(int(entry["level"])), 11)
-		level.custom_minimum_size = Vector2(30, 0)
-		level.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		row.add_child(
+			UI.micro(
+				"%s%s" % [entry["stat"], " · x2" if bool(entry.get("x2", false)) else ""]
+			)
+		)
+		var level := SpinBox.new()
+		level.min_value = 2 if CharacterRules.BASIC_SKILLS.has(String(entry["name"])) else 0
+		level.max_value = 10
+		level.value = int(entry["level"])
+		level.prefix = "Lv "
+		level.custom_minimum_size = Vector2(88, 0)
 		row.add_child(level)
 		var total := UI.value("+%d" % CampaignSchema.skill_total(stats, entry), 11, UI.ACCENT)
 		total.custom_minimum_size = Vector2(40, 0)
 		total.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(total)
+		level.value_changed.connect(
+			func(value: float) -> void:
+				entry["level"] = int(value)
+				total.text = "+%d" % CampaignSchema.skill_total(
+					Store.active_character()["stats"], entry
+				)
+				Store.mark_dirty()
+		)
+		var remove := UI.plain_button("Remove")
+		remove.disabled = CharacterRules.BASIC_SKILLS.has(String(entry["name"]))
+		remove.tooltip_text = "Basic Skills are required." if remove.disabled else "Remove this Skill."
+		remove.pressed.connect(
+			func() -> void:
+				if CharacterRules.remove_skill(
+					Store.active_character(), String(entry["name"])
+				):
+					Store.mark_dirty()
+					_refresh_sheet()
+		)
+		row.add_child(remove)
 		body.add_child(UI.margins(row, 3))
+
+	body.add_child(UI.rule_line())
+	body.add_child(_section_head("Add a Skill", "x2 Skills cost twice as many points"))
+	var add_row := UI.hbox(UI.GAP_2)
+	var add_picker := OptionButton.new()
+	UI.expand(add_picker, true, false)
+	var available: Array[Dictionary] = []
+	for definition in CharacterRules.SKILLS:
+		var base_name := String((definition as Dictionary)["name"])
+		if bool((definition as Dictionary).get("specialized", false)) or CharacterRules.selected_skill(
+			character, base_name
+		).is_empty():
+			available.append(definition)
+	for index in available.size():
+		var definition: Dictionary = available[index]
+		add_picker.add_item(
+			"%s · %s%s"
+			% [
+				definition["name"],
+				definition["stat"],
+				" · x2" if bool(definition.get("x2", false)) else "",
+			]
+		)
+		add_picker.set_item_metadata(index, definition)
+	add_row.add_child(add_picker)
+	var specialty := LineEdit.new()
+	specialty.placeholder_text = "Specialty"
+	specialty.custom_minimum_size = Vector2(135, 0)
+	add_row.add_child(specialty)
+	var new_level := SpinBox.new()
+	new_level.min_value = 0
+	new_level.max_value = 10
+	new_level.value = 0
+	new_level.prefix = "Lv "
+	new_level.custom_minimum_size = Vector2(88, 0)
+	add_row.add_child(new_level)
+	var add_button := UI.primary_button("Add")
+	add_row.add_child(add_button)
+	body.add_child(add_row)
+	var add_status := UI.micro("Specialized Skills require a subject.")
+	body.add_child(add_status)
+	var refresh_specialty := func(index: int) -> void:
+		var definition: Dictionary = add_picker.get_item_metadata(index)
+		specialty.editable = bool(definition.get("specialized", false))
+		if not specialty.editable:
+			specialty.text = ""
+	refresh_specialty.call(0)
+	add_picker.item_selected.connect(refresh_specialty)
+	add_button.pressed.connect(
+		func() -> void:
+			var definition: Dictionary = add_picker.get_item_metadata(add_picker.selected)
+			if CharacterRules.add_skill(
+				Store.active_character(),
+				String(definition["name"]),
+				int(new_level.value),
+				specialty.text,
+			):
+				Store.mark_dirty()
+				_refresh_sheet()
+			else:
+				add_status.text = "Choose a specialty or select a Skill not already on the sheet."
+				add_status.add_theme_color_override("font_color", UI.WARN)
+	)
+
+
+func _modifier_spin() -> SpinBox:
+	var modifier := SpinBox.new()
+	modifier.min_value = -20
+	modifier.max_value = 20
+	modifier.value = 0
+	modifier.prefix = "Mod "
+	modifier.custom_minimum_size = Vector2(100, 0)
+	return modifier
+
+
+func _dv_spin(initial: int) -> SpinBox:
+	var dv := SpinBox.new()
+	dv.min_value = 0
+	dv.max_value = 40
+	dv.value = initial
+	dv.prefix = "DV "
+	dv.custom_minimum_size = Vector2(92, 0)
+	return dv
+
+
+func _show_roll_result(label: Label, result: Dictionary) -> void:
+	label.text = CharacterRules.format_result(result)
+	var color := UI.WARN
+	if bool(result.get("ok", false)):
+		var success: Variant = result.get("success", null)
+		color = UI.ACCENT if success == null else (UI.GOOD if bool(success) else UI.ALERT_BRIGHT)
+	label.add_theme_color_override("font_color", color)
 
 
 func _build_gear_tab(body: VBoxContainer, character: Dictionary) -> void:
@@ -724,15 +1073,17 @@ func _refresh_cover() -> void:
 
 
 func _blank_character() -> Dictionary:
-	return {
+	var character := {
 		"id": "character-%d" % Time.get_ticks_usec(),
 		"name": "New Character",
 		"role": "Unset",
-		"kind": "npc",
-		"side": "neutral",
-		"tags": ["NPC"],
+		"role_key": "",
+		"role_ability": {"name": "", "rank": 0, "options": {}},
+		"kind": "pc",
+		"side": "party",
+		"tags": ["PC"],
 		"stats": CampaignSchema.empty_stats(),
-		"skills": [],
+		"skills": CharacterRules.new_character_skills(),
 		"gear": [],
 		"armor": CampaignSchema.empty_armor(),
 		"hp": 30,
@@ -748,6 +1099,8 @@ func _blank_character() -> Dictionary:
 		"last_lifestyle_charge": null,
 		"weapons": [],
 	}
+	CharacterRules.ensure_character(character)
+	return character
 
 
 func _roll_mook() -> Dictionary:

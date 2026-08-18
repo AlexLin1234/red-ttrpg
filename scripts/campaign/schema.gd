@@ -5,7 +5,7 @@ extends RefCounted
 ## calculations the sheets and headers share.
 
 const SAVE_FORMAT := "redline-campaign"
-const SAVE_VERSION := "0.6"
+const SAVE_VERSION := "0.7"
 
 const STAT_KEYS: PackedStringArray = [
 	"INT", "REF", "DEX", "TECH", "COOL", "WILL", "LUCK", "MOVE", "BODY", "EMP"

@@ -134,6 +134,7 @@ func _normalize_downtime_state() -> void:
 		campaign["closed_months"] = campaign["lifestyle_closed_months"]
 	for value in characters():
 		var character: Dictionary = value
+		CharacterRules.ensure_character(character)
 		if String(character.get("kind", "npc")) == "pc" or character.has("lifestyle"):
 			Lifestyle.ensure_character(character)
 
@@ -283,6 +284,7 @@ func cover_by_id(id: String) -> Dictionary:
 
 
 func add_character(character: Dictionary) -> void:
+	CharacterRules.ensure_character(character)
 	Lifestyle.ensure_character(character)
 	(roster["characters"] as Array).insert(0, character)
 	active_character_id = String(character["id"])

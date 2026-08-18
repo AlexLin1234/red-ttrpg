@@ -141,6 +141,7 @@ static func load_file(path: String) -> Dictionary:
 	(campaign as Dictionary)["current_month"] = current_month
 	for value in (roster as Dictionary).get("characters", []):
 		var character: Dictionary = value
+		CharacterRules.ensure_character(character)
 		if String(character.get("kind", "npc")) == "pc" or character.has("lifestyle"):
 			Lifestyle.ensure_character(character)
 			var problem := Lifestyle.validate_character(character)

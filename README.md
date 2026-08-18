@@ -64,9 +64,12 @@ month. **Close month** is available when the GM wants to advance explicitly.
 placement, initiative, combat resolution, cover raycasts, and exact event-based
 undo.
 
-**Forge** — edits PCs, NPCs, and mook templates. Alongside stats, skills, gear,
-Humanity, armor, and cover, each character can carry cash and one of the four
-Lifestyle levels:
+**Forge** — edits PCs, NPCs, and mook templates. Players can choose any of the
+ten Roles, configure Role Ability ranks and specialty/allocation points, and
+build a sheet from the complete Skill catalog. Role Ability and Skill Checks
+accept situational modifiers and use the same exploding-10/fumbling-1 d10 rules
+as combat. Alongside stats, skills, gear, Humanity, armor, and cover, each
+character can carry cash and one of the four Lifestyle levels:
 
 - Kibble — 100eb/month
 - Generic Prepak — 300eb/month
