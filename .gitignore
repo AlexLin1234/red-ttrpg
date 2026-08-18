@@ -17,6 +17,8 @@ data/maps/*.pdf
 data/chunks.jsonl
 data/rules.db
 data/tables/
+# Item catalog extracted from a user-owned rulebook by scripts/extract_items.py.
+data/items_local.json
 
 # Build output
 build/

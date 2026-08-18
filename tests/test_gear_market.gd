@@ -16,7 +16,7 @@ static func run(h: Harness) -> void:
 	var catalog := _catalog()
 	h.describe("character markets")
 	h.it("offers every catalog item in the full market")
-	h.equal(catalog.size(), 22, "complete built-in catalog")
+	h.equal(catalog.size(), 57, "complete built-in catalog")
 
 	h.it("pays for purchases and puts equipment on the character")
 	var buyer := _character()
@@ -25,7 +25,7 @@ static func run(h: Harness) -> void:
 	h.equal(buyer["cash"], 5500, "cash deducted")
 	h.equal(buyer["gear"][0]["name"], "Heavy Sidearm", "inventory updated")
 	h.equal(buyer["weapons"][0]["damage_dice"], 3, "combat weapon equipped")
-	GearMarket.buy(buyer, catalog, "helmet")
+	GearMarket.buy(buyer, catalog, "light_plate_head")
 	h.equal(buyer["armor"]["head"]["sp"], 11, "armor equipped")
 
 	h.it("rejects an unaffordable purchase without changing the character")

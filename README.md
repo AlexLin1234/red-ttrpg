@@ -164,8 +164,29 @@ scripts/
   ui/theme.gd        palette, fonts, widget factories
 tests/               headless runner and suites
 docs/mockups/        visual design references
-data/items.json      application-wide built-in item database
+data/items.json      homebrew placeholder item catalog (shipped)
+data/items_local.json  rulebook-derived catalog, git-ignored, replaces the above
 ```
+
+## Private item catalog
+
+`data/items.json` ships **homebrew placeholders**, exactly as `tables_default.gd`
+does for the rules tables, so the app boots with a usable catalog. Its weapon and
+armor names and stats deliberately match the rows in `tables_default.gd`, so a
+purchased weapon resolves the same way its table row does.
+
+A GM who owns the rulebook can build their own catalog from their own copy:
+
+```bash
+python scripts/extract_items.py --pdf "/input/Cyberpunk Red.pdf"
+```
+
+That writes `data/items_local.json`, which is git-ignored and, when present,
+replaces the placeholders at runtime rather than sitting beside them as
+near-duplicates. The Market header shows which catalog is loaded. Every row is
+validated on load — an unknown weapon type, an autofire rating on a weapon with
+no autofire range band, a bad armor location or an unknown cyberware body part is
+dropped with a warning instead of asserting later inside the resolver.
 
 ## Save format
 

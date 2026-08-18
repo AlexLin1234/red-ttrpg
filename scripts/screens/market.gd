@@ -34,7 +34,19 @@ func _rebuild() -> void:
 	if night and String(character.get("role_key", "")) != "fixer":
 		_body.add_child(UI.body("The selected character must be a Fixer to source Night Market stock.", 12, UI.WARN))
 		return
-	_body.add_child(UI.micro("Operator-limited stock from the global item database." if night else "Every item in the global item database."))
+	_body.add_child(
+		UI.micro(
+			"%s · %s"
+			% [
+				(
+					"Operator-limited stock from the global item database."
+					if night
+					else "Every item in the global item database."
+				),
+				ItemDB.source_label(),
+			]
+		)
+	)
 	if _message != "":
 		_body.add_child(UI.body(_message, 12, UI.GOOD if _message.begins_with("Bought") else UI.ALERT_BRIGHT))
 	var scroll := ScrollContainer.new()
