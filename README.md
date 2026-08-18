@@ -62,7 +62,9 @@ month. **Close month** is available when the GM wants to advance explicitly.
 
 **Location** — provides an isometric encounter board with tile, prop, and unit
 placement, initiative, combat resolution, cover raycasts, and exact event-based
-undo.
+undo. During setup, tokens can be dragged directly around the board and the
+selected character can make Skill Checks with modifiers and a DV before anyone
+rolls initiative.
 
 **Forge** — edits PCs, NPCs, and mook templates. Players can choose any of the
 ten Roles, configure Role Ability ranks and specialty/allocation points, and
