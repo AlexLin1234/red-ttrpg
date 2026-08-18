@@ -27,6 +27,9 @@ var _palette_tab := "units"
 var _selected_unit := ""
 var _hover_cell: Dictionary = {}
 var _message := "Roll initiative to begin the round."
+var _drag_unit := ""
+var _skill_result := "Choose a skill for a check before combat."
+var _check_rng := Dice.SeededRandom.new(Time.get_ticks_usec())
 
 var _palette_box: VBoxContainer
 var _initiative_box: VBoxContainer
@@ -292,9 +295,12 @@ func _on_board_input(event: InputEvent) -> void:
 		return
 
 	if event is InputEventMouseMotion:
-		var pick := _board.pick((event as InputEventMouseMotion).position)
+		var motion := event as InputEventMouseMotion
+		var pick := _board.pick(motion.position)
 		_hover_cell = pick.get("cell", {}) if not pick.is_empty() else {}
 		_board.set_hover_cell(_hover_cell)
+		if _drag_unit != "" and _is_setup() and not _hover_cell.is_empty():
+			_move_unit(_drag_unit, _hover_cell, false)
 		if _tool == "blast":
 			_board.show_blast_preview(_hover_cell, BLAST_RADIUS_M)
 		return
@@ -302,6 +308,11 @@ func _on_board_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var button := event as InputEventMouseButton
 		if not button.pressed:
+			if button.button_index == MOUSE_BUTTON_LEFT and _drag_unit != "":
+				_drag_unit = ""
+				Store.mark_dirty()
+				_message = "Position updated."
+				_refresh_card()
 			return
 		if button.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_board.set_zoom_delta(-2.0)
@@ -315,6 +326,8 @@ func _on_board_input(event: InputEvent) -> void:
 		var pick := _board.pick(button.position)
 		if pick.is_empty():
 			return
+		if _is_setup() and _pending_place.is_empty() and String(pick.get("kind", "")) == "unit":
+			_drag_unit = String(pick["id"])
 		_handle_click(pick)
 
 
@@ -393,7 +406,7 @@ func _place(cell: Dictionary) -> void:
 	_refresh()
 
 
-func _move_unit(unit_id: String, cell: Dictionary) -> void:
+func _move_unit(unit_id: String, cell: Dictionary, commit := true) -> void:
 	var location := Store.active_location()
 	for unit in location["units"]:
 		var entry: Dictionary = unit
@@ -401,9 +414,15 @@ func _move_unit(unit_id: String, cell: Dictionary) -> void:
 			entry["x"] = int(cell["x"])
 			entry["z"] = int(cell["z"])
 			entry["layer"] = int(cell.get("layer", 0))
-	Store.mark_dirty()
+	if commit:
+		Store.mark_dirty()
 	_sync_units()
-	_refresh()
+	if commit:
+		_refresh()
+
+
+func _is_setup() -> bool:
+	return int(_snapshot.get("round", 0)) == 0
 
 
 # -- combat -------------------------------------------------------------------------
@@ -861,6 +880,9 @@ func _refresh_selected() -> void:
 		grid.add_child(tile)
 	_selected_box.add_child(UI.margins(grid, UI.GAP_2))
 
+	if _is_setup():
+		_build_setup_skill_check()
+
 	_selected_box.add_child(UI.margins(UI.micro("Actions this turn"), UI.GAP_2))
 	var actions := UI.vbox(1)
 	var spent: Array = (_snapshot.get("actions_taken", {}) as Dictionary).get(_selected_unit, [])
@@ -876,6 +898,99 @@ func _refresh_selected() -> void:
 	)
 	actions.add_child(_action_row("Aimed shot · head", "−8 DV", false))
 	_selected_box.add_child(UI.margins(actions, UI.GAP_2))
+
+
+func _selected_character() -> Dictionary:
+	for unit in Store.active_location().get("units", []):
+		var entry: Dictionary = unit
+		if String(entry["id"]) == _selected_unit:
+			return Store.character_by_id(String(entry["character_id"]))
+	return {}
+
+
+func _build_setup_skill_check() -> void:
+	var character := _selected_character()
+	if character.is_empty():
+		return
+	CharacterRules.ensure_character(character)
+	var skills: Array = character.get("skills", [])
+	_selected_box.add_child(UI.rule_line())
+	_selected_box.add_child(UI.margins(UI.micro("Setup skill check"), UI.GAP_2))
+	var row := UI.hbox(UI.GAP_2)
+	var selected := OptionButton.new()
+	UI.expand(selected, true, false)
+	for index in skills.size():
+		var skill: Dictionary = skills[index]
+		selected.add_item(String(skill["name"]))
+		selected.set_item_metadata(index, String(skill["name"]))
+	if skills.is_empty():
+		selected.add_item("No skills")
+		selected.disabled = true
+	row.add_child(selected)
+	var modifier := SpinBox.new()
+	modifier.min_value = -10
+	modifier.max_value = 10
+	modifier.prefix = "Mod "
+	modifier.custom_minimum_size = Vector2(78, 0)
+	row.add_child(modifier)
+	var dv := SpinBox.new()
+	dv.min_value = 1
+	dv.max_value = 30
+	dv.value = 13
+	dv.prefix = "DV "
+	dv.custom_minimum_size = Vector2(72, 0)
+	row.add_child(dv)
+	var roll := UI.primary_button("Roll")
+	roll.disabled = skills.is_empty()
+	roll.pressed.connect(
+		func() -> void:
+			roll_selected_skill(
+				String(selected.get_item_metadata(selected.selected)),
+				int(modifier.value),
+				int(dv.value),
+			)
+	)
+	row.add_child(roll)
+	_selected_box.add_child(UI.margins(row, UI.GAP_2))
+	var result := UI.body(_skill_result, 10, UI.MUTED)
+	result.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	result.clip_text = false
+	_selected_box.add_child(UI.margins(result, UI.GAP_2))
+
+
+## Rolls a selected unit's sheet without starting combat. Kept public so UI
+## automation can exercise the same setup action as the GM.
+func roll_selected_skill(skill_name: String, modifier := 0, dv := 13) -> Dictionary:
+	if not _is_setup():
+		return {}
+	var character := _selected_character()
+	if character.is_empty():
+		return {}
+	var rolled := CharacterRules.roll_skill(character, skill_name, modifier, dv, _check_rng)
+	if not bool(rolled.get("ok", false)):
+		_skill_result = "That skill is not on this character's sheet."
+	else:
+		var dice: PackedInt32Array = rolled.get("rolls", PackedInt32Array())
+		var dice_parts := PackedStringArray()
+		for value in dice:
+			dice_parts.append(str(value))
+		var dice_text := ", ".join(dice_parts)
+		_skill_result = (
+			"%s: %d base %+d mod + d10 [%s] = %d vs DV %d — %s"
+			% [
+				skill_name,
+				int(rolled["base"]),
+				modifier,
+				dice_text,
+				int(rolled["total"]),
+				dv,
+				"SUCCESS" if bool(rolled["success"]) else "FAILURE",
+			]
+		)
+	_message = _skill_result
+	_refresh_selected()
+	_refresh_card()
+	return rolled
 
 
 func _action_row(label: String, note: String, used: bool) -> Control:
