@@ -8,9 +8,12 @@ set -euo pipefail
 
 GODOT="${GODOT:-godot}"
 SHOTS_DIR=".shots"
-USER_SHOTS="$HOME/.local/share/godot/app_userdata/Redline/shots"
+USER_DATA="$HOME/.local/share/godot/app_userdata/Redline"
+USER_SHOTS="$USER_DATA/shots"
 
-rm -rf "$SHOTS_DIR" "$USER_SHOTS"
+# Start from an empty save library so the demo campaign is regenerated from the
+# current fixtures; a stale .red from an earlier run would render old content.
+rm -rf "$SHOTS_DIR" "$USER_SHOTS" "$USER_DATA/saves"
 mkdir -p "$SHOTS_DIR"
 
 "$GODOT" --headless --path . --import >/dev/null 2>&1 || true

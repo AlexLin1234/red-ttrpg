@@ -323,3 +323,56 @@ static func new_area(points: PackedVector2Array) -> Dictionary:
 		"label": [label.x, label.y],
 		"custom": true,
 	}
+
+
+# -- points of interest ------------------------------------------------------
+#
+# A POI is a pin dropped inside a zone. It optionally links to a location — one
+# of the isometric boards in the campaign — which is what turns "the Kabuki
+# parkade is here" into something the party can walk into.
+
+const POI_KINDS: PackedStringArray = [
+	"job", "contact", "shop", "clinic", "safehouse", "corp", "hazard", "landmark"
+]
+
+const POI_COLORS := {
+	"job": Color("93bce2"),
+	"contact": Color("6fbf8b"),
+	"shop": Color("d9b45c"),
+	"clinic": Color("7fd4c8"),
+	"safehouse": Color("8f9bd6"),
+	"corp": Color("b0bcc9"),
+	"hazard": Color("bb5451"),
+	"landmark": Color("c58fd6"),
+}
+
+
+static func poi_color(kind: String) -> Color:
+	return POI_COLORS.get(kind, UI.ACCENT)
+
+
+## Which zone contains this point, or "" when it sits on bare ground.
+static func area_at(areas: Array, point: Vector2) -> String:
+	for area in areas:
+		var entry: Dictionary = area
+		if Geometry2D.is_point_in_polygon(point, points_of(entry)):
+			return String(entry["id"])
+	return ""
+
+
+static func new_poi(point: Vector2, area_id: String) -> Dictionary:
+	return {
+		"id": "poi-%d" % Time.get_ticks_usec(),
+		"name": "New Place",
+		"kind": "landmark",
+		"area_id": area_id,
+		"x": point.x,
+		"y": point.y,
+		"description": "",
+		# Empty until the GM links or builds a board for it.
+		"location_id": "",
+	}
+
+
+static func poi_position(poi: Dictionary) -> Vector2:
+	return Vector2(float(poi.get("x", 0.0)), float(poi.get("y", 0.0)))

@@ -29,6 +29,15 @@ and says so before it does. The eight Night City districts are only the seed —
 a campaign saved before zones were editable is migrated on open, keeping any
 overrides it already carried.
 
+Points of interest are pins dropped inside those zones — a clinic, a fixer's
+booth, a corp tower. Each carries a name, a kind and notes, and can link to a
+location: pick an existing board or build a fresh one on the spot. A linked pin
+draws filled and opens its board in one click; an unlinked one draws hollow,
+because it is a note on the map rather than somewhere the party can walk into.
+The Places tab lists them all. Deleting a zone re-homes its pins rather than
+deleting them — a place the party knows about does not stop existing because
+the GM redrew a boundary.
+
 **Location** — an isometric board. Pick tiles, props or units from the palette
 and click the grid to place them. Roll 1d10 + REF for initiative, then fire.
 Every attack writes its arithmetic out longhand so you can see — and override —
@@ -76,7 +85,7 @@ Open `project.godot` in Godot 4.7, or:
 
 ```bash
 godot --path .                # run the app
-./run-tests.sh                # 203 checks, headless
+./run-tests.sh                # 230 checks, headless
 ./run-shots.sh                # render every screen to .shots/ (needs Xvfb)
 ```
 

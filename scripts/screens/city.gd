@@ -6,14 +6,17 @@ extends Control
 ## new one straight onto the map, edit every field it carries, or delete it. The
 ## header clock is campaign state too, so advancing an hour edits the save.
 
-const TABS: PackedStringArray = ["map", "areas", "control", "jobs", "net"]
+const TABS: PackedStringArray = ["map", "areas", "places", "control", "jobs", "net"]
 
 ## Clicking within this many map units of the first vertex closes the polygon.
 const CLOSE_RADIUS := 18.0
 
 var _tab := "map"
-## "inspect", "edit" or "draw".
+## "inspect", "edit", "draw" or "pin".
 var _mode := "inspect"
+## Whether the rail is showing a zone or a point of interest.
+var _focus_kind := "area"
+var _focus_poi := ""
 var _focus_id := "pacifica"
 var _pinned_id := "pacifica"
 var _map: _MapView
@@ -41,6 +44,9 @@ func _ready() -> void:
 	_map.picked.connect(_on_picked)
 	_map.zone_drawn.connect(_on_zone_drawn)
 	_map.draft_changed.connect(_refresh_rail)
+	_map.poi_hovered.connect(_on_poi_hovered)
+	_map.poi_picked.connect(_on_poi_picked)
+	_map.poi_placed.connect(_on_poi_placed)
 	map_shell.add_child(_map)
 
 	var rail_shell := UI.panel()
@@ -92,7 +98,7 @@ func set_tab(tab: String) -> void:
 
 
 func _on_hovered(area_id: String) -> void:
-	if _mode != "inspect":
+	if _mode != "inspect" or _focus_kind == "poi":
 		return
 	_focus_id = area_id if area_id != "" else _pinned_id
 	_map.set_focus(_focus_id)
@@ -101,6 +107,7 @@ func _on_hovered(area_id: String) -> void:
 
 
 func _on_picked(area_id: String) -> void:
+	_focus_kind = "area"
 	_pinned_id = area_id
 	_focus_id = area_id
 	_map.set_focus(_focus_id)
@@ -120,6 +127,53 @@ func _on_zone_drawn(points: PackedVector2Array) -> void:
 	_refresh()
 
 
+func _on_poi_hovered(poi_id: String) -> void:
+	if _mode != "inspect":
+		return
+	if poi_id == "":
+		if _focus_kind == "poi":
+			_focus_kind = "area"
+			_map.set_focus_poi("")
+			if _tab == "map":
+				_refresh_rail()
+		return
+	_focus_kind = "poi"
+	_focus_poi = poi_id
+	_map.set_focus_poi(poi_id)
+	if _tab == "map":
+		_refresh_rail()
+
+
+func _on_poi_picked(poi_id: String) -> void:
+	_focus_kind = "poi"
+	_focus_poi = poi_id
+	_map.set_focus_poi(poi_id)
+	_tab = "map"
+	for key in _tab_buttons:
+		(_tab_buttons[key] as Button).button_pressed = key == "map"
+	_refresh_rail()
+
+
+func _on_poi_placed(point: Vector2) -> void:
+	var poi := NightCity.new_poi(point, NightCity.area_at(Store.areas(), point))
+	Store.add_poi(poi)
+	_focus_kind = "poi"
+	_focus_poi = String(poi["id"])
+	_mode = "inspect"
+	_tab = "map"
+	for key in _tab_buttons:
+		(_tab_buttons[key] as Button).button_pressed = key == "map"
+	_map.set_pin_mode(false)
+	_map.set_focus_poi(_focus_poi)
+	_refresh()
+
+
+func start_pin() -> void:
+	_mode = "pin"
+	_map.set_pin_mode(true)
+	_refresh_rail()
+
+
 func start_draw() -> void:
 	_mode = "draw"
 	_map.set_draw_mode(true)
@@ -129,6 +183,7 @@ func start_draw() -> void:
 func _cancel_draw() -> void:
 	_mode = "inspect"
 	_map.set_draw_mode(false)
+	_map.set_pin_mode(false)
 	_refresh_rail()
 
 
@@ -157,6 +212,24 @@ func close_draft() -> void:
 	_map.close_draft()
 
 
+func poi_ids() -> PackedStringArray:
+	var ids := PackedStringArray()
+	for poi in Store.points_of_interest():
+		ids.append(String((poi as Dictionary)["id"]))
+	return ids
+
+
+func select_poi(poi_id: String) -> void:
+	_on_poi_picked(poi_id)
+
+
+## Same effect as clicking the map at this point while in pin mode.
+func place_pin(point: Vector2) -> void:
+	if _mode != "pin":
+		return
+	_on_poi_placed(point)
+
+
 func area_ids() -> PackedStringArray:
 	var ids := PackedStringArray()
 	for area in Store.areas():
@@ -167,8 +240,11 @@ func area_ids() -> PackedStringArray:
 func _refresh() -> void:
 	_refresh_count()
 	_map.set_areas(Store.areas(), _hooked_areas())
+	_map.set_pois(Store.points_of_interest())
 	_map.set_focus(_focus_id)
+	_map.set_focus_poi(_focus_poi if _focus_kind == "poi" else "")
 	_map.set_draw_mode(_mode == "draw")
+	_map.set_pin_mode(_mode == "pin")
 	_refresh_rail()
 
 
@@ -212,15 +288,22 @@ func _refresh_rail() -> void:
 	if _mode == "draw":
 		_rail.add_child(_build_draw_panel())
 		return
+	if _mode == "pin":
+		_rail.add_child(_build_pin_panel())
+		return
 
 	match _tab:
 		"map":
 			if _mode == "edit":
 				_rail.add_child(_build_editor())
+			elif _focus_kind == "poi":
+				_rail.add_child(_build_poi_panel())
 			else:
 				_rail.add_child(_build_area_panel())
 		"areas":
 			_rail.add_child(_build_areas_list())
+		"places":
+			_rail.add_child(_build_places_list())
 		"control":
 			_rail.add_child(_build_simple_list("Who holds what", "control"))
 		"jobs":
@@ -352,6 +435,23 @@ func _build_area_panel() -> Control:
 	delete_button.pressed.connect(confirm_delete.bind(_focus_id))
 	actions.add_child(delete_button)
 	box.add_child(actions)
+
+	var add_place := UI.plain_button("+ Add a place here")
+	add_place.pressed.connect(start_pin)
+	box.add_child(add_place)
+
+	var pins := Store.pois_in_area(_focus_id)
+	if not pins.is_empty():
+		box.add_child(UI.micro("Places in this zone"))
+		for pin in pins:
+			var entry: Dictionary = pin
+			var linked := Store.location_by_id(String(entry.get("location_id", "")))
+			var row := UI.plain_button(
+				"%s%s" % [String(entry["name"]), "" if linked.is_empty() else " ▸"]
+			)
+			row.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			row.pressed.connect(_on_poi_picked.bind(String(entry["id"])))
+			box.add_child(row)
 
 	return _scrolled(box)
 
@@ -702,13 +802,35 @@ func confirm_delete(area_id: String) -> void:
 	if area.is_empty():
 		return
 	var hook_count := Store.hooks_for_area(area_id).size()
+	var pin_count := Store.pois_in_area(area_id).size()
 	var message := "This removes the zone from the map and from every list."
 	if hook_count > 0:
 		message += (
 			" %d job %s here will be removed with it."
 			% [hook_count, "hook" if hook_count == 1 else "hooks"]
 		)
+	if pin_count > 0:
+		message += (
+			" %d %s here will stay on the map, no longer inside any zone."
+			% [pin_count, "place" if pin_count == 1 else "places"]
+		)
 
+	_confirm("Delete zone", String(area["name"]), message, func() -> void:
+		var dropped := Store.remove_area(area_id)
+		if _pinned_id == area_id or _focus_id == area_id:
+			var remaining := Store.areas()
+			_pinned_id = String((remaining[0] as Dictionary)["id"]) if not remaining.is_empty() else ""
+			_focus_id = _pinned_id
+		_mode = "inspect"
+		_focus_kind = "area"
+		Store.set_status(
+			"Zone deleted" if dropped == 0 else "Zone and %d hook(s) deleted" % dropped
+		)
+		_refresh())
+
+
+## One confirmation dialog for anything destructive on this screen.
+func _confirm(kicker: String, subject: String, message: String, on_confirm: Callable) -> void:
 	var scrim := ColorRect.new()
 	scrim.name = "DeletePrompt"
 	scrim.color = Color(0.024, 0.035, 0.051, 0.78)
@@ -727,8 +849,8 @@ func confirm_delete(area_id: String) -> void:
 
 	var box := UI.vbox(UI.GAP_2)
 	dialog.add_child(UI.margins(box, UI.GAP_5))
-	box.add_child(UI.micro("Delete zone"))
-	box.add_child(UI.display(String(area["name"]), 26))
+	box.add_child(UI.micro(kicker))
+	box.add_child(UI.display(subject, 26))
 	var text := UI.body(message, 12, UI.MUTED)
 	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	text.clip_text = false
@@ -737,26 +859,264 @@ func confirm_delete(area_id: String) -> void:
 	var actions := UI.hbox(UI.GAP_2)
 	var confirm := UI.primary_button("Delete")
 	UI.expand(confirm, true, false)
+	confirm.set_meta("choice", "confirm")
 	confirm.pressed.connect(
 		func() -> void:
-			var dropped := Store.remove_area(area_id)
 			scrim.queue_free()
-			if _pinned_id == area_id or _focus_id == area_id:
-				var remaining := Store.areas()
-				_pinned_id = String((remaining[0] as Dictionary)["id"]) if not remaining.is_empty() else ""
-				_focus_id = _pinned_id
-			_mode = "inspect"
-			Store.set_status(
-				"Zone deleted" if dropped == 0 else "Zone and %d hook(s) deleted" % dropped
-			)
-			_refresh()
+			on_confirm.call()
 	)
 	actions.add_child(confirm)
 	var cancel := UI.plain_button("Keep it")
 	UI.expand(cancel, true, false)
+	cancel.set_meta("choice", "cancel")
 	cancel.pressed.connect(scrim.queue_free)
 	actions.add_child(cancel)
 	box.add_child(actions)
+
+
+# -- points of interest ------------------------------------------------------------
+
+
+func _build_pin_panel() -> Control:
+	var box := UI.vbox(UI.GAP_2)
+	box.add_child(UI.micro("Adding a place"))
+	box.add_child(UI.display("New place", 26))
+	var text := UI.body(
+		"Click anywhere on the map to drop the pin. It picks up whichever zone it lands in.",
+		11,
+		UI.MUTED,
+	)
+	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	text.clip_text = false
+	box.add_child(text)
+	box.add_child(UI.rule_line())
+	var cancel := UI.plain_button("Cancel")
+	cancel.pressed.connect(_cancel_draw)
+	box.add_child(cancel)
+	return UI.margins(box, UI.GAP_3)
+
+
+func _build_poi_panel() -> Control:
+	var poi := Store.poi_by_id(_focus_poi)
+	if poi.is_empty():
+		_focus_kind = "area"
+		return _build_area_panel()
+
+	var area := Store.area_by_id(String(poi.get("area_id", "")))
+	var linked := Store.location_by_id(String(poi.get("location_id", "")))
+
+	var box := UI.vbox(UI.GAP_2)
+	box.add_child(UI.micro("Point of interest"))
+	box.add_child(UI.display(String(poi["name"]), 28, NightCity.poi_color(String(poi.get("kind", "")))))
+	box.add_child(
+		UI.micro(
+			"%s · %s"
+			% [
+				String(poi.get("kind", "place")).capitalize(),
+				String(area["name"]) if not area.is_empty() else "Outside every zone",
+			]
+		)
+	)
+
+	var set_name := func(value: String) -> void:
+		poi["name"] = value
+		_commit()
+	var set_kind := func(value: String) -> void:
+		poi["kind"] = value
+		_commit()
+	box.add_child(_text_field("Name", String(poi.get("name", "")), set_name))
+	box.add_child(
+		_choice_field("Kind", NightCity.POI_KINDS, String(poi.get("kind", "landmark")), set_kind)
+	)
+
+	box.add_child(UI.micro("Notes"))
+	var notes := TextEdit.new()
+	notes.text = String(poi.get("description", ""))
+	notes.custom_minimum_size = Vector2(0, 80)
+	notes.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	notes.add_theme_font_size_override("font_size", 11)
+	notes.text_changed.connect(
+		func() -> void:
+			poi["description"] = notes.text
+			Store.mark_dirty()
+	)
+	box.add_child(notes)
+
+	box.add_child(UI.rule_line())
+	box.add_child(UI.micro("Linked location"))
+
+	if linked.is_empty():
+		box.add_child(
+			UI.micro("Nothing linked — this pin is a note on the map, not a place to play.", UI.MUTED_DIM)
+		)
+	else:
+		var card := UI.panel(UI.PANEL_INSET)
+		var inner := UI.vbox(1)
+		card.add_child(UI.margins(inner, UI.GAP_2))
+		inner.add_child(UI.value(String(linked["name"]), 12, UI.ACCENT))
+		inner.add_child(
+			UI.micro(
+				"%d × %d grid · %d props · %d units"
+				% [
+					int(linked.get("grid_width", 0)),
+					int(linked.get("grid_height", 0)),
+					(linked.get("props", []) as Array).size(),
+					(linked.get("units", []) as Array).size(),
+				]
+			)
+		)
+		box.add_child(card)
+
+		var open_button := UI.primary_button("▶ Open location")
+		open_button.pressed.connect(func() -> void: Store.open_location(String(linked["id"])))
+		box.add_child(open_button)
+
+	box.add_child(_build_location_link_row(poi))
+
+	box.add_child(UI.rule_line())
+	var delete_button := UI.plain_button("Delete place")
+	delete_button.add_theme_color_override("font_color", UI.ALERT_BRIGHT)
+	delete_button.pressed.connect(confirm_delete_poi.bind(String(poi["id"])))
+	box.add_child(delete_button)
+
+	return _scrolled(box)
+
+
+## Pick an existing board or build a fresh one for this pin.
+func _build_location_link_row(poi: Dictionary) -> Control:
+	var box := UI.vbox(UI.GAP_2)
+
+	if not Store.locations.is_empty():
+		box.add_child(UI.micro("Link an existing board"))
+		var picker := OptionButton.new()
+		picker.add_item("— none —", 0)
+		var current := String(poi.get("location_id", ""))
+		for index in Store.locations.size():
+			var location: Dictionary = Store.locations[index]
+			picker.add_item(String(location["name"]), index + 1)
+			if String(location["id"]) == current:
+				picker.select(index + 1)
+		picker.item_selected.connect(
+			func(index: int) -> void:
+				poi["location_id"] = (
+					"" if index == 0 else String((Store.locations[index - 1] as Dictionary)["id"])
+				)
+				Store.mark_dirty()
+				_refresh_rail()
+		)
+		box.add_child(picker)
+
+	var create := UI.plain_button("+ Build a new board here")
+	create.pressed.connect(
+		func() -> void:
+			var location := Store.create_location_for_poi(poi)
+			Store.set_status("Created %s" % String(location["name"]))
+			_refresh_rail()
+	)
+	box.add_child(create)
+	return box
+
+
+func _build_places_list() -> Control:
+	var box := UI.vbox(UI.GAP_2)
+
+	var head := UI.hbox()
+	var title := UI.micro("Places")
+	UI.expand(title, true, false)
+	head.add_child(title)
+	head.add_child(UI.micro("%d pinned" % Store.points_of_interest().size()))
+	box.add_child(head)
+
+	for poi in Store.points_of_interest():
+		box.add_child(_build_poi_row(poi))
+
+	if Store.points_of_interest().is_empty():
+		box.add_child(UI.micro("No places yet. Drop a pin on the map."))
+
+	box.add_child(UI.rule_line())
+	var add := UI.primary_button("+ Add place")
+	add.pressed.connect(start_pin)
+	box.add_child(add)
+
+	return _scrolled(box)
+
+
+func _build_poi_row(poi: Dictionary) -> Control:
+	var id := String(poi["id"])
+	var is_selected := _focus_kind == "poi" and id == _focus_poi
+	var area := Store.area_by_id(String(poi.get("area_id", "")))
+	var linked := Store.location_by_id(String(poi.get("location_id", "")))
+
+	var card := UI.panel(UI.PANEL_INSET, UI.ACCENT if is_selected else UI.HAIRLINE)
+	var box := UI.vbox(2)
+	card.add_child(UI.margins(box, UI.GAP_2))
+
+	var head := UI.hbox(UI.GAP_2)
+	var dot := Panel.new()
+	dot.custom_minimum_size = Vector2(8, 8)
+	dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	dot.add_theme_stylebox_override("panel", UI.flat(NightCity.poi_color(String(poi.get("kind", "")))))
+	head.add_child(dot)
+
+	var select := Button.new()
+	select.flat = true
+	select.focus_mode = Control.FOCUS_NONE
+	select.text = String(poi["name"]).to_upper()
+	select.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	select.add_theme_font_override("font", UI.DISPLAY_FONT)
+	select.add_theme_font_size_override("font_size", 13)
+	select.add_theme_color_override("font_color", UI.TEXT_DISPLAY)
+	UI.expand(select, true, false)
+	select.pressed.connect(_on_poi_picked.bind(id))
+	head.add_child(select)
+	head.add_child(UI.micro(String(poi.get("kind", ""))))
+	box.add_child(head)
+
+	box.add_child(
+		UI.elide(
+			UI.micro(
+				"%s · %s"
+				% [
+					String(area["name"]) if not area.is_empty() else "Outside every zone",
+					String(linked["name"]) if not linked.is_empty() else "No board linked",
+				],
+				UI.MUTED if not linked.is_empty() else UI.MUTED_DIM
+			)
+		)
+	)
+
+	var actions := UI.hbox(UI.GAP_2)
+	var open_button := UI.plain_button("Open")
+	UI.expand(open_button, true, false)
+	open_button.disabled = linked.is_empty()
+	if not linked.is_empty():
+		open_button.pressed.connect(func() -> void: Store.open_location(String(linked["id"])))
+	actions.add_child(open_button)
+	var delete_button := UI.plain_button("Delete")
+	UI.expand(delete_button, true, false)
+	delete_button.add_theme_color_override("font_color", UI.ALERT_BRIGHT)
+	delete_button.pressed.connect(confirm_delete_poi.bind(id))
+	actions.add_child(delete_button)
+	box.add_child(actions)
+
+	return card
+
+
+func confirm_delete_poi(poi_id: String) -> void:
+	var poi := Store.poi_by_id(poi_id)
+	if poi.is_empty():
+		return
+	var linked := Store.location_by_id(String(poi.get("location_id", "")))
+	var message := "This removes the pin from the map."
+	if not linked.is_empty():
+		message += " The board \"%s\" stays in the campaign." % String(linked["name"])
+	_confirm("Delete place", String(poi["name"]), message, func() -> void:
+		Store.remove_poi(poi_id)
+		if _focus_poi == poi_id:
+			_focus_poi = ""
+			_focus_kind = "area"
+		Store.set_status("Place deleted")
+		_refresh())
 
 
 # -- other tabs -------------------------------------------------------------------------
@@ -828,11 +1188,20 @@ class _MapView extends Control:
 	signal picked(area_id: String)
 	signal zone_drawn(points: PackedVector2Array)
 	signal draft_changed
+	signal poi_hovered(poi_id: String)
+	signal poi_picked(poi_id: String)
+	signal poi_placed(point: Vector2)
+
+	## How close, in map units, the pointer has to be to hit a pin.
+	const PIN_RADIUS := 14.0
 
 	var _areas: Array = []
+	var _pois: Array = []
 	var _focus := ""
+	var _focus_poi := ""
 	var _hooked: PackedStringArray = []
 	var _drawing := false
+	var _pinning := false
 	var _draft := PackedVector2Array()
 	var _cursor := Vector2.ZERO
 	var _scale := 1.0
@@ -846,10 +1215,24 @@ class _MapView extends Control:
 		_hooked = hooked
 		queue_redraw()
 
+	func set_pois(pois: Array) -> void:
+		_pois = pois
+		queue_redraw()
+
 	func set_focus(area_id: String) -> void:
 		if _focus == area_id:
 			return
 		_focus = area_id
+		queue_redraw()
+
+	func set_focus_poi(poi_id: String) -> void:
+		if _focus_poi == poi_id:
+			return
+		_focus_poi = poi_id
+		queue_redraw()
+
+	func set_pin_mode(on: bool) -> void:
+		_pinning = on
 		queue_redraw()
 
 	func set_draw_mode(on: bool) -> void:
@@ -890,6 +1273,18 @@ class _MapView extends Control:
 	func _to_map(point: Vector2) -> Vector2:
 		return (point - _origin) / maxf(_scale, 0.0001)
 
+	## Pins sit on top of zones, so they are hit-tested first.
+	func _poi_at(at: Vector2) -> String:
+		var best := ""
+		var best_distance := PIN_RADIUS
+		for poi in _pois:
+			var entry: Dictionary = poi
+			var distance := at.distance_to(NightCity.poi_position(entry))
+			if distance <= best_distance:
+				best_distance = distance
+				best = String(entry["id"])
+		return best
+
 	func _area_at(at: Vector2) -> String:
 		for area in _areas:
 			var entry: Dictionary = area
@@ -900,11 +1295,14 @@ class _MapView extends Control:
 	func _gui_input(event: InputEvent) -> void:
 		if event is InputEventMouseMotion:
 			var at := _to_map((event as InputEventMouseMotion).position)
-			if _drawing:
+			if _drawing or _pinning:
 				_cursor = at
 				queue_redraw()
 				return
-			hovered.emit(_area_at(at))
+			var pin := _poi_at(at)
+			poi_hovered.emit(pin)
+			if pin == "":
+				hovered.emit(_area_at(at))
 			return
 
 		if not (event is InputEventMouseButton) or not (event as InputEventMouseButton).pressed:
@@ -912,8 +1310,17 @@ class _MapView extends Control:
 		var button := event as InputEventMouseButton
 		var at := _to_map(button.position)
 
+		if _pinning:
+			if button.button_index == MOUSE_BUTTON_LEFT:
+				poi_placed.emit(at)
+			return
+
 		if not _drawing:
 			if button.button_index == MOUSE_BUTTON_LEFT:
+				var pin := _poi_at(at)
+				if pin != "":
+					poi_picked.emit(pin)
+					return
 				var id := _area_at(at)
 				if id != "":
 					picked.emit(id)
@@ -1000,8 +1407,47 @@ class _MapView extends Control:
 					1.5,
 				)
 
+		_draw_pins()
+
 		if _drawing:
 			_draw_draft()
+		elif _pinning:
+			_draw_pin_cursor()
+
+	## A pin: a filled head on a short stem, with its name beside it. Drawn after
+	## the plates so it always reads on top of them.
+	func _draw_pins() -> void:
+		for poi in _pois:
+			var entry: Dictionary = poi
+			var at := _to_screen(NightCity.poi_position(entry))
+			var colour: Color = NightCity.poi_color(String(entry.get("kind", "")))
+			var focused := String(entry["id"]) == _focus_poi
+			var linked := String(entry.get("location_id", "")) != ""
+
+			draw_line(at, at + Vector2(0, 9), colour, 1.5)
+			draw_circle(at, 6.0 if focused else 5.0, colour)
+			# A hollow head means the pin is a note; a filled one has a board
+			# behind it that the party can walk into.
+			if not linked:
+				draw_circle(at, 3.0, UI.PANEL_INSET)
+			if focused:
+				draw_arc(at, 11.0, 0, TAU, 24, colour, 1.5)
+
+			draw_string(
+				UI.BODY_BOLD_FONT,
+				at + Vector2(10, 4),
+				String(entry.get("name", "")).to_upper(),
+				HORIZONTAL_ALIGNMENT_LEFT,
+				-1,
+				9,
+				colour if focused else UI.TEXT,
+			)
+
+	func _draw_pin_cursor() -> void:
+		var at := _to_screen(_cursor)
+		draw_arc(at, 10.0, 0, TAU, 24, UI.ACCENT, 1.5)
+		draw_line(at - Vector2(14, 0), at + Vector2(14, 0), UI.ACCENT, 1.0)
+		draw_line(at - Vector2(0, 14), at + Vector2(0, 14), UI.ACCENT, 1.0)
 
 	func _draw_draft() -> void:
 		var screen_points := PackedVector2Array()

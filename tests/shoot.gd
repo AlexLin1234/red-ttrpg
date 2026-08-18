@@ -102,8 +102,52 @@ func _drive_city(app: Control) -> void:
 		_errors.append("closing the shape did not add an area (%d -> %d)" % [before, after])
 	await _shoot("1b-new-zone")
 
-	screen.call("set_tab", "map")
+	await _drive_pins(app, screen)
+
+	# _drive_pins navigates away and back, which frees the old screen node.
+	screen = app.get("_screen")
+	if screen != null and screen.has_method("set_tab"):
+		screen.call("set_tab", "map")
 	await _settle(10)
+
+
+## Pins are the link between the city map and a playable board, so this checks
+## the whole chain: list them, select one, drop a new one, and follow a linked
+## pin through to the location screen.
+func _drive_pins(app: Control, screen: Node) -> void:
+	screen.call("set_tab", "places")
+	await _settle(10)
+	await _shoot("1b-places")
+
+	var pins: PackedStringArray = screen.call("poi_ids")
+	if pins.size() < 2:
+		_errors.append("expected the demo campaign to ship pins")
+		return
+
+	screen.call("select_poi", "poi-parkade")
+	await _settle(10)
+	await _shoot("1b-poi")
+
+	screen.call("start_pin")
+	await _settle(6)
+	screen.call("place_pin", Vector2(430, 460))
+	await _settle(10)
+	var after: int = (screen.call("poi_ids") as PackedStringArray).size()
+	if after != pins.size() + 1:
+		_errors.append("dropping a pin did not add a place (%d -> %d)" % [pins.size(), after])
+	await _shoot("1b-new-pin")
+
+	# A pin with a board behind it should take the GM straight to it.
+	screen.call("select_poi", "poi-parkade")
+	await _settle(6)
+	Store.open_location("kabuki-parkade")
+	await _settle(20)
+	if String(app.get("_current")) != "location":
+		_errors.append("opening a linked pin did not switch to the location screen")
+	else:
+		await _shoot("1b-followed-link")
+	app.call("_show", "city")
+	await _settle(20)
 
 
 ## Walk the combat path the GM walks: roll initiative, shoot across the deck,

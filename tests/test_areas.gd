@@ -84,4 +84,73 @@ static func run(h: Harness) -> void:
 	h.equal(CampaignSchema.remove_area(doomed, "nowhere"), 0, "nothing dropped")
 	h.equal((doomed["areas"] as Array).size(), 7, "area count unchanged")
 
+	h.describe("points of interest")
+
+	h.it("ships pins with the demo campaign, one linked to a board")
+	var demo: Dictionary = CampaignFixtures.blackwall_sunrise()["campaign"]
+	var pins := CampaignSchema.points_of_interest(demo)
+	h.equal(pins.size(), 5, "seeded pin count")
+	var parkade := CampaignSchema.poi_by_id(demo, "poi-parkade")
+	h.equal(parkade["location_id"], "kabuki-parkade", "parkade links to its board")
+	h.equal(CampaignSchema.poi_by_id(demo, "poi-clinic")["location_id"], "", "clinic is only a note")
+
+	h.it("groups pins by the zone they sit in")
+	h.equal(CampaignSchema.pois_in_area(demo, "watson").size(), 2, "watson pins")
+	h.equal(CampaignSchema.pois_in_area(demo, "westbrook").size(), 1, "westbrook pins")
+	h.equal(CampaignSchema.pois_in_area(demo, "north-oak").size(), 0, "empty zone")
+
+	h.it("gives a campaign with no pins an empty list rather than failing")
+	var bare: Dictionary = CampaignFixtures.new_campaign("Bare")["campaign"]
+	h.equal(CampaignSchema.points_of_interest(bare), [], "empty list")
+
+	h.it("places a new pin in whichever zone it lands in")
+	CampaignSchema.migrate_areas(demo)
+	var inside := NightCity.new_poi(Vector2(150, 500), NightCity.area_at(demo["areas"], Vector2(150, 500)))
+	h.equal(inside["area_id"], "watson", "landed in Watson")
+	h.equal(inside["location_id"], "", "starts unlinked")
+	var outside := NightCity.new_poi(Vector2(5, 5), NightCity.area_at(demo["areas"], Vector2(5, 5)))
+	h.equal(outside["area_id"], "", "bare ground has no zone")
+
+	h.it("round trips pins through the .red container")
+	var pin_bundle := CampaignFixtures.blackwall_sunrise()
+	var pin_path := "user://test_pois.red"
+	h.equal(CampaignContainer.save(pin_path, pin_bundle)["ok"], true, "saved")
+	var reopened := CampaignContainer.load_file(pin_path)
+	h.equal(reopened["integrity"]["verified"], true, "integrity verified")
+	var restored_pin := CampaignSchema.poi_by_id(reopened["campaign"], "poi-parkade")
+	h.equal(restored_pin["name"], "Kabuki Parkade", "name survived")
+	h.equal(restored_pin["location_id"], "kabuki-parkade", "link survived")
+	h.equal(NightCity.poi_position(restored_pin), Vector2(150, 470), "position survived")
+
+	h.it("keeps pins when their zone is deleted, re-homing them")
+	var doomed_pins: Dictionary = CampaignFixtures.blackwall_sunrise()["campaign"]
+	CampaignSchema.migrate_areas(doomed_pins)
+	h.equal(CampaignSchema.pois_in_area(doomed_pins, "watson").size(), 2, "watson pins before")
+	CampaignSchema.remove_area(doomed_pins, "watson")
+	h.equal(CampaignSchema.points_of_interest(doomed_pins).size(), 5, "no pins lost")
+	h.equal(CampaignSchema.pois_in_area(doomed_pins, "watson").size(), 0, "none still claim Watson")
+	h.equal(
+		String(CampaignSchema.poi_by_id(doomed_pins, "poi-parkade")["area_id"]),
+		"",
+		"re-homed to no zone",
+	)
+	h.equal(
+		String(CampaignSchema.poi_by_id(doomed_pins, "poi-parkade")["location_id"]),
+		"kabuki-parkade",
+		"its board is untouched",
+	)
+
+	h.it("deletes a single pin without touching the others")
+	h.equal(CampaignSchema.remove_poi(doomed_pins, "poi-clinic"), true, "removed")
+	h.equal(CampaignSchema.points_of_interest(doomed_pins).size(), 4, "one fewer")
+	h.equal(CampaignSchema.remove_poi(doomed_pins, "poi-clinic"), false, "already gone")
+
+	h.it("builds a workable blank board for a pin")
+	var board := CampaignFixtures.new_location("Ross Clinic", "watson")
+	h.equal(board["name"], "Ross Clinic", "name")
+	h.equal(board["district_id"], "watson", "district")
+	h.equal((board["tiles"] as Array).size(), 256, "16 x 16 of deck")
+	h.equal((board["units"] as Array), [], "starts empty")
+
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(pin_path))

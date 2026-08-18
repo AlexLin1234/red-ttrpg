@@ -185,6 +185,7 @@ static func remove_area(campaign: Dictionary, id: String) -> int:
 			hooks.remove_at(index)
 			dropped += 1
 	(campaign.get("districts", {}) as Dictionary).erase(id)
+	rehome_pois(campaign)
 	return dropped
 
 
@@ -195,3 +196,51 @@ static func hooks_for_area(campaign: Dictionary, id: String) -> Array:
 		if String(entry.get("district_id", "")) == id and String(entry.get("status", "open")) != "closed":
 			found.append(entry)
 	return found
+
+
+# -- points of interest ------------------------------------------------------
+
+
+static func points_of_interest(campaign: Dictionary) -> Array:
+	if not campaign.has("points_of_interest"):
+		campaign["points_of_interest"] = []
+	return campaign["points_of_interest"]
+
+
+static func poi_by_id(campaign: Dictionary, id: String) -> Dictionary:
+	for poi in points_of_interest(campaign):
+		if String((poi as Dictionary)["id"]) == id:
+			return poi
+	return {}
+
+
+static func pois_in_area(campaign: Dictionary, area_id: String) -> Array:
+	var found: Array = []
+	for poi in points_of_interest(campaign):
+		if String((poi as Dictionary).get("area_id", "")) == area_id:
+			found.append(poi)
+	return found
+
+
+static func remove_poi(campaign: Dictionary, id: String) -> bool:
+	var pois := points_of_interest(campaign)
+	for index in pois.size():
+		if String((pois[index] as Dictionary)["id"]) == id:
+			pois.remove_at(index)
+			return true
+	return false
+
+
+## Deleting a zone leaves its pins without a home rather than deleting them:
+## a place the party knows about does not stop existing because the GM redrew
+## a district boundary. They are re-homed to whichever zone now covers them.
+static func rehome_pois(campaign: Dictionary) -> int:
+	var moved := 0
+	var areas: Array = campaign.get("areas", [])
+	for poi in points_of_interest(campaign):
+		var entry: Dictionary = poi
+		var found := NightCity.area_at(areas, NightCity.poi_position(entry))
+		if found != String(entry.get("area_id", "")):
+			entry["area_id"] = found
+			moved += 1
+	return moved
