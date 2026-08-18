@@ -320,6 +320,56 @@ static func blackwall_sunrise() -> Dictionary:
 				"pacifica": {"note": "Pier generator dark since session 12."},
 			},
 			"cover_palette": cover_palette(),
+			# Pins the party already knows about. Only the parkade has a board
+			# behind it; the rest are notes until the GM builds one.
+			"points_of_interest":
+			[
+				{
+					"id": "poi-parkade",
+					"name": "Kabuki Parkade",
+					"kind": "landmark",
+					"area_id": "watson",
+					"x": 150.0, "y": 470.0,
+					"description": "Where the courier went into the stairwell and did not come out.",
+					"location_id": "kabuki-parkade",
+				},
+				{
+					"id": "poi-clinic",
+					"name": "Ross Clinic",
+					"kind": "clinic",
+					"area_id": "watson",
+					"x": 95.0, "y": 570.0,
+					"description": "Dr. Annika Ross. Cash, no questions, closes at dawn.",
+					"location_id": "",
+				},
+				{
+					"id": "poi-booth",
+					"name": "Ninetails' Booth",
+					"kind": "contact",
+					"area_id": "westbrook",
+					"x": 690.0, "y": 95.0,
+					"description": "Back of the club. She advances against jobs, at a rate.",
+					"location_id": "",
+				},
+				{
+					"id": "poi-pier",
+					"name": "Pacifica Pier",
+					"kind": "hazard",
+					"area_id": "pacifica",
+					"x": 690.0, "y": 545.0,
+					"description": "Dead drop under the boards. Generator has been dark since session 12.",
+					"location_id": "",
+				},
+				{
+					"id": "poi-arasoma",
+					"name": "Arasoma Tower",
+					"kind": "corp",
+					"area_id": "city-center",
+					"x": 430.0, "y": 255.0,
+					"description": "Forty floors of deniability. The leak came from somewhere inside.",
+					"location_id": "",
+				},
+			],
 			"restore_points":
 			[
 				{"id": "restore-parkade", "label": "Before the Parkade", "session": 14, "created_at": "2045-09-14T21:12:00"},
@@ -435,4 +485,25 @@ static func actor_input(character: Dictionary) -> Dictionary:
 		"selected_weapon": first_weapon,
 		"skills": skill_map,
 		"weapons": weapons,
+	}
+
+
+## An empty board, sized like the seeded parkade so a new place is immediately
+## workable rather than a blank slate the GM has to tile from scratch.
+static func new_location(name: String, district_id: String) -> Dictionary:
+	var tiles: Array = []
+	for x in 16:
+		for z in 16:
+			tiles.append({"x": x, "z": z, "layer": 0, "tile_id": "deck", "rotation": 0})
+	return {
+		"id": "location-%d" % Time.get_ticks_usec(),
+		"name": name,
+		"district_id": district_id,
+		"grid_width": 16,
+		"grid_height": 16,
+		"tile_metres": 2.0,
+		"layers": 3,
+		"tiles": tiles,
+		"props": [],
+		"units": [],
 	}

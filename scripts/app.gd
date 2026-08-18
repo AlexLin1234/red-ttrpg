@@ -50,6 +50,7 @@ func _ready() -> void:
 	Store.campaign_changed.connect(_refresh_header)
 	Store.campaign_saved.connect(_refresh_header)
 	Store.status_changed.connect(_on_status)
+	Store.open_location_requested.connect(func(_id: String) -> void: _show("location"))
 
 	Store.seed_library_if_empty()
 	_show("library")

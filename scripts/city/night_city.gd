@@ -227,3 +227,194 @@ const _WEATHER: Array = [
 
 static func roll_weather() -> Dictionary:
 	return (_WEATHER[randi() % _WEATHER.size()] as Dictionary).duplicate()
+
+
+# -- editable areas ----------------------------------------------------------
+#
+# Districts above are only the seed. Once a campaign is opened they are copied
+# into `campaign.areas`, where the GM can edit, draw and delete them. Polygons
+# are stored flat — [x, y, x, y, …] — because a PackedVector2Array does not
+# survive a JSON round trip into the .red container.
+
+const ZONE_TYPES: PackedStringArray = [
+	"corporate", "combat", "residential", "industrial", "reclaimed", "outland"
+]
+const LAW_RESPONSES: PackedStringArray = [
+	"Immediate", "Moderate", "Slow", "Bought", "Never", "None"
+]
+const NET_DENSITIES: PackedStringArray = [
+	"Saturated", "High", "Medium", "Low", "Private", "None"
+]
+
+
+static func flatten(points: PackedVector2Array) -> Array:
+	var flat: Array = []
+	for point in points:
+		flat.append(point.x)
+		flat.append(point.y)
+	return flat
+
+
+static func points_of(area: Dictionary) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	var flat: Array = area.get("polygon", [])
+	var index := 0
+	while index + 1 < flat.size():
+		points.append(Vector2(float(flat[index]), float(flat[index + 1])))
+		index += 2
+	return points
+
+
+static func label_of(area: Dictionary) -> Vector2:
+	var label: Array = area.get("label", [])
+	if label.size() < 2:
+		return centroid_of(points_of(area))
+	return Vector2(float(label[0]), float(label[1]))
+
+
+static func centroid_of(points: PackedVector2Array) -> Vector2:
+	if points.is_empty():
+		return Vector2.ZERO
+	var total := Vector2.ZERO
+	for point in points:
+		total += point
+	return total / points.size()
+
+
+## Where a new zone's name sits: low and inside, the way the seeded plates read.
+static func suggest_label(points: PackedVector2Array) -> Vector2:
+	if points.is_empty():
+		return Vector2.ZERO
+	var centre := centroid_of(points)
+	var lowest := points[0].y
+	for point in points:
+		lowest = maxf(lowest, point.y)
+	return Vector2(centre.x - 60.0, lowest - 40.0)
+
+
+## The seed districts in the editable, JSON-safe shape.
+static func default_areas() -> Array:
+	var areas: Array = []
+	for district in districts():
+		var entry: Dictionary = district
+		var area := entry.duplicate(true)
+		area["polygon"] = flatten(entry["polygon"])
+		area["label"] = [entry["label"].x, entry["label"].y]
+		area["custom"] = false
+		areas.append(area)
+	return areas
+
+
+## A blank area around a freshly drawn polygon.
+static func new_area(points: PackedVector2Array) -> Dictionary:
+	var label := suggest_label(points)
+	return {
+		"id": "area-%d" % Time.get_ticks_usec(),
+		"name": "New Zone",
+		"subtitle": "Unclaimed",
+		"zone_type": "residential",
+		"control": "Unclaimed",
+		"danger": 2,
+		"population": 10000,
+		"law_response": "Moderate",
+		"net_density": "Medium",
+		"description": "",
+		"polygon": flatten(points),
+		"label": [label.x, label.y],
+		"custom": true,
+	}
+
+
+# -- points of interest ------------------------------------------------------
+#
+# A POI is a pin dropped inside a zone. It optionally links to a location — one
+# of the isometric boards in the campaign — which is what turns "the Kabuki
+# parkade is here" into something the party can walk into.
+
+const POI_KINDS: PackedStringArray = [
+	"job", "contact", "shop", "clinic", "safehouse", "corp", "hazard", "landmark"
+]
+
+const POI_COLORS := {
+	"job": Color("93bce2"),
+	"contact": Color("6fbf8b"),
+	"shop": Color("d9b45c"),
+	"clinic": Color("7fd4c8"),
+	"safehouse": Color("8f9bd6"),
+	"corp": Color("b0bcc9"),
+	"hazard": Color("bb5451"),
+	"landmark": Color("c58fd6"),
+}
+
+
+static func poi_color(kind: String) -> Color:
+	return POI_COLORS.get(kind, UI.ACCENT)
+
+
+## Which zone contains this point, or "" when it sits on bare ground.
+static func area_at(areas: Array, point: Vector2) -> String:
+	for area in areas:
+		var entry: Dictionary = area
+		if Geometry2D.is_point_in_polygon(point, points_of(entry)):
+			return String(entry["id"])
+	return ""
+
+
+static func new_poi(point: Vector2, area_id: String) -> Dictionary:
+	return {
+		"id": "poi-%d" % Time.get_ticks_usec(),
+		"name": "New Place",
+		"kind": "landmark",
+		"area_id": area_id,
+		"x": point.x,
+		"y": point.y,
+		"description": "",
+		# Empty until the GM links or builds a board for it.
+		"location_id": "",
+	}
+
+
+static func poi_position(poi: Dictionary) -> Vector2:
+	return Vector2(float(poi.get("x", 0.0)), float(poi.get("y", 0.0)))
+
+
+# -- reshaping ----------------------------------------------------------------
+
+
+static func set_points(area: Dictionary, points: PackedVector2Array) -> void:
+	area["polygon"] = flatten(points)
+
+
+## Slide the whole zone, label included, so a moved district keeps its name in
+## the same spot relative to its outline.
+static func move_area(area: Dictionary, delta: Vector2) -> void:
+	var moved := PackedVector2Array()
+	for point in points_of(area):
+		moved.append(point + delta)
+	set_points(area, moved)
+	var label := label_of(area) + delta
+	area["label"] = [label.x, label.y]
+
+
+## Add a corner after [param index]. Used when the GM clicks an edge midpoint.
+static func insert_corner(points: PackedVector2Array, index: int, at: Vector2) -> PackedVector2Array:
+	var out := points.duplicate()
+	out.insert(clampi(index + 1, 0, out.size()), at)
+	return out
+
+
+## Drop a corner. A polygon needs three, so the last three are held.
+static func remove_corner(points: PackedVector2Array, index: int) -> PackedVector2Array:
+	if points.size() <= 3 or index < 0 or index >= points.size():
+		return points
+	var out := points.duplicate()
+	out.remove_at(index)
+	return out
+
+
+## Midpoint of every edge, in order, for drawing the "add a corner" handles.
+static func edge_midpoints(points: PackedVector2Array) -> PackedVector2Array:
+	var mids := PackedVector2Array()
+	for index in points.size():
+		mids.append((points[index] + points[(index + 1) % points.size()]) * 0.5)
+	return mids

@@ -20,10 +20,41 @@ one atomic operation and `/ws` broadcasts the resulting campaign state.
 checksum-verified integrity. The active save shows party status, the latest
 session log, and restore points.
 
-**City** — provides the built-in Night City district view or any raster image
-selected by the GM. Uploaded images are normalized to PNG, embedded in the
-campaign save, and support persistent polygon zones. Choose **Draw zone**,
-left-click vertices, and right-click to finish.
+**City** — Night City as hover-inspectable zone plates. Each reports who holds
+it, what it is, danger, population, law response and net density. Diamond
+markers flag zones carrying open job hooks.
+
+Zones are campaign data, not a fixed list. Draw a new one corner by corner
+straight onto the map and it becomes an area with the same fields as every
+built-in district, ready to fill in. The Areas tab lists them all with Edit and
+Delete on each; deleting a zone also removes the job hooks that pointed at it,
+and says so before it does. The eight Night City districts are only the seed —
+a campaign saved before zones were editable is migrated on open, keeping any
+overrides it already carried.
+
+What a zone occupies is editable too, not just what it says. **Reshape on the
+map** puts handles on its corners: drag one to move it, click a cross on an edge
+to add a corner there, right-click a corner to remove it, or drag inside the
+shape to slide the whole plate — name included. Three corners is the floor. When
+you finish, every pin is re-checked against the new boundary, so a district that
+grew over a clinic now claims it.
+
+Points of interest are pins dropped inside those zones — a clinic, a fixer's
+booth, a corp tower. Each carries a name, a kind and notes, and can link to a
+location: pick an existing board or build a fresh one on the spot. A linked pin
+draws filled and opens its board in one click; an unlinked one draws hollow,
+because it is a note on the map rather than somewhere the party can walk into.
+The Places tab lists them all. Deleting a zone re-homes its pins rather than
+deleting them — a place the party knows about does not stop existing because
+the GM redrew a boundary.
+
+**Upload map** puts the GM's own image behind those plates. It is normalized to
+PNG, stored inside the campaign save, and drawn as a *backdrop* rather than a
+separate mode — zones, pins and reshaping all keep working on top of it, so a
+zone drawn over a real landmark stays on that landmark. A slider sets how
+strongly it reads, and `M` hides it. A campaign carrying label-only zones from
+the earlier annotation tool has them adopted into `areas` on open, so they gain
+the district fields instead of being dropped.
 
 The in-world clock, date, shift, and weather are campaign state. Crossing a
 month boundary automatically bills every configured character for the upcoming
@@ -62,9 +93,9 @@ inverse so undo restores previous state structurally.
 Open `project.godot` in Godot 4.7, or run:
 
 ```bash
-godot --path .
-./run-tests.sh
-./run-shots.sh
+godot --path .                # run the app
+./run-tests.sh                # headless logic suite
+./run-shots.sh                # render every screen to .shots/ (needs Xvfb)
 ```
 
 Both scripts accept `GODOT=/path/to/godot`. The test script performs the import
@@ -108,8 +139,8 @@ scripts/
   rules/             dice, resolver, events, tables, Lifestyle billing
   campaign/          .red container, schema, store, fixtures
   encounter/         initiative, rounds, turns
-  city/              built-in Night City district data
-  board/             isometric board
+  city/              zone data, the Night City seed, map images
+  board/             the isometric board
   screens/           library, city, location, forge
   ui/theme.gd        palette, fonts, widget factories
 tests/               headless runner and suites

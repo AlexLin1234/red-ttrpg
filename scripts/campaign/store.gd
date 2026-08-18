@@ -11,6 +11,8 @@ signal campaign_opened
 signal campaign_changed
 signal campaign_saved
 signal status_changed(message: String)
+## Raised when a map pin asks for its board to be opened.
+signal open_location_requested(location_id: String)
 
 var path := ""
 var manifest: Dictionary = {}
@@ -290,3 +292,91 @@ func add_character(character: Dictionary) -> void:
 func add_cover(cover: Dictionary) -> void:
 	(campaign["cover_palette"] as Array).append(cover)
 	mark_dirty()
+
+
+# -- areas ---------------------------------------------------------------------
+#
+# Map zones are campaign data, not a fixed list. A campaign saved before areas
+# existed is migrated on open: the built-in districts become editable records,
+# with any per-district overrides it already carried folded in.
+
+
+func _ensure_areas() -> void:
+	CampaignSchema.migrate_areas(campaign)
+
+
+func areas() -> Array:
+	if not is_open():
+		return []
+	_ensure_areas()
+	return campaign["areas"]
+
+
+func area_by_id(id: String) -> Dictionary:
+	return CampaignSchema.area_by_id(campaign, id) if is_open() else {}
+
+
+func add_area(area: Dictionary) -> void:
+	areas().append(area)
+	mark_dirty()
+
+
+func remove_area(id: String) -> int:
+	var dropped := CampaignSchema.remove_area(campaign, id)
+	mark_dirty()
+	return dropped
+
+
+func hooks_for_area(id: String) -> Array:
+	return CampaignSchema.hooks_for_area(campaign, id)
+
+
+# -- points of interest ------------------------------------------------------
+
+
+func points_of_interest() -> Array:
+	return CampaignSchema.points_of_interest(campaign) if is_open() else []
+
+
+func poi_by_id(id: String) -> Dictionary:
+	return CampaignSchema.poi_by_id(campaign, id) if is_open() else {}
+
+
+func pois_in_area(area_id: String) -> Array:
+	return CampaignSchema.pois_in_area(campaign, area_id) if is_open() else []
+
+
+func add_poi(poi: Dictionary) -> void:
+	points_of_interest().append(poi)
+	mark_dirty()
+
+
+func remove_poi(id: String) -> void:
+	CampaignSchema.remove_poi(campaign, id)
+	mark_dirty()
+
+
+func location_by_id(id: String) -> Dictionary:
+	for location in locations:
+		if String((location as Dictionary)["id"]) == id:
+			return location
+	return {}
+
+
+## Build an empty board for a pin and link the two together, so a place on the
+## map becomes somewhere the party can actually walk into.
+func create_location_for_poi(poi: Dictionary) -> Dictionary:
+	var location := CampaignFixtures.new_location(
+		String(poi.get("name", "New Location")), String(poi.get("area_id", ""))
+	)
+	locations.append(location)
+	poi["location_id"] = String(location["id"])
+	mark_dirty()
+	return location
+
+
+func open_location(location_id: String) -> void:
+	if location_by_id(location_id).is_empty():
+		return
+	active_location_id = location_id
+	open_location_requested.emit(location_id)
