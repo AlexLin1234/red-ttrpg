@@ -320,8 +320,14 @@ func _build_stats_tab(body: VBoxContainer, character: Dictionary) -> void:
 	_build_role_section(body, character)
 	body.add_child(UI.rule_line())
 	var stats: Dictionary = character["stats"]
+	var creating := not bool(character.get("creation_complete", true))
 	body.add_child(
-		_section_head("Stats", "%d points spent" % CampaignSchema.points_spent(stats))
+		_section_head(
+			"Stats",
+			"%d / %d creation points" % [CampaignSchema.points_spent(stats), CharacterRules.STAT_POINT_BUDGET]
+			if creating
+			else "Locked after creation (not improvable with IP)",
+		)
 	)
 
 	var grid := GridContainer.new()
@@ -339,9 +345,10 @@ func _build_stats_tab(body: VBoxContainer, character: Dictionary) -> void:
 		box.add_child(key_label)
 
 		var spin := SpinBox.new()
-		spin.min_value = 1
-		spin.max_value = 10
+		spin.min_value = CharacterRules.CREATION_STAT_MIN
+		spin.max_value = CharacterRules.CREATION_STAT_MAX
 		spin.value = int(stats.get(key, 4))
+		spin.editable = creating
 		spin.custom_minimum_size = Vector2(40, 0)
 		spin.get_line_edit().add_theme_font_override("font", UI.DISPLAY_FONT)
 		spin.get_line_edit().add_theme_font_size_override("font_size", 19)
@@ -350,8 +357,11 @@ func _build_stats_tab(body: VBoxContainer, character: Dictionary) -> void:
 		var stat_key := String(key)
 		spin.value_changed.connect(
 			func(value: float) -> void:
-				(Store.active_character()["stats"] as Dictionary)[stat_key] = int(value)
-				Store.mark_dirty()
+				if CharacterRules.set_stat(Store.active_character(), stat_key, int(value)):
+					Store.mark_dirty()
+					_refresh_sheet()
+				else:
+					spin.set_value_no_signal(int((Store.active_character()["stats"] as Dictionary)[stat_key]))
 		)
 		box.add_child(spin)
 		grid.add_child(tile)
@@ -387,7 +397,9 @@ func _build_role_section(body: VBoxContainer, character: Dictionary) -> void:
 	var role_key := String(character.get("role_key", ""))
 	var profile := CharacterRules.role(role_key)
 	var ability: Dictionary = character.get("role_ability", {})
-	body.add_child(_section_head("Role & ability", "Starting Role Ability rank · 4"))
+	var creating := not bool(character.get("creation_complete", true))
+	var ip := int(character.get("improvement_points", 0))
+	body.add_child(_section_head("Role & ability", "%d IP available" % ip))
 
 	var editor := UI.hbox(UI.GAP_2)
 	var picker := OptionButton.new()
@@ -409,6 +421,7 @@ func _build_role_section(body: VBoxContainer, character: Dictionary) -> void:
 			_refresh_roster()
 			_refresh_sheet()
 	)
+	picker.disabled = not creating
 	editor.add_child(picker)
 
 	var rank := SpinBox.new()
@@ -417,15 +430,51 @@ func _build_role_section(body: VBoxContainer, character: Dictionary) -> void:
 	rank.value = maxi(1, int(ability.get("rank", 4)))
 	rank.prefix = "Rank "
 	rank.custom_minimum_size = Vector2(110, 0)
-	rank.editable = not profile.is_empty()
-	rank.value_changed.connect(
-		func(value: float) -> void:
-			CharacterRules.set_role_rank(Store.active_character(), int(value))
-			Store.mark_dirty()
-			_refresh_sheet()
-	)
+	rank.editable = false
 	editor.add_child(rank)
+	if not creating and not profile.is_empty() and int(ability.get("rank", 0)) < 10:
+		var improve := UI.primary_button("Improve · %d IP" % CharacterRules.role_ip_cost(character))
+		improve.pressed.connect(
+			func() -> void:
+				if CharacterRules.improve_role(Store.active_character()):
+					Store.mark_dirty()
+					_refresh_sheet()
+		)
+		editor.add_child(improve)
 	body.add_child(editor)
+
+	if creating:
+		var status := CharacterRules.creation_status(character)
+		var finish := UI.primary_button(
+			"Finish creation · Stats %d/%d · Skills %d/%d"
+			% [status["stat_spent"], status["stat_maximum"], status["skill_spent"], status["skill_maximum"]]
+		)
+		finish.disabled = (
+			int(status["stat_spent"]) != int(status["stat_maximum"])
+			or int(status["skill_spent"]) != int(status["skill_maximum"])
+			or profile.is_empty()
+		)
+		finish.tooltip_text = "Choose a Role and spend exactly the Complete Package point budgets."
+		finish.pressed.connect(
+			func() -> void:
+				if CharacterRules.finish_creation(Store.active_character()):
+					Store.mark_dirty()
+					_refresh_sheet()
+		)
+		body.add_child(finish)
+	else:
+		var ip_editor := SpinBox.new()
+		ip_editor.min_value = 0
+		ip_editor.max_value = 99999
+		ip_editor.value = ip
+		ip_editor.prefix = "Available IP "
+		ip_editor.tooltip_text = "Record IP awarded by the GM. Improvements deduct from this pool."
+		ip_editor.value_changed.connect(
+			func(value: float) -> void:
+				Store.active_character()["improvement_points"] = int(value)
+				Store.mark_dirty()
+		)
+		body.add_child(ip_editor)
 
 	if profile.is_empty():
 		body.add_child(UI.micro("Choose one of the ten Roles to configure its Role Ability."))
@@ -570,10 +619,11 @@ func _build_skills_tab(body: VBoxContainer, character: Dictionary) -> void:
 	CharacterRules.ensure_character(character)
 	var stats: Dictionary = character["stats"]
 	var skills: Array = character.get("skills", [])
+	var creating := not bool(character.get("creation_complete", true))
 	body.add_child(
 		_section_head(
 			"Skill checks",
-			"%d points recorded · STAT + Skill + 1d10" % CharacterRules.skill_points(character),
+			("%d / %d creation points" % [CharacterRules.skill_points(character), CharacterRules.SKILL_POINT_BUDGET]) if creating else "%d IP available · STAT + Skill + 1d10" % int(character.get("improvement_points", 0)),
 		)
 	)
 	var check_row := UI.hbox(UI.GAP_2)
@@ -613,7 +663,7 @@ func _build_skills_tab(body: VBoxContainer, character: Dictionary) -> void:
 	)
 
 	body.add_child(UI.rule_line())
-	body.add_child(_section_head("Chosen Skills", "Basic Skills stay at Level 2 or higher"))
+	body.add_child(_section_head("Chosen Skills", "Creation maximum Level 6" if creating else "Raise one Level at a time with IP"))
 	if skills.is_empty():
 		body.add_child(UI.micro("No Skills selected."))
 	for skill in skills:
@@ -630,9 +680,11 @@ func _build_skills_tab(body: VBoxContainer, character: Dictionary) -> void:
 		)
 		var level := SpinBox.new()
 		level.min_value = 2 if CharacterRules.BASIC_SKILLS.has(String(entry["name"])) else 0
-		level.max_value = 10
+		level.max_value = CharacterRules.CREATION_SKILL_MAX if creating else mini(10, int(entry["level"]) + 1)
 		level.value = int(entry["level"])
 		level.prefix = "Lv "
+		if not creating and int(entry["level"]) < 10:
+			level.tooltip_text = "Next Level costs %d IP%s" % [CharacterRules.skill_ip_cost(entry), " (x2 Skill)" if bool(entry.get("x2", false)) else ""]
 		level.custom_minimum_size = Vector2(88, 0)
 		row.add_child(level)
 		var total := UI.value("+%d" % CampaignSchema.skill_total(stats, entry), 11, UI.ACCENT)
@@ -641,14 +693,14 @@ func _build_skills_tab(body: VBoxContainer, character: Dictionary) -> void:
 		row.add_child(total)
 		level.value_changed.connect(
 			func(value: float) -> void:
-				entry["level"] = int(value)
-				total.text = "+%d" % CampaignSchema.skill_total(
-					Store.active_character()["stats"], entry
-				)
-				Store.mark_dirty()
+				if CharacterRules.set_skill_level(Store.active_character(), String(entry["name"]), int(value)):
+					Store.mark_dirty()
+					_refresh_sheet()
+				else:
+					level.set_value_no_signal(int(entry["level"]))
 		)
 		var remove := UI.plain_button("Remove")
-		remove.disabled = CharacterRules.BASIC_SKILLS.has(String(entry["name"]))
+		remove.disabled = CharacterRules.BASIC_SKILLS.has(String(entry["name"])) or not creating
 		remove.tooltip_text = "Basic Skills are required." if remove.disabled else "Remove this Skill."
 		remove.pressed.connect(
 			func() -> void:
@@ -691,12 +743,13 @@ func _build_skills_tab(body: VBoxContainer, character: Dictionary) -> void:
 	add_row.add_child(specialty)
 	var new_level := SpinBox.new()
 	new_level.min_value = 0
-	new_level.max_value = 10
+	new_level.max_value = CharacterRules.CREATION_SKILL_MAX
 	new_level.value = 0
 	new_level.prefix = "Lv "
 	new_level.custom_minimum_size = Vector2(88, 0)
 	add_row.add_child(new_level)
 	var add_button := UI.primary_button("Add")
+	add_button.disabled = not creating
 	add_row.add_child(add_button)
 	body.add_child(add_row)
 	var add_status := UI.micro("Specialized Skills require a subject.")
@@ -1165,6 +1218,8 @@ func _blank_character() -> Dictionary:
 		"role": "Unset",
 		"role_key": "",
 		"role_ability": {"name": "", "rank": 0, "options": {}},
+		"creation_complete": false,
+		"improvement_points": 0,
 		"kind": "pc",
 		"side": "party",
 		"tags": ["PC"],

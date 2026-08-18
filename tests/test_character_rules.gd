@@ -118,3 +118,31 @@ static func run(h: Harness) -> void:
 	character["skills"] = CharacterRules.new_character_skills()
 	h.equal(CharacterRules.remove_skill(character, "Athletics"), false, "Basic Skill retained")
 	h.equal(CharacterRules.remove_skill(character, "Stealth"), false, "Basic Skill retained")
+
+	h.it("enforces Complete Package creation budgets and limits")
+	var recruit := _character()
+	recruit["creation_complete"] = false
+	recruit["stats"] = CampaignSchema.empty_stats()
+	recruit["skills"] = CharacterRules.new_character_skills()
+	h.equal(CharacterRules.set_stat(recruit, "INT", 8), true, "creation STAT raised")
+	for key in ["REF", "DEX", "TECH", "COOL"]:
+		h.equal(CharacterRules.set_stat(recruit, key, 8), true, "%s raised" % key)
+	h.equal(CharacterRules.set_stat(recruit, "WILL", 6), true, "62nd point assigned")
+	h.equal(CharacterRules.set_stat(recruit, "LUCK", 8), false, "62-point ceiling enforced")
+	h.equal(CharacterRules.add_skill(recruit, "Handgun", 7), true, "new Skill added")
+	h.equal(CharacterRules.selected_skill(recruit, "Handgun")["level"], 6, "creation Level capped")
+
+	h.it("spends IP at rules-as-written Skill and Role Ability costs")
+	var veteran := _character()
+	veteran["creation_complete"] = true
+	veteran["improvement_points"] = 1000
+	CharacterRules.select_role(veteran, "solo")
+	CharacterRules.add_skill(veteran, "Handgun", 5)
+	h.equal(CharacterRules.skill_ip_cost(CharacterRules.selected_skill(veteran, "Handgun")), 120, "Level 6 cost")
+	h.equal(CharacterRules.set_skill_level(veteran, "Handgun", 6), true, "Skill improved")
+	h.equal(veteran["improvement_points"], 880, "Skill IP deducted")
+	h.equal(CharacterRules.role_ip_cost(veteran), 300, "Role Rank 5 cost")
+	h.equal(CharacterRules.improve_role(veteran), true, "Role improved")
+	h.equal(veteran["role_ability"]["rank"], 5, "Role rank raised")
+	h.equal(veteran["improvement_points"], 580, "Role IP deducted")
+	h.equal(CharacterRules.set_stat(veteran, "INT", 8), false, "STAT cannot improve with IP")

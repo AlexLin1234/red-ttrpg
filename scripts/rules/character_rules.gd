@@ -85,6 +85,15 @@ const BASIC_SKILLS: PackedStringArray = [
 	"Stealth",
 ]
 
+# Complete Package character generation limits and Improvement Point costs.
+const STAT_POINT_BUDGET := 62
+const SKILL_POINT_BUDGET := 86
+const CREATION_STAT_MIN := 2
+const CREATION_STAT_MAX := 8
+const CREATION_SKILL_MAX := 6
+const SKILL_IP_MULTIPLIER := 20
+const ROLE_IP_MULTIPLIER := 60
+
 # Skills whose name needs a player-supplied subject. The saved name is written
 # as "Language (Japanese)", for example, while retaining Language's INT link.
 const SPECIALIZED_SKILLS: PackedStringArray = [
@@ -232,6 +241,10 @@ static func selected_skill(character: Dictionary, name: String) -> Dictionary:
 
 
 static func ensure_character(character: Dictionary) -> void:
+	character["improvement_points"] = maxi(0, int(character.get("improvement_points", 0)))
+	# Old sheets predate the creation workflow and remain completed rather than
+	# unexpectedly becoming locked behind a point-allocation screen.
+	character["creation_complete"] = bool(character.get("creation_complete", true))
 	var key := String(character.get("role_key", ""))
 	if role(key).is_empty():
 		key = role_key_from_name(String(character.get("role", "")))
@@ -439,12 +452,18 @@ static func add_skill(
 		name = "%s (%s)" % [base_name, specialty.strip_edges()]
 	if not selected_skill(character, name).is_empty():
 		return false
+	var adjusted_level := clampi(level, 0, 10)
+	if not bool(character["creation_complete"]):
+		adjusted_level = mini(adjusted_level, CREATION_SKILL_MAX)
+		var added_cost := adjusted_level * (2 if bool(definition.get("x2", false)) else 1)
+		if skill_points(character) + added_cost > SKILL_POINT_BUDGET:
+			return false
 	var skills: Array = character["skills"]
 	skills.append(
 		{
 			"name": name,
 			"stat": definition["stat"],
-			"level": clampi(level, 0, 10),
+			"level": adjusted_level,
 			"x2": bool(definition.get("x2", false)),
 		}
 	)
@@ -468,6 +487,96 @@ static func skill_points(character: Dictionary) -> int:
 		var entry: Dictionary = value
 		total += int(entry.get("level", 0)) * (2 if bool(entry.get("x2", false)) else 1)
 	return total
+
+
+static func creation_status(character: Dictionary) -> Dictionary:
+	return {
+		"stat_spent": CampaignSchema.points_spent(character.get("stats", {})),
+		"stat_maximum": STAT_POINT_BUDGET,
+		"skill_spent": skill_points(character),
+		"skill_maximum": SKILL_POINT_BUDGET,
+		"complete": bool(character.get("creation_complete", true)),
+	}
+
+
+static func set_stat(character: Dictionary, key: String, value: int) -> bool:
+	if not CampaignSchema.STAT_KEYS.has(key):
+		return false
+	ensure_character(character)
+	if bool(character["creation_complete"]):
+		# In RED, STATs are not purchased with IP after character generation.
+		return false
+	var stats: Dictionary = character.get("stats", {})
+	var adjusted := clampi(value, CREATION_STAT_MIN, CREATION_STAT_MAX)
+	var spent_without_this := CampaignSchema.points_spent(stats) - int(stats.get(key, 0))
+	if spent_without_this + adjusted > STAT_POINT_BUDGET:
+		return false
+	stats[key] = adjusted
+	return true
+
+
+static func set_skill_level(character: Dictionary, name: String, value: int) -> bool:
+	ensure_character(character)
+	var entry := selected_skill(character, name)
+	if entry.is_empty():
+		return false
+	var old_level := int(entry.get("level", 0))
+	var minimum := 2 if BASIC_SKILLS.has(name) else 0
+	if not bool(character["creation_complete"]):
+		var adjusted := clampi(value, minimum, CREATION_SKILL_MAX)
+		var multiplier := 2 if bool(entry.get("x2", false)) else 1
+		if skill_points(character) + (adjusted - old_level) * multiplier > SKILL_POINT_BUDGET:
+			return false
+		entry["level"] = adjusted
+		return true
+	if value != old_level + 1 or old_level >= 10:
+		return false
+	var cost := value * SKILL_IP_MULTIPLIER * (2 if bool(entry.get("x2", false)) else 1)
+	if int(character["improvement_points"]) < cost:
+		return false
+	character["improvement_points"] = int(character["improvement_points"]) - cost
+	entry["level"] = value
+	return true
+
+
+static func skill_ip_cost(skill: Dictionary) -> int:
+	return (int(skill.get("level", 0)) + 1) * SKILL_IP_MULTIPLIER * (2 if bool(skill.get("x2", false)) else 1)
+
+
+static func role_ip_cost(character: Dictionary) -> int:
+	ensure_character(character)
+	return (int((character["role_ability"] as Dictionary).get("rank", 0)) + 1) * ROLE_IP_MULTIPLIER
+
+
+static func improve_role(character: Dictionary) -> bool:
+	ensure_character(character)
+	var rank := int((character["role_ability"] as Dictionary).get("rank", 0))
+	if not bool(character["creation_complete"]) or rank < 1 or rank >= 10:
+		return false
+	var cost := role_ip_cost(character)
+	if int(character["improvement_points"]) < cost:
+		return false
+	character["improvement_points"] = int(character["improvement_points"]) - cost
+	# role_ip_cost() runs ensure_character() again, which rebuilds role_ability,
+	# so the rank has to be written through a fresh lookup rather than a
+	# reference cached before the cost was computed.
+	(character["role_ability"] as Dictionary)["rank"] = rank + 1
+	_normalize_role_options(character)
+	return true
+
+
+static func finish_creation(character: Dictionary) -> bool:
+	ensure_character(character)
+	if bool(character["creation_complete"]):
+		return true
+	if CampaignSchema.points_spent(character.get("stats", {})) != STAT_POINT_BUDGET:
+		return false
+	if skill_points(character) != SKILL_POINT_BUDGET:
+		return false
+	if role(String(character.get("role_key", ""))).is_empty():
+		return false
+	character["creation_complete"] = true
+	return true
 
 
 static func roll_skill(
