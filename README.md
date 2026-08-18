@@ -8,6 +8,10 @@ No server, sidecar, API, or network connection is required. Rules, campaign
 editing, Lifestyle month closing, and undo/redo all run in GDScript. Campaigns
 are portable `.red` files stored on disk.
 
+An optional FastAPI service and container are included for a persistent cloud
+session. `POST /encounter/month-end` performs the same in-game month close as
+one atomic operation and `/ws` broadcasts the resulting campaign state.
+
 ![The campaign library](docs/mockups/1a-library.png)
 
 ## Features
@@ -88,6 +92,11 @@ The committed `data/.gdignore` prevents Godot from trying to import private
 runtime tables as translation catalogs. If the project was previously opened
 with extracted tables present, close Godot and remove the `.godot/` directory
 once to clear the old failed import records; Godot will rebuild that cache.
+The City screen loads that RGB-compatible PNG at runtime, preserves its aspect
+ratio, and toggles it with **M** or **Map [M]**. When absent, the built-in map
+remains usable. For cloud use, `docker compose up --build` provides persistent
+`/data` campaign storage, a writable map mount, a read-only sourcebook mount,
+and the API health check. Set `SOURCEBOOK_PDF` to the host PDF path.
 
 ## Layout
 
