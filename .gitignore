@@ -12,6 +12,7 @@ data/maps/*.jpg
 data/maps/*.jpeg
 data/maps/*.pdf
 !data/maps/.gitkeep
+!data/.gdignore
 
 # Build output
 build/

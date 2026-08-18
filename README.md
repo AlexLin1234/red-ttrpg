@@ -4,8 +4,9 @@ A standalone desktop GM console for Cyberpunk RED, built as a single Godot 4.7
 project. Four screens cover the campaign library, City map, isometric combat
 location, and character Forge.
 
-No server, sidecar, or network connection is required. Rules run in GDScript
-and campaigns are portable `.red` files stored on disk.
+No server, sidecar, API, or network connection is required. Rules, campaign
+editing, Lifestyle month closing, and undo/redo all run in GDScript. Campaigns
+are portable `.red` files stored on disk.
 
 An optional FastAPI service and container are included for a persistent cloud
 session. `POST /encounter/month-end` performs the same in-game month close as
@@ -82,6 +83,15 @@ python scripts/extract_night_city_map.py \
   --output "data/maps/night_city_2045.png"
 ```
 
+Install the extraction-only dependencies with `python -m pip install -r
+requirements.txt`. The City screen loads the resulting RGB-compatible PNG at
+runtime, preserves its aspect ratio, and toggles it with **M** or **Map [M]**.
+When absent, the built-in map remains usable.
+
+The committed `data/.gdignore` prevents Godot from trying to import private
+runtime tables as translation catalogs. If the project was previously opened
+with extracted tables present, close Godot and remove the `.godot/` directory
+once to clear the old failed import records; Godot will rebuild that cache.
 The City screen loads that RGB-compatible PNG at runtime, preserves its aspect
 ratio, and toggles it with **M** or **Map [M]**. When absent, the built-in map
 remains usable. For cloud use, `docker compose up --build` provides persistent
