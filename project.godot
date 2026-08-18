@@ -17,6 +17,7 @@ config/icon="res://assets/icon.svg"
 [autoload]
 
 Store="*res://scripts/campaign/store.gd"
+ItemDB="*res://scripts/rules/item_database.gd"
 
 [display]
 

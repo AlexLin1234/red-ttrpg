@@ -43,6 +43,7 @@ class Weapon extends RefCounted:
 	## -1 means the weapon cannot autofire.
 	var autofire_rating: int
 	var quality: String
+	var damage_bonus: int
 
 	func _init(
 		p_name: String,
@@ -52,6 +53,7 @@ class Weapon extends RefCounted:
 		p_magazine := 1,
 		p_autofire_rating := -1,
 		p_quality := "standard",
+		p_damage_bonus := 0,
 	) -> void:
 		assert(p_damage_dice > 0, "damage_dice must be positive")
 		assert(p_rof > 0, "rof must be positive")
@@ -64,6 +66,7 @@ class Weapon extends RefCounted:
 		magazine = p_magazine
 		autofire_rating = p_autofire_rating
 		quality = p_quality
+		damage_bonus = p_damage_bonus
 
 	func can_autofire() -> bool:
 		return autofire_rating > 0
@@ -275,7 +278,7 @@ static func resolve_attack(
 	var multiplier := 1
 	if request.mode == "autofire":
 		multiplier = tables.autofire_multiplier(attack_total - defense, request.weapon.autofire_rating)
-	var raw_damage := base_damage * multiplier
+	var raw_damage := base_damage * multiplier + request.weapon.damage_bonus
 
 	var pieces := PackedStringArray()
 	for value in damage_rolls:

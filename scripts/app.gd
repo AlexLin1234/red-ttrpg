@@ -7,12 +7,17 @@ const LibraryScreen := preload("res://scripts/screens/library.gd")
 const CityScreen := preload("res://scripts/screens/city.gd")
 const LocationScreen := preload("res://scripts/screens/location.gd")
 const ForgeScreen := preload("res://scripts/screens/forge.gd")
+const MarketScreen := preload("res://scripts/screens/market.gd")
+const ItemWorkshopScreen := preload("res://scripts/screens/item_workshop.gd")
 
 const SCREENS := [
 	{"id": "library", "label": "Library"},
+	{"id": "workshop", "label": "Item Workshop"},
 	{"id": "city", "label": "City"},
 	{"id": "location", "label": "Location"},
 	{"id": "forge", "label": "Forge"},
+	{"id": "market", "label": "Market"},
+	{"id": "night_market", "label": "Night Market"},
 ]
 
 var _current := "library"
@@ -112,7 +117,7 @@ func _build_header() -> Control:
 
 
 func _show(screen_id: String) -> void:
-	if screen_id != "library" and not Store.is_open():
+	if screen_id not in ["library", "workshop"] and not Store.is_open():
 		return
 	_current = screen_id
 	for id in _nav_buttons:
@@ -123,12 +128,19 @@ func _show(screen_id: String) -> void:
 	match screen_id:
 		"library":
 			_screen = LibraryScreen.new()
+		"workshop":
+			_screen = ItemWorkshopScreen.new()
 		"city":
 			_screen = CityScreen.new()
 		"location":
 			_screen = LocationScreen.new()
 		"forge":
 			_screen = ForgeScreen.new()
+		"market":
+			_screen = MarketScreen.new()
+		"night_market":
+			_screen = MarketScreen.new()
+			_screen.set("night", true)
 		_:
 			_screen = Control.new()
 	_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -161,7 +173,7 @@ func _refresh_header() -> void:
 		_save_button.visible = false
 
 	for id in _nav_buttons:
-		(_nav_buttons[id] as Button).disabled = id != "library" and not Store.is_open()
+		(_nav_buttons[id] as Button).disabled = id not in ["library", "workshop"] and not Store.is_open()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
