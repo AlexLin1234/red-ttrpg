@@ -187,3 +187,40 @@ func add_character(character: Dictionary) -> void:
 func add_cover(cover: Dictionary) -> void:
 	(campaign["cover_palette"] as Array).append(cover)
 	mark_dirty()
+
+
+# -- areas ---------------------------------------------------------------------
+#
+# Map zones are campaign data, not a fixed list. A campaign saved before areas
+# existed is migrated on open: the built-in districts become editable records,
+# with any per-district overrides it already carried folded in.
+
+
+func _ensure_areas() -> void:
+	CampaignSchema.migrate_areas(campaign)
+
+
+func areas() -> Array:
+	if not is_open():
+		return []
+	_ensure_areas()
+	return campaign["areas"]
+
+
+func area_by_id(id: String) -> Dictionary:
+	return CampaignSchema.area_by_id(campaign, id) if is_open() else {}
+
+
+func add_area(area: Dictionary) -> void:
+	areas().append(area)
+	mark_dirty()
+
+
+func remove_area(id: String) -> int:
+	var dropped := CampaignSchema.remove_area(campaign, id)
+	mark_dirty()
+	return dropped
+
+
+func hooks_for_area(id: String) -> Array:
+	return CampaignSchema.hooks_for_area(campaign, id)

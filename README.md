@@ -16,10 +16,18 @@ with its real size, format version and a checksum-verified integrity state. The
 active save gets a hero panel: party HP and humanity, last session's log, and
 named restore points.
 
-**City** — Night City as hover-inspectable district plates. Each reports who
-holds it, danger, population, law response and net density. The in-world clock,
-date, shift and weather are campaign state: advance an hour or a day and the
-save changes with it. Diamond markers flag districts carrying open job hooks.
+**City** — Night City as hover-inspectable zone plates. Each reports who holds
+it, what it is, danger, population, law response and net density. The in-world
+clock, date, shift and weather are campaign state: advance an hour or a day and
+the save changes with it. Diamond markers flag zones carrying open job hooks.
+
+Zones are campaign data, not a fixed list. Draw a new one corner by corner
+straight onto the map and it becomes an area with the same fields as every
+built-in district, ready to fill in. The Areas tab lists them all with Edit and
+Delete on each; deleting a zone also removes the job hooks that pointed at it,
+and says so before it does. The eight Night City districts are only the seed —
+a campaign saved before zones were editable is migrated on open, keeping any
+overrides it already carried.
 
 **Location** — an isometric board. Pick tiles, props or units from the palette
 and click the grid to place them. Roll 1d10 + REF for initiative, then fire.

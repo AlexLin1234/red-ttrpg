@@ -227,3 +227,99 @@ const _WEATHER: Array = [
 
 static func roll_weather() -> Dictionary:
 	return (_WEATHER[randi() % _WEATHER.size()] as Dictionary).duplicate()
+
+
+# -- editable areas ----------------------------------------------------------
+#
+# Districts above are only the seed. Once a campaign is opened they are copied
+# into `campaign.areas`, where the GM can edit, draw and delete them. Polygons
+# are stored flat — [x, y, x, y, …] — because a PackedVector2Array does not
+# survive a JSON round trip into the .red container.
+
+const ZONE_TYPES: PackedStringArray = [
+	"corporate", "combat", "residential", "industrial", "reclaimed", "outland"
+]
+const LAW_RESPONSES: PackedStringArray = [
+	"Immediate", "Moderate", "Slow", "Bought", "Never", "None"
+]
+const NET_DENSITIES: PackedStringArray = [
+	"Saturated", "High", "Medium", "Low", "Private", "None"
+]
+
+
+static func flatten(points: PackedVector2Array) -> Array:
+	var flat: Array = []
+	for point in points:
+		flat.append(point.x)
+		flat.append(point.y)
+	return flat
+
+
+static func points_of(area: Dictionary) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	var flat: Array = area.get("polygon", [])
+	var index := 0
+	while index + 1 < flat.size():
+		points.append(Vector2(float(flat[index]), float(flat[index + 1])))
+		index += 2
+	return points
+
+
+static func label_of(area: Dictionary) -> Vector2:
+	var label: Array = area.get("label", [])
+	if label.size() < 2:
+		return centroid_of(points_of(area))
+	return Vector2(float(label[0]), float(label[1]))
+
+
+static func centroid_of(points: PackedVector2Array) -> Vector2:
+	if points.is_empty():
+		return Vector2.ZERO
+	var total := Vector2.ZERO
+	for point in points:
+		total += point
+	return total / points.size()
+
+
+## Where a new zone's name sits: low and inside, the way the seeded plates read.
+static func suggest_label(points: PackedVector2Array) -> Vector2:
+	if points.is_empty():
+		return Vector2.ZERO
+	var centre := centroid_of(points)
+	var lowest := points[0].y
+	for point in points:
+		lowest = maxf(lowest, point.y)
+	return Vector2(centre.x - 60.0, lowest - 40.0)
+
+
+## The seed districts in the editable, JSON-safe shape.
+static func default_areas() -> Array:
+	var areas: Array = []
+	for district in districts():
+		var entry: Dictionary = district
+		var area := entry.duplicate(true)
+		area["polygon"] = flatten(entry["polygon"])
+		area["label"] = [entry["label"].x, entry["label"].y]
+		area["custom"] = false
+		areas.append(area)
+	return areas
+
+
+## A blank area around a freshly drawn polygon.
+static func new_area(points: PackedVector2Array) -> Dictionary:
+	var label := suggest_label(points)
+	return {
+		"id": "area-%d" % Time.get_ticks_usec(),
+		"name": "New Zone",
+		"subtitle": "Unclaimed",
+		"zone_type": "residential",
+		"control": "Unclaimed",
+		"danger": 2,
+		"population": 10000,
+		"law_response": "Moderate",
+		"net_density": "Medium",
+		"description": "",
+		"polygon": flatten(points),
+		"label": [label.x, label.y],
+		"custom": true,
+	}

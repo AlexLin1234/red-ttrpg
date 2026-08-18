@@ -136,3 +136,62 @@ static func suggest_file_name(campaign_name: String) -> String:
 			slug += "_"
 	slug = slug.strip_edges().trim_prefix("_").trim_suffix("_")
 	return "%s.red" % (slug if slug != "" else "campaign")
+
+
+# -- map areas -------------------------------------------------------------------
+#
+# Kept here rather than in the Store so they can be exercised by the headless
+# test runner, which has no autoloads.
+
+
+## Give a campaign its editable `areas` list.
+##
+## A campaign saved before areas existed carries only a `districts` override
+## dictionary; its overrides are folded onto the built-in districts so nothing
+## the GM had already changed is lost.
+static func migrate_areas(campaign: Dictionary) -> void:
+	if campaign.has("areas") and not (campaign["areas"] as Array).is_empty():
+		return
+	var overrides: Dictionary = campaign.get("districts", {})
+	var seeded: Array = []
+	for area in NightCity.default_areas():
+		var entry: Dictionary = area
+		var override: Dictionary = overrides.get(String(entry["id"]), {})
+		for key in override:
+			entry[key] = override[key]
+		seeded.append(entry)
+	campaign["areas"] = seeded
+
+
+static func area_by_id(campaign: Dictionary, id: String) -> Dictionary:
+	for area in campaign.get("areas", []):
+		if String((area as Dictionary)["id"]) == id:
+			return area
+	return {}
+
+
+## Remove an area and any job hooks that pointed at it, so the Jobs tab cannot
+## list work in a district that no longer exists. Returns the hooks dropped.
+static func remove_area(campaign: Dictionary, id: String) -> int:
+	var areas: Array = campaign.get("areas", [])
+	for index in areas.size():
+		if String((areas[index] as Dictionary)["id"]) == id:
+			areas.remove_at(index)
+			break
+	var hooks: Array = campaign.get("hooks", [])
+	var dropped := 0
+	for index in range(hooks.size() - 1, -1, -1):
+		if String((hooks[index] as Dictionary).get("district_id", "")) == id:
+			hooks.remove_at(index)
+			dropped += 1
+	(campaign.get("districts", {}) as Dictionary).erase(id)
+	return dropped
+
+
+static func hooks_for_area(campaign: Dictionary, id: String) -> Array:
+	var found: Array = []
+	for hook in campaign.get("hooks", []):
+		var entry: Dictionary = hook
+		if String(entry.get("district_id", "")) == id and String(entry.get("status", "open")) != "closed":
+			found.append(entry)
+	return found

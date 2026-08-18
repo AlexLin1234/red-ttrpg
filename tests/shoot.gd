@@ -44,6 +44,7 @@ func _ready() -> void:
 	app.call("_show", "city")
 	await _settle(30)
 	await _shoot("1b-city")
+	await _drive_city(app)
 
 	app.call("_show", "location")
 	await _settle(30)
@@ -62,6 +63,47 @@ func _ready() -> void:
 		for error in _errors:
 			print(" - " + error)
 		get_tree().quit(1)
+
+
+## Walk the zone-editing path: list every area, open the editor, and draw a new
+## zone corner by corner.
+func _drive_city(app: Control) -> void:
+	var screen: Node = app.get("_screen")
+	if screen == null or not screen.has_method("start_draw"):
+		_errors.append("city screen did not expose the zone-editing path")
+		return
+
+	screen.call("set_tab", "areas")
+	await _settle(10)
+	await _shoot("1b-areas")
+
+	var ids: PackedStringArray = screen.call("area_ids")
+	if ids.is_empty():
+		_errors.append("no areas to edit")
+		return
+	screen.call("edit_area", ids[0])
+	await _settle(10)
+	await _shoot("1b-edit")
+
+	screen.call("start_draw")
+	await _settle(6)
+	for corner in [Vector2(80, 90), Vector2(230, 70), Vector2(260, 210), Vector2(110, 240)]:
+		screen.call("place_draft_corner", corner)
+		await _settle(3)
+	if int(screen.call("draft_corner_count")) != 4:
+		_errors.append("drawing did not record four corners")
+	await _shoot("1b-draw")
+
+	var before: int = (screen.call("area_ids") as PackedStringArray).size()
+	screen.call("close_draft")
+	await _settle(12)
+	var after: int = (screen.call("area_ids") as PackedStringArray).size()
+	if after != before + 1:
+		_errors.append("closing the shape did not add an area (%d -> %d)" % [before, after])
+	await _shoot("1b-new-zone")
+
+	screen.call("set_tab", "map")
+	await _settle(10)
 
 
 ## Walk the combat path the GM walks: roll initiative, shoot across the deck,
