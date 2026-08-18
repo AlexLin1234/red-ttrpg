@@ -13,6 +13,10 @@ data/maps/*.jpeg
 data/maps/*.pdf
 !data/maps/.gitkeep
 !data/.gdignore
+# Extracted rulebook text, tables and page scans.
+data/chunks.jsonl
+data/rules.db
+data/tables/
 
 # Build output
 build/
