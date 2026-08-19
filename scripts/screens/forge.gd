@@ -319,6 +319,8 @@ func _section_head(title: String, note: String) -> Control:
 func _build_stats_tab(body: VBoxContainer, character: Dictionary) -> void:
 	_build_role_section(body, character)
 	body.add_child(UI.rule_line())
+	_build_model_section(body, character)
+	body.add_child(UI.rule_line())
 	var stats: Dictionary = character["stats"]
 	var creating := not bool(character.get("creation_complete", true))
 	body.add_child(
@@ -391,6 +393,54 @@ func _build_stats_tab(body: VBoxContainer, character: Dictionary) -> void:
 		value_row.add_child(note)
 		box.add_child(value_row)
 		armor_grid.add_child(tile)
+
+
+## Pick the 3D model the board draws for this character. Models are glTF files
+## the GM drops into the library folder; the board normalizes whatever it finds
+## to the declared real-world height, so scale never has to match between them.
+func _build_model_section(body: VBoxContainer, character: Dictionary) -> void:
+	var models := ModelDB.catalog("character")
+	body.add_child(
+		_section_head(
+			"Board model",
+			"%d in the library" % models.size() if ModelDB.has_models() else "Library is empty",
+		)
+	)
+	if models.is_empty():
+		var hint := UI.micro("Drop .glb or .gltf files into %s" % ModelDB.library_path())
+		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		hint.custom_minimum_size.x = 0
+		body.add_child(hint)
+		return
+
+	var row := UI.hbox(UI.GAP_2)
+	var picker := OptionButton.new()
+	picker.add_item("Default token")
+	picker.set_item_metadata(0, "")
+	var current := String(character.get("model_id", ""))
+	for index in models.size():
+		var model: Dictionary = models[index]
+		picker.add_item("%s · %.2gm" % [model["name"], float(model["height_m"])])
+		picker.set_item_metadata(index + 1, String(model["id"]))
+		if String(model["id"]) == current:
+			picker.select(index + 1)
+	picker.item_selected.connect(
+		func(index: int) -> void:
+			Store.active_character()["model_id"] = String(picker.get_item_metadata(index))
+			Store.mark_dirty()
+			_refresh_sheet()
+	)
+	UI.expand(picker, true, false)
+	row.add_child(picker)
+
+	var rescan := UI.plain_button("Rescan library")
+	rescan.pressed.connect(
+		func() -> void:
+			ModelDB.reload()
+			_refresh_sheet()
+	)
+	row.add_child(rescan)
+	body.add_child(row)
 
 
 func _build_role_section(body: VBoxContainer, character: Dictionary) -> void:
@@ -1220,6 +1270,7 @@ func _blank_character() -> Dictionary:
 		"role_ability": {"name": "", "rank": 0, "options": {}},
 		"creation_complete": false,
 		"improvement_points": 0,
+		"model_id": "",
 		"kind": "pc",
 		"side": "party",
 		"tags": ["PC"],

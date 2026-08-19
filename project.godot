@@ -18,6 +18,7 @@ config/icon="res://assets/icon.svg"
 
 Store="*res://scripts/campaign/store.gd"
 ItemDB="*res://scripts/rules/item_database.gd"
+ModelDB="*res://scripts/rules/model_database.gd"
 
 [display]
 

@@ -242,16 +242,32 @@ func _build_props() -> void:
 		body.set_meta("cover_id", String(entry["cover_id"]))
 		body.set_meta("cell", {"x": int(entry["x"]), "z": int(entry["z"]), "layer": int(entry.get("layer", 0))})
 
-		var mesh := MeshInstance3D.new()
-		var box := BoxMesh.new()
-		box.size = extents
-		mesh.mesh = box
-		var material := StandardMaterial3D.new()
-		material.albedo_color = _material_color(String(cover["material"]))
-		material.roughness = 0.7
-		material.metallic = 0.25
-		mesh.material_override = material
-		body.add_child(mesh)
+		# A model stands in for the block visually only. The collision box below
+		# is left exactly as it was, because cover_between() raycasts against it
+		# and line of sight must not change with the art.
+		var model := _resolve_model(
+			String(entry.get("model_id", cover.get("model_id", ""))),
+			false,
+			float(cover["height"]),
+		)
+		if model.is_empty():
+			var mesh := MeshInstance3D.new()
+			var box := BoxMesh.new()
+			box.size = extents
+			mesh.mesh = box
+			var material := StandardMaterial3D.new()
+			material.albedo_color = _material_color(String(cover["material"]))
+			material.roughness = 0.7
+			material.metallic = 0.25
+			mesh.material_override = material
+			body.add_child(mesh)
+		else:
+			# The body is seated at the block's centre, so a model whose feet sit
+			# at its own origin has to drop by half the block's height to stand
+			# on the ground rather than hover at the block's midpoint.
+			var node: Node3D = model["node"]
+			node.position = Vector3(0, -extents.y * 0.5, 0)
+			body.add_child(node)
 
 		var shape := CollisionShape3D.new()
 		var box_shape := BoxShape3D.new()
@@ -283,7 +299,16 @@ static func _material_color(material: String) -> Color:
 			return Color("39414b")
 
 
-## [param visuals] maps unit id to {side, hp_ratio, down}.
+## Resolve a model id into a board-ready node, or an empty Dictionary when the
+## id is blank or the library cannot supply it. Returns {node, height, radius}
+## with both measurements already in board units.
+func _resolve_model(model_id: String, prone := false, height_m := 0.0) -> Dictionary:
+	if model_id.is_empty():
+		return {}
+	return ModelDB.instantiate(model_id, tile_metres(), prone, height_m)
+
+
+## [param visuals] maps unit id to {side, hp_ratio, down, model_id}.
 func set_units(units: Array, visuals: Dictionary) -> void:
 	_clear(_units)
 	_unit_nodes = {}
@@ -308,21 +333,32 @@ func set_units(units: Array, visuals: Dictionary) -> void:
 		body.position = world_of(entry)
 
 		var height := 0.24 if down else 1.05
-		var mesh := MeshInstance3D.new()
-		var cylinder := CylinderMesh.new()
-		cylinder.top_radius = 0.36
-		cylinder.bottom_radius = 0.42
-		cylinder.height = height
-		mesh.mesh = cylinder
-		var material := StandardMaterial3D.new()
-		material.albedo_color = color
-		material.emission_enabled = true
-		material.emission = color
-		material.emission_energy_multiplier = 0.1 if down else 0.35
-		material.roughness = 0.5
-		mesh.material_override = material
-		mesh.position = Vector3(0, height * 0.5, 0)
-		body.add_child(mesh)
+		var radius := 0.46
+
+		# A character may carry its own model. It replaces the token's body but
+		# not its footprint: the base disc, health pip, selection ring and
+		# collision shape all keep working off whatever height it normalizes to.
+		var model := _resolve_model(String(visual.get("model_id", "")), down)
+		if model.is_empty():
+			var mesh := MeshInstance3D.new()
+			var cylinder := CylinderMesh.new()
+			cylinder.top_radius = 0.36
+			cylinder.bottom_radius = 0.42
+			cylinder.height = height
+			mesh.mesh = cylinder
+			var material := StandardMaterial3D.new()
+			material.albedo_color = color
+			material.emission_enabled = true
+			material.emission = color
+			material.emission_energy_multiplier = 0.1 if down else 0.35
+			material.roughness = 0.5
+			mesh.material_override = material
+			mesh.position = Vector3(0, height * 0.5, 0)
+			body.add_child(mesh)
+		else:
+			height = float(model["height"])
+			radius = maxf(0.46, float(model["radius"]))
+			body.add_child(model["node"])
 
 		var shape := CollisionShape3D.new()
 		var cylinder_shape := CylinderShape3D.new()
@@ -335,8 +371,8 @@ func set_units(units: Array, visuals: Dictionary) -> void:
 		# A base disc reading as the unit's footprint on the grid.
 		var base := MeshInstance3D.new()
 		var disc := CylinderMesh.new()
-		disc.top_radius = 0.46
-		disc.bottom_radius = 0.46
+		disc.top_radius = radius
+		disc.bottom_radius = radius
 		disc.height = 0.02
 		base.mesh = disc
 		base.material_override = _unshaded(color, 0.3)

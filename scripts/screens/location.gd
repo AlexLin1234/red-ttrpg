@@ -733,6 +733,7 @@ func _sync_units() -> void:
 			"side": String(character.get("side", "neutral")),
 			"hp_ratio": clampf(float(hp) / maxf(1.0, float(max_hp)), 0.0, 1.0),
 			"down": hp <= 0,
+			"model_id": String(character.get("model_id", "")),
 		}
 	_board.set_units(location.get("units", []), visuals)
 	_board.set_selection(_selected_unit)
