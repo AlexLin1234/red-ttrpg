@@ -151,6 +151,8 @@ static func buy(character: Dictionary, catalog: Array, item_id: String) -> Dicti
 		character["gear"] = []
 	var owned := product.duplicate(true)
 	owned["detail"] = String(product.get("description", product.get("detail", "")))
+	if product.has("armor"):
+		owned["armor_profile"] = (product["armor"] as Dictionary).duplicate(true)
 	owned.erase("id")
 	owned.erase("price")
 	owned.erase("weapon")

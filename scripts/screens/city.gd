@@ -10,6 +10,7 @@ const TABS: PackedStringArray = ["map", "areas", "places", "control", "jobs", "n
 
 ## Clicking within this many map units of the first vertex closes the polygon.
 const CLOSE_RADIUS := 18.0
+const EconomyRules := preload("res://scripts/rules/economy.gd")
 
 var _tab := "map"
 ## "inspect", "edit", "draw", "pin" or "reshape".
@@ -17,6 +18,9 @@ var _mode := "inspect"
 ## Whether the rail is showing a zone or a point of interest.
 var _focus_kind := "area"
 var _focus_poi := ""
+## A clicked place remains selected while the pointer travels to its detail rail.
+## _focus_poi may temporarily follow hover, then returns to this id.
+var _selected_poi := ""
 var _focus_id := "pacifica"
 var _pinned_id := "pacifica"
 var _map: _MapView
@@ -25,11 +29,18 @@ var _tab_buttons: Dictionary = {}
 var _count_label: Label
 var _map_dialog: FileDialog
 var _month_dialog: ConfirmationDialog
+var _hustle_dialog: ConfirmationDialog
+var _hustle_all: CheckBox
+var _hustle_list: VBoxContainer
+var _hustle_checks: Dictionary = {}
 var _campaign_dialog: ConfirmationDialog
 var _campaign_name: LineEdit
 var _campaign_city: LineEdit
 var _campaign_gm: LineEdit
 var _closing_month := false
+var _lifestyle_queue: Array = []
+var _lifestyle_prompt_index := 0
+var _after_lifestyle_confirmation := Callable()
 
 
 func _ready() -> void:
@@ -54,6 +65,7 @@ func _ready() -> void:
 	_map.poi_hovered.connect(_on_poi_hovered)
 	_map.poi_picked.connect(_on_poi_picked)
 	_map.poi_placed.connect(_on_poi_placed)
+	_map.poi_moved.connect(_on_poi_moved)
 	_map.reshape_changed.connect(_on_reshape_changed)
 	map_shell.add_child(_map)
 
@@ -82,13 +94,34 @@ func _ready() -> void:
 	add_child(_map_dialog)
 
 	_month_dialog = ConfirmationDialog.new()
-	_month_dialog.title = "Close campaign month?"
-	_month_dialog.dialog_text = "Pay every character's Lifestyle for the upcoming in-game month?"
-	_month_dialog.confirmed.connect(_confirm_month_close)
+	_month_dialog.confirmed.connect(_confirm_lifestyle_player)
+	_month_dialog.canceled.connect(_cancel_lifestyle_prompts)
 	add_child(_month_dialog)
+
+	_build_hustle_dialog()
 
 	_build_campaign_dialog()
 	_refresh()
+
+
+func _build_hustle_dialog() -> void:
+	_hustle_dialog = ConfirmationDialog.new()
+	_hustle_dialog.title = "Add free-time Hustle"
+	_hustle_dialog.get_ok_button().text = "Roll Hustle"
+	var form := UI.vbox(UI.GAP_3)
+	form.add_child(UI.body("Choose one, several, or every eligible player. They work concurrently during the same free-time week.", 12, UI.MUTED))
+	form.add_child(UI.micro("Players"))
+	_hustle_all = CheckBox.new()
+	_hustle_all.text = "All eligible players"
+	_hustle_all.toggled.connect(_toggle_all_hustlers)
+	form.add_child(_hustle_all)
+	form.add_child(UI.rule_line())
+	_hustle_list = UI.vbox(UI.GAP_1)
+	form.add_child(_hustle_list)
+	form.add_child(UI.micro("The selected players each roll once; campaign time advances 7 days total.", UI.WARN))
+	_hustle_dialog.add_child(UI.margins(form, UI.GAP_4))
+	_hustle_dialog.confirmed.connect(_confirm_downtime_hustle)
+	add_child(_hustle_dialog)
 
 
 func _build_bar() -> Control:
@@ -204,15 +237,21 @@ func _on_hovered(area_id: String) -> void:
 
 func _on_picked(area_id: String) -> void:
 	_focus_kind = "area"
+	_selected_poi = ""
+	_focus_poi = ""
 	_pinned_id = area_id
 	_focus_id = area_id
 	_map.set_focus(_focus_id)
+	_map.set_focus_poi("")
 	_refresh_rail()
 
 
 func _on_zone_drawn(points: PackedVector2Array) -> void:
 	var area := NightCity.new_area(points)
 	Store.add_area(area)
+	_selected_poi = ""
+	_focus_poi = ""
+	_focus_kind = "area"
 	_focus_id = String(area["id"])
 	_pinned_id = _focus_id
 	# Straight into the form: a zone with no name or faction is not useful yet.
@@ -227,11 +266,21 @@ func _on_poi_hovered(poi_id: String) -> void:
 	if _mode != "inspect":
 		return
 	if poi_id == "":
-		if _focus_kind == "poi":
+		if _selected_poi != "":
+			var changed := _focus_kind != "poi" or _focus_poi != _selected_poi
+			_focus_kind = "poi"
+			_focus_poi = _selected_poi
+			_map.set_focus_poi(_selected_poi)
+			if changed and _tab == "map":
+				_refresh_rail()
+		elif _focus_kind == "poi":
 			_focus_kind = "area"
+			_focus_poi = ""
 			_map.set_focus_poi("")
 			if _tab == "map":
 				_refresh_rail()
+		return
+	if _focus_kind == "poi" and _focus_poi == poi_id:
 		return
 	_focus_kind = "poi"
 	_focus_poi = poi_id
@@ -243,6 +292,7 @@ func _on_poi_hovered(poi_id: String) -> void:
 func _on_poi_picked(poi_id: String) -> void:
 	_focus_kind = "poi"
 	_focus_poi = poi_id
+	_selected_poi = poi_id
 	_map.set_focus_poi(poi_id)
 	_tab = "map"
 	for key in _tab_buttons:
@@ -255,6 +305,7 @@ func _on_poi_placed(point: Vector2) -> void:
 	Store.add_poi(poi)
 	_focus_kind = "poi"
 	_focus_poi = String(poi["id"])
+	_selected_poi = _focus_poi
 	_mode = "inspect"
 	_tab = "map"
 	for key in _tab_buttons:
@@ -262,6 +313,22 @@ func _on_poi_placed(point: Vector2) -> void:
 	_map.set_pin_mode(false)
 	_map.set_focus_poi(_focus_poi)
 	_refresh()
+
+
+## Dragging a place writes its new map coordinates immediately. On drop, the
+## detail panel refreshes to show the zone at the new position.
+func _on_poi_moved(poi_id: String, point: Vector2, finished: bool) -> void:
+	var result := Store.relocate_poi(poi_id, point)
+	if not bool(result.get("ok", false)):
+		return
+	_focus_kind = "poi"
+	_focus_poi = poi_id
+	_selected_poi = poi_id
+	_map.set_pois(Store.points_of_interest())
+	_map.set_focus_poi(poi_id)
+	if finished:
+		Store.set_status("Place relocated")
+		_refresh_rail()
 
 
 ## Reshaping writes to the campaign on every drag frame, so the plate follows
@@ -283,6 +350,8 @@ func start_reshape(area_id: String) -> void:
 	_pinned_id = area_id
 	_focus_id = area_id
 	_focus_kind = "area"
+	_selected_poi = ""
+	_focus_poi = ""
 	_mode = "reshape"
 	_tab = "map"
 	for key in _tab_buttons:
@@ -309,6 +378,9 @@ func start_pin() -> void:
 
 
 func start_draw() -> void:
+	_selected_poi = ""
+	_focus_poi = ""
+	_focus_kind = "area"
 	_mode = "draw"
 	_map.set_draw_mode(true)
 	_refresh_rail()
@@ -327,6 +399,9 @@ func _cancel_draw() -> void:
 func edit_area(area_id: String) -> void:
 	_pinned_id = area_id
 	_focus_id = area_id
+	_selected_poi = ""
+	_focus_poi = ""
+	_focus_kind = "area"
 	_tab = "map"
 	_mode = "edit"
 	for key in _tab_buttons:
@@ -379,6 +454,11 @@ func poi_ids() -> PackedStringArray:
 
 func select_poi(poi_id: String) -> void:
 	_on_poi_picked(poi_id)
+
+
+## Same effect as dragging a place and dropping it at [param point].
+func relocate_poi(poi_id: String, point: Vector2) -> void:
+	_on_poi_moved(poi_id, point, true)
 
 
 ## Same effect as clicking the map at this point while in pin mode.
@@ -535,11 +615,7 @@ func _build_clock() -> Control:
 		var button := UI.plain_button(String(pair[0]))
 		UI.expand(button, true, false)
 		var minutes := int(pair[1])
-		button.pressed.connect(
-			func() -> void:
-				Store.advance_clock(minutes)
-				_refresh_rail()
-		)
+		button.pressed.connect(_request_time_advance.bind(minutes))
 		actions.add_child(button)
 	var weather_button := UI.plain_button("Weather")
 	UI.expand(weather_button, true, false)
@@ -562,10 +638,15 @@ func _build_clock() -> Control:
 func _build_month_close(clock: Dictionary) -> Control:
 	var box := UI.vbox(3)
 	var month := Lifestyle.month_key(clock)
-	var close_button := UI.primary_button("Close month · auto-pay Lifestyles")
+	var close_button := UI.primary_button("Close month · confirm each Lifestyle")
 	close_button.disabled = _closing_month or (Store.campaign.get("closed_months", []) as Array).has(month)
-	close_button.pressed.connect(func() -> void: _month_dialog.popup_centered())
+	close_button.pressed.connect(_request_month_close)
 	box.add_child(close_button)
+
+	var hustle_button := UI.plain_button("+ Add free-time Hustle")
+	hustle_button.disabled = _closing_month
+	hustle_button.pressed.connect(_open_hustle_dialog)
+	box.add_child(hustle_button)
 
 	var report: Dictionary = Store.campaign.get("last_lifestyle_report", {})
 	if report.is_empty():
@@ -591,11 +672,197 @@ func _build_month_close(clock: Dictionary) -> Control:
 	return box
 
 
-func _confirm_month_close() -> void:
+func _request_month_close() -> void:
+	var month := Lifestyle.month_key(Store.campaign["clock"])
+	_begin_lifestyle_prompts(
+		func() -> void: Store.close_month(month),
+		"Close %s and bill Lifestyles for %s" % [month, Lifestyle.next_month(month)],
+	)
+
+
+func _request_time_advance(minutes: int) -> void:
+	var before := Lifestyle.month_key(Store.campaign["clock"])
+	var after_clock := CampaignSchema.advance_clock(Store.campaign["clock"], minutes)
+	if before != Lifestyle.month_key(after_clock):
+		_begin_lifestyle_prompts(
+			func() -> void:
+				Store.advance_clock(minutes)
+				_refresh(),
+			"Advance time into %s" % Lifestyle.month_key(after_clock),
+		)
+	else:
+		Store.advance_clock(minutes)
+		_refresh_rail()
+
+
+func _lifestyle_players() -> Array:
+	var players: Array = []
+	for value in Store.characters():
+		var character: Dictionary = value
+		if String(character.get("kind", "npc")) != "pc":
+			continue
+		Lifestyle.ensure_character(character)
+		players.append(character)
+	return players
+
+
+func _begin_lifestyle_prompts(action: Callable, reason: String) -> void:
+	if _closing_month:
+		return
+	_lifestyle_queue = _lifestyle_players()
+	_lifestyle_prompt_index = 0
+	_after_lifestyle_confirmation = action
 	_closing_month = true
+	_month_dialog.set_meta("reason", reason)
 	_refresh_rail()
-	Store.close_month(Lifestyle.month_key(Store.campaign["clock"]))
+	if _lifestyle_queue.is_empty():
+		_finish_lifestyle_prompts()
+	else:
+		_show_lifestyle_prompt.call_deferred()
+
+
+func _show_lifestyle_prompt() -> void:
+	if _lifestyle_prompt_index >= _lifestyle_queue.size():
+		_finish_lifestyle_prompts()
+		return
+	var character: Dictionary = _lifestyle_queue[_lifestyle_prompt_index]
+	var selected := Lifestyle.profile(String(character.get("lifestyle", "kibble")))
+	var cost := int(selected["cost"])
+	var cash := int(character.get("cash", 0))
+	var result := (
+		"Payment will succeed, leaving %deb." % (cash - cost)
+		if cash >= cost
+		else "Cannot cover the bill: %deb short; a 7-day grace period will begin." % (cost - cash)
+	)
+	_month_dialog.title = "Lifestyle %d of %d · %s" % [
+		_lifestyle_prompt_index + 1,
+		_lifestyle_queue.size(),
+		String(character.get("name", "Player")),
+	]
+	_month_dialog.dialog_text = "%s\n\n%s · %deb\nCash on hand · %deb\n\n%s" % [
+		String(_month_dialog.get_meta("reason", "Update Lifestyles")),
+		String(selected["label"]),
+		cost,
+		cash,
+		result,
+	]
+	_month_dialog.get_ok_button().text = "Confirm player"
+	_month_dialog.popup_centered(Vector2i(540, 280))
+
+
+func _confirm_lifestyle_player() -> void:
+	_lifestyle_prompt_index += 1
+	if _lifestyle_prompt_index < _lifestyle_queue.size():
+		_show_lifestyle_prompt.call_deferred()
+	else:
+		_finish_lifestyle_prompts.call_deferred()
+
+
+func _finish_lifestyle_prompts() -> void:
+	var action := _after_lifestyle_confirmation
+	_lifestyle_queue.clear()
+	_lifestyle_prompt_index = 0
+	_after_lifestyle_confirmation = Callable()
+	if action.is_valid():
+		action.call()
 	_closing_month = false
+	_refresh()
+
+
+func _cancel_lifestyle_prompts() -> void:
+	_lifestyle_queue.clear()
+	_lifestyle_prompt_index = 0
+	_after_lifestyle_confirmation = Callable()
+	_closing_month = false
+	Store.set_status("Lifestyle update canceled")
+	_refresh()
+
+
+func _open_hustle_dialog() -> void:
+	for child in _hustle_list.get_children():
+		child.queue_free()
+	_hustle_checks.clear()
+	_hustle_all.set_pressed_no_signal(false)
+	for value in Store.characters():
+		var character: Dictionary = value
+		if String(character.get("kind", "npc")) != "pc":
+			continue
+		if not EconomyRules.HUSTLES.has(String(character.get("role_key", ""))):
+			continue
+		var rank := int((character.get("role_ability", {}) as Dictionary).get("rank", 0))
+		var check := CheckBox.new()
+		check.text = "%s · %s Rank %d" % [
+			String(character.get("name", "Character")),
+			String(character.get("role", "Role")),
+			rank,
+		]
+		check.toggled.connect(_sync_hustle_selection.unbind(1))
+		_hustle_list.add_child(check)
+		_hustle_checks[String(character["id"])] = check
+	_hustle_all.disabled = _hustle_checks.is_empty()
+	_sync_hustle_selection()
+	if _hustle_checks.is_empty():
+		Store.set_status("No player character with a Role can take a Hustle")
+	_hustle_dialog.popup_centered(
+		Vector2i(560, mini(680, 260 + _hustle_checks.size() * 38))
+	)
+
+
+func _toggle_all_hustlers(pressed: bool) -> void:
+	for value in _hustle_checks.values():
+		(value as CheckBox).set_pressed_no_signal(pressed)
+	_sync_hustle_selection()
+
+
+func _sync_hustle_selection() -> void:
+	var selected := _selected_hustlers().size()
+	_hustle_all.set_pressed_no_signal(
+		selected > 0 and selected == _hustle_checks.size()
+	)
+	_hustle_dialog.get_ok_button().disabled = selected == 0
+	_hustle_dialog.get_ok_button().text = (
+		"Roll %d Hustles" % selected if selected != 1 else "Roll Hustle"
+	)
+
+
+func _selected_hustlers() -> Array:
+	var selected: Array = []
+	for id in _hustle_checks:
+		if (_hustle_checks[id] as CheckBox).button_pressed:
+			selected.append(String(id))
+	return selected
+
+
+func _confirm_downtime_hustle() -> void:
+	var character_ids := _selected_hustlers()
+	if character_ids.is_empty():
+		return
+	var after_clock := CampaignSchema.advance_clock(
+		Store.campaign["clock"], EconomyRules.HUSTLE_DAYS * 24 * 60
+	)
+	if Lifestyle.month_key(Store.campaign["clock"]) != Lifestyle.month_key(after_clock):
+		_begin_lifestyle_prompts(
+			_execute_downtime_hustles.bind(character_ids.duplicate()),
+			"These Hustles advance time into %s" % Lifestyle.month_key(after_clock),
+		)
+	else:
+		_execute_downtime_hustles(character_ids)
+
+
+func _execute_downtime_hustles(character_ids: Array) -> void:
+	var result := Store.perform_hustles(character_ids, Dice.SeededRandom.new(randi()))
+	if not bool(result.get("ok", false)):
+		Store.set_status(String(result.get("error", "Hustles failed")))
+	elif int(result["participants"]) == 1:
+		var line: Dictionary = result["results"][0]
+		Store.set_status("%s earned %deb · %s" % [
+			String(line["name"]), int(line["earned"]), String(line["work"]),
+		])
+	else:
+		Store.set_status(
+			"%d players completed Hustles · %deb total"
+			% [int(result["participants"]), int(result["total_earned"])]
+		)
 	_refresh()
 
 
@@ -936,13 +1203,7 @@ func _build_area_row(area: Dictionary) -> Control:
 	select.add_theme_font_size_override("font_size", 14)
 	select.add_theme_color_override("font_color", UI.TEXT_DISPLAY)
 	UI.expand(select, true, false)
-	select.pressed.connect(
-		func() -> void:
-			_pinned_id = id
-			_focus_id = id
-			_map.set_focus(id)
-			_refresh_rail()
-	)
+	select.pressed.connect(_on_picked.bind(id))
 	head.add_child(select)
 	head.add_child(
 		UI.micro("Danger %d" % danger, UI.ALERT_BRIGHT if danger >= 4 else UI.MUTED)
@@ -977,17 +1238,7 @@ func _build_area_row(area: Dictionary) -> Control:
 	var actions := UI.hbox(UI.GAP_2)
 	var edit_button := UI.plain_button("Edit")
 	UI.expand(edit_button, true, false)
-	edit_button.pressed.connect(
-		func() -> void:
-			_pinned_id = id
-			_focus_id = id
-			_tab = "map"
-			_mode = "edit"
-			for key in _tab_buttons:
-				(_tab_buttons[key] as Button).button_pressed = key == "map"
-			_map.set_focus(id)
-			_refresh_rail()
-	)
+	edit_button.pressed.connect(edit_area.bind(id))
 	actions.add_child(edit_button)
 	var delete_button := UI.plain_button("Delete")
 	UI.expand(delete_button, true, false)
@@ -1225,6 +1476,9 @@ func _build_poi_panel() -> Control:
 			]
 		)
 	)
+	box.add_child(
+		UI.micro("Click to keep these details open · drag the pin to relocate it", UI.ACCENT)
+	)
 
 	var set_name := func(value: String) -> void:
 		poi["name"] = value
@@ -1420,8 +1674,9 @@ func confirm_delete_poi(poi_id: String) -> void:
 		message += " The board \"%s\" stays in the campaign." % String(linked["name"])
 	_confirm("Delete place", String(poi["name"]), message, func() -> void:
 		Store.remove_poi(poi_id)
-		if _focus_poi == poi_id:
+		if _focus_poi == poi_id or _selected_poi == poi_id:
 			_focus_poi = ""
+			_selected_poi = ""
 			_focus_kind = "area"
 		Store.set_status("Place deleted")
 		_refresh())
@@ -1499,11 +1754,14 @@ class _MapView extends Control:
 	signal poi_hovered(poi_id: String)
 	signal poi_picked(poi_id: String)
 	signal poi_placed(point: Vector2)
+	signal poi_moved(poi_id: String, point: Vector2, finished: bool)
 	## delta is the movement when the whole zone was dragged, zero otherwise.
 	signal reshape_changed(area_id: String, points: PackedVector2Array, delta: Vector2)
 
 	## How close, in map units, the pointer has to be to hit a pin.
 	const PIN_RADIUS := 14.0
+	## Pointer travel required before a press becomes a relocation rather than a click.
+	const PIN_DRAG_THRESHOLD := 4.0
 	## Grab radius for a corner handle while reshaping.
 	const HANDLE_RADIUS := 13.0
 
@@ -1515,6 +1773,9 @@ class _MapView extends Control:
 	var _drawing := false
 	var _pinning := false
 	var _reshape_id := ""
+	var _pressed_poi := ""
+	var _poi_dragged := false
+	var _poi_press_screen := Vector2.ZERO
 	var _drag_corner := -1
 	var _dragging_body := false
 	var _drag_last := Vector2.ZERO
@@ -1738,21 +1999,47 @@ class _MapView extends Control:
 			return
 
 		if event is InputEventMouseMotion:
-			var at := _to_map((event as InputEventMouseMotion).position)
+			var motion := event as InputEventMouseMotion
+			var at := _to_map(motion.position)
+			if _pressed_poi != "":
+				if motion.position.distance_to(_poi_press_screen) >= PIN_DRAG_THRESHOLD:
+					_poi_dragged = true
+				if _poi_dragged:
+					mouse_default_cursor_shape = Control.CURSOR_MOVE
+					poi_moved.emit(_pressed_poi, at.snapped(Vector2(5, 5)), false)
+					queue_redraw()
+				return
 			if _drawing or _pinning:
 				_cursor = at
 				queue_redraw()
 				return
 			var pin := _poi_at(at)
+			mouse_default_cursor_shape = (
+				Control.CURSOR_DRAG if pin != "" else Control.CURSOR_ARROW
+			)
 			poi_hovered.emit(pin)
 			if pin == "":
 				hovered.emit(_area_at(at))
 			return
 
-		if not (event is InputEventMouseButton) or not (event as InputEventMouseButton).pressed:
+		if not (event is InputEventMouseButton):
 			return
 		var button := event as InputEventMouseButton
 		var at := _to_map(button.position)
+
+		if not button.pressed:
+			if button.button_index == MOUSE_BUTTON_LEFT and _pressed_poi != "":
+				var released_poi := _pressed_poi
+				var was_dragged := _poi_dragged
+				_pressed_poi = ""
+				_poi_dragged = false
+				mouse_default_cursor_shape = Control.CURSOR_DRAG
+				if was_dragged:
+					poi_moved.emit(released_poi, at.snapped(Vector2(5, 5)), true)
+				else:
+					poi_picked.emit(released_poi)
+				queue_redraw()
+			return
 
 		if _pinning:
 			if button.button_index == MOUSE_BUTTON_LEFT:
@@ -1763,7 +2050,12 @@ class _MapView extends Control:
 			if button.button_index == MOUSE_BUTTON_LEFT:
 				var pin := _poi_at(at)
 				if pin != "":
-					poi_picked.emit(pin)
+					_pressed_poi = pin
+					_poi_dragged = false
+					_poi_press_screen = button.position
+					_focus_poi = pin
+					mouse_default_cursor_shape = Control.CURSOR_DRAG
+					queue_redraw()
 					return
 				var id := _area_at(at)
 				if id != "":

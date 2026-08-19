@@ -31,6 +31,7 @@ var _roster_box: VBoxContainer
 var _sheet_box: VBoxContainer
 var _tab_buttons: Dictionary = {}
 var _check_rng := Dice.SeededRandom.new(Time.get_ticks_usec())
+var _economy_rng := Dice.SeededRandom.new(Time.get_ticks_usec() + 1)
 var _market_message := ""
 
 # Cover builder state.
@@ -904,6 +905,56 @@ func _build_gear_tab(body: VBoxContainer, character: Dictionary) -> void:
 	elif character.get("lifestyle_paid_through") != null:
 		payment += " · paid through %s" % character["lifestyle_paid_through"]
 	body.add_child(UI.micro(payment, UI.WARN if String(character["lifestyle_status"]) == "unpaid" else UI.GOOD))
+	if _market_message != "":
+		body.add_child(UI.body(_market_message, 12, UI.ACCENT))
+	body.add_child(UI.rule_line())
+	body.add_child(_section_head("Weekly Hustle", "Consumes seven full days"))
+	var hustle_row := UI.hbox(UI.GAP_2)
+	var hustle_note := UI.micro(
+		"Roll 1d6 on the %s Rank %d table and add the result to cash."
+		% [
+			character.get("role", "Role"),
+			int((character.get("role_ability", {}) as Dictionary).get("rank", 0)),
+		]
+	)
+	UI.expand(hustle_note, true, false)
+	hustle_row.add_child(hustle_note)
+	var hustle := UI.primary_button("Hustle for 7 days")
+	hustle.disabled = String(character.get("role_key", "")) == ""
+	hustle.pressed.connect(_perform_hustle)
+	hustle_row.add_child(hustle)
+	body.add_child(hustle_row)
+
+	var recipients: Array[Dictionary] = []
+	for value in Store.characters():
+		var other: Dictionary = value
+		if String(other.get("id", "")) != String(character.get("id", "")):
+			recipients.append(other)
+	body.add_child(UI.rule_line())
+	body.add_child(_section_head("Give money or gear", "Transfers are immediate"))
+	var recipient_picker := OptionButton.new()
+	if recipients.is_empty():
+		body.add_child(UI.micro("Add another character to enable transfers."))
+	else:
+		for index in recipients.size():
+			var recipient: Dictionary = recipients[index]
+			recipient_picker.add_item(String(recipient.get("name", "Character")))
+			recipient_picker.set_item_metadata(index, String(recipient.get("id", "")))
+		body.add_child(recipient_picker)
+		var cash_transfer := UI.hbox(UI.GAP_2)
+		var amount := SpinBox.new()
+		amount.min_value = 1
+		amount.max_value = maxi(1, int(character.get("cash", 0)))
+		amount.step = 1
+		amount.value = mini(100, int(amount.max_value))
+		amount.suffix = " eb"
+		UI.expand(amount, true, false)
+		cash_transfer.add_child(amount)
+		var give_cash := UI.primary_button("Give money")
+		give_cash.disabled = int(character.get("cash", 0)) <= 0
+		give_cash.pressed.connect(_give_money.bind(amount, recipient_picker))
+		cash_transfer.add_child(give_cash)
+		body.add_child(cash_transfer)
 	body.add_child(UI.rule_line())
 
 	var gear: Array = character.get("gear", [])
@@ -913,8 +964,8 @@ func _build_gear_tab(body: VBoxContainer, character: Dictionary) -> void:
 	if gear.is_empty():
 		body.add_child(UI.micro("Nothing carried."))
 		return
-	for item in gear:
-		var entry: Dictionary = item
+	for index in gear.size():
+		var entry: Dictionary = gear[index]
 		body.add_child(UI.rule_line())
 		var row := UI.hbox(UI.GAP_2)
 		var name_label := UI.body(String(entry["name"]), 12)
@@ -929,7 +980,54 @@ func _build_gear_tab(body: VBoxContainer, character: Dictionary) -> void:
 		cost_label.custom_minimum_size = Vector2(60, 0)
 		cost_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(cost_label)
+		if not recipients.is_empty():
+			var give := UI.plain_button("Give")
+			give.disabled = String(entry.get("installed_on", "")) != ""
+			give.tooltip_text = (
+				"Detach this cyberware first."
+				if give.disabled
+				else "Give this item to the selected character."
+			)
+			give.pressed.connect(_give_item.bind(index, recipient_picker))
+			row.add_child(give)
 		body.add_child(UI.margins(row, 3))
+
+
+func _perform_hustle() -> void:
+	var result := Store.perform_hustle(Store.active_character_id, _economy_rng)
+	_market_message = (
+		"Hustle roll %d · +%deb · %s"
+		% [result["roll"], result["earned"], result["work"]]
+		if bool(result.get("ok", false))
+		else String(result.get("error", "Hustle failed."))
+	)
+	_refresh_sheet()
+
+
+func _give_money(amount: SpinBox, recipient_picker: OptionButton) -> void:
+	var recipient_id := String(recipient_picker.get_item_metadata(recipient_picker.selected))
+	var recipient := Store.character_by_id(recipient_id)
+	var result := Store.transfer_cash(Store.active_character_id, recipient_id, int(amount.value))
+	_market_message = (
+		"Gave %s %deb."
+		% [recipient.get("name", "character"), result["amount"]]
+		if bool(result.get("ok", false))
+		else String(result.get("error", "Transfer failed."))
+	)
+	_refresh_sheet()
+
+
+func _give_item(gear_index: int, recipient_picker: OptionButton) -> void:
+	var recipient_id := String(recipient_picker.get_item_metadata(recipient_picker.selected))
+	var recipient := Store.character_by_id(recipient_id)
+	var result := Store.transfer_item(Store.active_character_id, recipient_id, gear_index)
+	_market_message = (
+		"Gave %s to %s."
+		% [result["item"], recipient.get("name", "character")]
+		if bool(result.get("ok", false))
+		else String(result.get("error", "Transfer failed."))
+	)
+	_refresh_sheet()
 
 
 func _build_cyberware_tab(body: VBoxContainer, character: Dictionary) -> void:

@@ -46,6 +46,32 @@ func _ready() -> void:
 	await _shoot("1b-city")
 	await _drive_city(app)
 
+	var opening := Store.add_beat()
+	opening["title"] = "The client lies"
+	opening["status"] = "active"
+	Store.move_beat(String(opening["id"]), Vector2(80, 90))
+	var ambush := Store.add_beat()
+	ambush["title"] = "Container-yard ambush"
+	Store.move_beat(String(ambush["id"]), Vector2(390, 220))
+	var fallout := Store.add_beat()
+	fallout["title"] = "Choose who gets the evidence"
+	Store.move_beat(String(fallout["id"]), Vector2(700, 90))
+	Store.connect_beats(String(opening["id"]), String(ambush["id"]))
+	Store.connect_beats(String(ambush["id"]), String(fallout["id"]))
+	app.call("open_gm_notes_window")
+	await _settle(30)
+	var gm_window: Window = app.get("_gm_window")
+	if gm_window == null:
+		_errors.append("GM Notes / Beats did not open a separate window")
+	else:
+		if not gm_window.force_native:
+			_errors.append("GM Notes / Beats window was not forced native")
+		if not gm_window.exclude_from_capture:
+			_errors.append("GM Notes / Beats did not request capture exclusion")
+		if gm_window.is_embedded():
+			_errors.append("GM Notes / Beats was still embedded in the streamed viewport")
+		gm_window.hide()
+
 	app.call("_show", "location")
 	await _settle(30)
 	await _shoot("1c-location")

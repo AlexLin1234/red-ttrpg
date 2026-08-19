@@ -1,5 +1,8 @@
 extends Node
 
+const EconomyRules := preload("res://scripts/rules/economy.gd")
+const CampaignFlowRules := preload("res://scripts/rules/campaign_flow.gd")
+
 ## The one place the loaded campaign lives.
 ##
 ## Registered as the `Store` autoload. Screens read from here and call the edit
@@ -125,8 +128,11 @@ func mark_dirty() -> void:
 
 
 func _normalize_downtime_state() -> void:
+	CampaignFlowRules.ensure_campaign(campaign)
 	if not campaign.has("lifestyle_closed_months"):
 		campaign["lifestyle_closed_months"] = []
+	if not campaign.has("night_market") or not campaign["night_market"] is Dictionary:
+		campaign["night_market"] = {}
 	if not campaign.has("gm_map"):
 		campaign["gm_map"] = {}
 	campaign["current_month"] = Lifestyle.month_key(campaign["clock"])
@@ -272,6 +278,211 @@ func active_character() -> Dictionary:
 	return character_by_id(active_character_id)
 
 
+# -- GM notes and campaign beats --------------------------------------------------
+
+
+func beats() -> Array:
+	if not is_open():
+		return []
+	CampaignFlowRules.ensure_campaign(campaign)
+	return campaign["beats"]
+
+
+func beat_by_id(id: String) -> Dictionary:
+	return CampaignFlowRules.beat_by_id(campaign, id) if is_open() else {}
+
+
+func add_beat() -> Dictionary:
+	var beat := CampaignFlowRules.new_beat(beats().size())
+	beats().append(beat)
+	mark_dirty()
+	return beat
+
+
+func move_beat(id: String, point: Vector2) -> bool:
+	var beat := beat_by_id(id)
+	if beat.is_empty():
+		return false
+	CampaignFlowRules.set_beat_position(beat, point)
+	mark_dirty()
+	return true
+
+
+func connect_beats(from_id: String, to_id: String) -> bool:
+	var changed := CampaignFlowRules.link_beats(campaign, from_id, to_id)
+	if changed:
+		mark_dirty()
+	return changed
+
+
+func disconnect_beats(from_id: String, to_id: String) -> bool:
+	var changed := CampaignFlowRules.unlink_beats(campaign, from_id, to_id)
+	if changed:
+		mark_dirty()
+	return changed
+
+
+func remove_beat(id: String) -> bool:
+	var changed := CampaignFlowRules.remove_beat(campaign, id)
+	if changed:
+		mark_dirty()
+	return changed
+
+
+# -- shared economy ---------------------------------------------------------------
+
+
+## The active Night Market is campaign state, not character or screen state.
+## Once a Fixer organizes it, every character can visit the same stalls.
+func night_market() -> Dictionary:
+	if not is_open():
+		return {}
+	if not campaign.has("night_market") or not campaign["night_market"] is Dictionary:
+		campaign["night_market"] = {}
+	return campaign["night_market"]
+
+
+func organize_night_market(
+	organizer: Dictionary, rng: Dice.RandomSource, catalog: Array = []
+) -> Dictionary:
+	var available := catalog
+	if available.is_empty():
+		var item_db := get_node_or_null("/root/ItemDB")
+		if item_db == null:
+			return {"ok": false, "error": "The item database is not available."}
+		available = item_db.call("catalog")
+	var rolled := GearMarket.night_market(organizer, available, rng)
+	if not bool(rolled.get("ok", false)):
+		return rolled
+	var shared := {
+		"organizer_id": String(organizer.get("id", "")),
+		"organizer_name": String(organizer.get("name", "Fixer")),
+		"opened_at": campaign.get("clock", {}).duplicate(true),
+		"stock": (rolled.get("stock", []) as Array).duplicate(true),
+		"categories": Array(rolled.get("categories", PackedStringArray())),
+		"midnight": bool(rolled.get("midnight", false)),
+	}
+	campaign["night_market"] = shared
+	(campaign.get("session_log", []) as Array).push_front(
+		{
+			"session": int(campaign.get("sessions", 0)),
+			"text": "%s organized a Night Market for the crew."
+			% String(organizer.get("name", "A Fixer")),
+		}
+	)
+	mark_dirty()
+	return {"ok": true, "market": shared}
+
+
+func transfer_cash(source_id: String, recipient_id: String, amount: int) -> Dictionary:
+	var source := character_by_id(source_id)
+	var recipient := character_by_id(recipient_id)
+	var result := EconomyRules.transfer_cash(source, recipient, amount)
+	if bool(result.get("ok", false)):
+		(campaign.get("session_log", []) as Array).push_front(
+			{
+				"session": int(campaign.get("sessions", 0)),
+				"text": "%s gave %s %deb."
+				% [source.get("name", "A character"), recipient.get("name", "someone"), amount],
+			}
+		)
+		mark_dirty()
+	return result
+
+
+func transfer_item(source_id: String, recipient_id: String, gear_index: int) -> Dictionary:
+	var source := character_by_id(source_id)
+	var recipient := character_by_id(recipient_id)
+	var result := EconomyRules.transfer_item(source, recipient, gear_index)
+	if bool(result.get("ok", false)):
+		(campaign.get("session_log", []) as Array).push_front(
+			{
+				"session": int(campaign.get("sessions", 0)),
+				"text": "%s gave %s to %s."
+				% [source.get("name", "A character"), result["item"], recipient.get("name", "someone")],
+			}
+		)
+		mark_dirty()
+	return result
+
+
+## A successful Hustle consumes the full seven free days required by the rule.
+func perform_hustle(character_id: String, rng: Dice.RandomSource) -> Dictionary:
+	var character := character_by_id(character_id)
+	var result := EconomyRules.hustle(character, rng)
+	if not bool(result.get("ok", false)):
+		return result
+	advance_clock(int(result["days"]) * 24 * 60)
+	(campaign.get("session_log", []) as Array).push_front(
+		{
+			"session": int(campaign.get("sessions", 0)),
+			"text": "%s hustled for seven days and earned %deb: %s"
+			% [character.get("name", "A character"), result["earned"], result["work"]],
+		}
+	)
+	mark_dirty()
+	return result
+
+
+## Several characters can spend the same free-time week Hustling concurrently.
+## Every participant rolls and gets paid, but the shared campaign clock advances
+## only once for the seven-day downtime block.
+func perform_hustles(character_ids: Array, rng: Dice.RandomSource) -> Dictionary:
+	var participants: Array[Dictionary] = []
+	var seen := {}
+	for value in character_ids:
+		var id := String(value)
+		if seen.has(id):
+			continue
+		seen[id] = true
+		var character := character_by_id(id)
+		if character.is_empty():
+			return {"ok": false, "error": "A selected character could not be found."}
+		var role_key := String(character.get("role_key", ""))
+		if not EconomyRules.HUSTLES.has(role_key):
+			return {
+				"ok": false,
+				"error": "%s needs a Role before taking a Hustle."
+				% String(character.get("name", "A selected character")),
+			}
+		var rank := int((character.get("role_ability", {}) as Dictionary).get("rank", 0))
+		if rank < 1 or rank > 10:
+			return {
+				"ok": false,
+				"error": "%s needs a Role Ability Rank from 1 to 10."
+				% String(character.get("name", "A selected character")),
+			}
+		participants.append(character)
+	if participants.is_empty():
+		return {"ok": false, "error": "Select at least one character."}
+
+	var results: Array = []
+	var total_earned := 0
+	for character in participants:
+		var result := EconomyRules.hustle(character, rng)
+		result["character_id"] = String(character["id"])
+		result["name"] = String(character.get("name", "Character"))
+		results.append(result)
+		total_earned += int(result["earned"])
+		(campaign.get("session_log", []) as Array).push_front(
+			{
+				"session": int(campaign.get("sessions", 0)),
+				"text": "%s hustled during the crew's free-time week and earned %deb: %s"
+				% [character.get("name", "A character"), result["earned"], result["work"]],
+			}
+		)
+
+	advance_clock(EconomyRules.HUSTLE_DAYS * 24 * 60)
+	mark_dirty()
+	return {
+		"ok": true,
+		"days": EconomyRules.HUSTLE_DAYS,
+		"results": results,
+		"participants": results.size(),
+		"total_earned": total_earned,
+	}
+
+
 func cover_palette() -> Array:
 	return campaign.get("cover_palette", [])
 
@@ -351,6 +562,21 @@ func pois_in_area(area_id: String) -> Array:
 func add_poi(poi: Dictionary) -> void:
 	points_of_interest().append(poi)
 	mark_dirty()
+
+
+func relocate_poi(id: String, point: Vector2) -> Dictionary:
+	var poi := poi_by_id(id)
+	if poi.is_empty():
+		return {"ok": false, "error": "Place not found."}
+	var before := NightCity.poi_position(poi)
+	var after := NightCity.relocate_poi(poi, point, areas())
+	if not before.is_equal_approx(after):
+		mark_dirty()
+	return {
+		"ok": true,
+		"position": after,
+		"area_id": String(poi.get("area_id", "")),
+	}
 
 
 func remove_poi(id: String) -> void:

@@ -1,8 +1,8 @@
 # Redline
 
 A standalone desktop GM console for Cyberpunk RED, built as a single Godot 4.7
-project. Four screens cover the campaign library, City map, isometric combat
-location, and character Forge.
+project. Its workspaces cover the campaign library, City map, campaign notes and
+beats, isometric combat locations, character Forge, and markets.
 
 No server, sidecar, API, or network connection is required. Rules, campaign
 editing, Lifestyle month closing, and undo/redo all run in GDScript. Campaigns
@@ -40,13 +40,15 @@ you finish, every pin is re-checked against the new boundary, so a district that
 grew over a clinic now claims it.
 
 Points of interest are pins dropped inside those zones — a clinic, a fixer's
-booth, a corp tower. Each carries a name, a kind and notes, and can link to a
-location: pick an existing board or build a fresh one on the spot. A linked pin
-draws filled and opens its board in one click; an unlinked one draws hollow,
-because it is a note on the map rather than somewhere the party can walk into.
-The Places tab lists them all. Deleting a zone re-homes its pins rather than
-deleting them — a place the party knows about does not stop existing because
-the GM redrew a boundary.
+booth, a corp tower. Click one to keep its name, kind, notes, and linked-board
+information open in the rail. Drag it to relocate it; its containing zone is
+updated automatically when it crosses a boundary. A pin can link to a location:
+pick an existing board or build a fresh one on the spot. A linked pin draws
+filled and offers its board from the information rail; an unlinked one draws
+hollow, because it is a note on the map rather than somewhere the party can
+walk into. The Places tab lists them all. Deleting a zone re-homes its pins
+rather than deleting them — a place the party knows about does not stop existing
+because the GM redrew a boundary.
 
 **Upload map** puts the GM's own image behind those plates. It is normalized to
 PNG, stored inside the campaign save, and drawn as a *backdrop* rather than a
@@ -57,8 +59,22 @@ the earlier annotation tool has them adopted into `areas` on open, so they gain
 the district fields instead of being dropped.
 
 The in-world clock, date, shift, and weather are campaign state. Crossing a
-month boundary automatically bills every configured character for the upcoming
-month. **Close month** is available when the GM wants to advance explicitly.
+month boundary prompts the GM through every player character's selected
+Lifestyle and available cash before billing the upcoming month. **Close month**
+starts the same confirmation flow explicitly. A nearby **Add free-time Hustle**
+button lets the GM choose one, several, or all eligible PCs. Each selected PC
+rolls their Role-and-Rank Hustle and gets paid while the shared campaign clock
+advances the required seven days only once.
+
+**Notes / Beats** — the header's **GM Window** button opens a separate native OS
+window for private campaign notes and a basic campaign flowchart. It is not part
+of the main Redline viewport, so streaming or recording only the main application
+window keeps GM material off-stream. On Windows and macOS it also requests OS
+capture exclusion as an extra safeguard; full-desktop capture tools can vary, so
+main-window capture remains the reliable setup. Add beats, track
+planned/active/complete/skipped status, write scene notes, link beats into
+possible paths, and drag cards around the canvas. Notes, links, and positions are
+saved inside the portable campaign.
 
 **Location** — provides an isometric encounter board with tile, prop, and unit
 placement, initiative, combat resolution, cover raycasts, and exact event-based
@@ -72,9 +88,11 @@ build a sheet from the complete Skill catalog. Role Ability and Skill Checks
 accept situational modifiers and use the same exploding-10/fumbling-1 d10 rules
 as combat. The Cyberware tab attaches owned
 implants to compatible body parts, applies their Humanity loss on installation,
-and leaves that loss in place when an implant is detached. Alongside stats, skills, gear,
-Humanity, armor, and cover, each
-character can carry cash and one of the four Lifestyle levels:
+and leaves that loss in place when an implant is detached. The Gear tab can
+transfer cash and carried items directly between any two characters and can run
+the Role- and Rank-based weekly Hustle, advancing the campaign clock by the
+required seven days. Alongside stats, skills, gear, Humanity, armor, and cover,
+each character can carry cash and one of the four Lifestyle levels:
 
 - Kibble — 100eb/month
 - Generic Prepak — 300eb/month
@@ -87,7 +105,9 @@ seven-day grace period instead.
 
 **Market / Night Market** — top-level screens that buy from the application-wide
 item database onto the selected character. Market exposes the entire database;
-Night Market restricts stock using the selected Fixer's Operator rank.
+an Operator Rank 5+ Fixer can organize a Night Market whose rolled stock is saved
+with the campaign and available to every character. Rank 9+ also seats its
+Midnight Market.
 
 **Item Workshop** — available from the starting library even before a campaign
 is opened. Browse every built-in or custom item, read its description, and make
@@ -194,7 +214,7 @@ A `.red` file is a zip containing:
 
 ```text
 manifest.json          version, timestamps, SHA-256 and size per entry
-campaign.json          identity, clock, map image/zones, logs and districts
+campaign.json          identity, clock, map/zones, GM notes and beat flow
 roster.json            characters, cash and Lifestyle state
 locations/<id>.json    board layouts
 assets/map.png          optional normalized GM-uploaded map

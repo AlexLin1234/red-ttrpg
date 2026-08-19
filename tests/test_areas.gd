@@ -111,6 +111,26 @@ static func run(h: Harness) -> void:
 	var outside := NightCity.new_poi(Vector2(5, 5), NightCity.area_at(demo["areas"], Vector2(5, 5)))
 	h.equal(outside["area_id"], "", "bare ground has no zone")
 
+	h.it("relocates a pin and assigns the zone under its new position")
+	var destination := NightCity.new_area(
+		PackedVector2Array([
+			Vector2(200, 200), Vector2(400, 200), Vector2(400, 400), Vector2(200, 400)
+		])
+	)
+	destination["id"] = "destination"
+	var moved_to := NightCity.relocate_poi(outside, Vector2(300, 300), [destination])
+	h.equal(moved_to, Vector2(300, 300), "new position")
+	h.equal(NightCity.poi_position(outside), Vector2(300, 300), "coordinates updated")
+	h.equal(outside["area_id"], "destination", "new zone assigned")
+
+	h.it("keeps a relocated pin inside the map bounds")
+	h.equal(
+		NightCity.relocate_poi(outside, Vector2(-50, 900), [destination]),
+		Vector2(0, 700),
+		"position clamped",
+	)
+	h.equal(outside["area_id"], "", "clamped position re-homed")
+
 	h.it("round trips pins through the .red container")
 	var pin_bundle := CampaignFixtures.blackwall_sunrise()
 	var pin_path := "user://test_pois.red"

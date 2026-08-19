@@ -378,6 +378,18 @@ static func poi_position(poi: Dictionary) -> Vector2:
 	return Vector2(float(poi.get("x", 0.0)), float(poi.get("y", 0.0)))
 
 
+## Move a place on the city map and update the zone that now contains it.
+## Clamping keeps a dragged pin inside the saved map coordinate system.
+static func relocate_poi(poi: Dictionary, point: Vector2, areas: Array) -> Vector2:
+	var bounded := Vector2(
+		clampf(point.x, 0.0, MAP_SIZE.x), clampf(point.y, 0.0, MAP_SIZE.y)
+	)
+	poi["x"] = bounded.x
+	poi["y"] = bounded.y
+	poi["area_id"] = area_at(areas, bounded)
+	return bounded
+
+
 # -- reshaping ----------------------------------------------------------------
 
 

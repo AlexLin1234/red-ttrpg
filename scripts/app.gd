@@ -5,6 +5,7 @@ extends Control
 
 const LibraryScreen := preload("res://scripts/screens/library.gd")
 const CityScreen := preload("res://scripts/screens/city.gd")
+const NotesBeatsScreen := preload("res://scripts/screens/notes_beats.gd")
 const LocationScreen := preload("res://scripts/screens/location.gd")
 const ForgeScreen := preload("res://scripts/screens/forge.gd")
 const MarketScreen := preload("res://scripts/screens/market.gd")
@@ -28,6 +29,10 @@ var _title_label: Label
 var _dirty_label: Label
 var _status_label: Label
 var _save_button: Button
+var _gm_window_button: Button
+var _gm_window: Window
+var _gm_notes_screen: Control
+var _gm_notes_campaign_path := ""
 
 
 func _ready() -> void:
@@ -100,6 +105,12 @@ func _build_header() -> Control:
 	right_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(right_spacer)
 
+	_gm_window_button = UI.plain_button("GM Window")
+	_gm_window_button.tooltip_text = "Open private Notes / Beats in a separate native window"
+	_gm_window_button.visible = false
+	_gm_window_button.pressed.connect(open_gm_notes_window)
+	row.add_child(_gm_window_button)
+
 	_status_label = UI.micro("", UI.GOOD)
 	_status_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(_status_label)
@@ -151,7 +162,60 @@ func _show(screen_id: String) -> void:
 
 
 func _on_campaign_opened() -> void:
+	# Never carry private GM material visibly from one opened save into another.
+	if is_instance_valid(_gm_window):
+		_gm_window.hide()
+	_gm_notes_campaign_path = ""
 	_show("city")
+
+
+## Opens private campaign material outside the main app viewport. Streamers can
+## capture Redline's main window while keeping this native OS window off-stream.
+func open_gm_notes_window() -> void:
+	if not Store.is_open():
+		return
+	if not is_instance_valid(_gm_window):
+		_build_gm_window()
+	if _gm_notes_campaign_path != Store.path or not is_instance_valid(_gm_notes_screen):
+		_rebuild_gm_window_content()
+	_gm_window.show()
+	_gm_window.grab_focus()
+
+
+func _build_gm_window() -> void:
+	_gm_window = Window.new()
+	_gm_window.name = "PrivateGMNotes"
+	_gm_window.title = "Redline · Private GM Notes / Beats"
+	_gm_window.visible = false
+	_gm_window.force_native = true
+	_gm_window.exclude_from_capture = true
+	_gm_window.size = Vector2i(1400, 860)
+	_gm_window.min_size = Vector2i(1040, 680)
+	_gm_window.initial_position = Window.WINDOW_INITIAL_POSITION_CENTER_MAIN_WINDOW_SCREEN
+	_gm_window.theme = UI.build_theme()
+	_gm_window.close_requested.connect(_gm_window.hide)
+	add_child(_gm_window)
+
+
+func _rebuild_gm_window_content() -> void:
+	if is_instance_valid(_gm_notes_screen):
+		_gm_notes_screen.queue_free()
+	for child in _gm_window.get_children():
+		if child != _gm_notes_screen:
+			child.queue_free()
+
+	var background := ColorRect.new()
+	background.color = UI.BG_PAGE
+	background.set_anchors_preset(Control.PRESET_FULL_RECT)
+	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_gm_window.add_child(background)
+
+	_gm_notes_screen = NotesBeatsScreen.new()
+	_gm_notes_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_gm_notes_screen.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_gm_notes_screen.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_gm_window.add_child(_gm_notes_screen)
+	_gm_notes_campaign_path = Store.path
 
 
 func _on_status(message: String) -> void:
@@ -167,10 +231,14 @@ func _refresh_header() -> void:
 		_dirty_label.text = UI._letterspace("Unsaved changes" if Store.dirty else "Saved")
 		_dirty_label.add_theme_color_override("font_color", UI.WARN if Store.dirty else UI.MUTED)
 		_save_button.visible = true
+		_gm_window_button.visible = true
 	else:
 		_title_label.text = UI._letterspace("GM CONSOLE · BUILD 0.5.0")
 		_dirty_label.text = UI._letterspace("Local library")
 		_save_button.visible = false
+		_gm_window_button.visible = false
+		if is_instance_valid(_gm_window):
+			_gm_window.hide()
 
 	for id in _nav_buttons:
 		(_nav_buttons[id] as Button).disabled = id not in ["library", "workshop"] and not Store.is_open()

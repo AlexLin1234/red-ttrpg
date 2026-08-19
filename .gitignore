@@ -37,3 +37,7 @@ __pycache__/
 
 # Rendered screenshots are build output.
 .shots/
+
+# Private desktop captures stay local. Their Godot import metadata does too.
+/Screenshot*.png
+/Screenshot*.png.import

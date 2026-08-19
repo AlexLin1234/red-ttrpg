@@ -4,18 +4,12 @@ extends Control
 ## share the same external ItemDB catalog and purchase flow.
 ##
 ## The Night Market is generated rather than filtered: it is an event a Rank 5+
-## Fixer organizes, so its stock is rolled once and held. Rebuilding the screen
-## after a purchase must not reshuffle the stalls, so the roll is cached against
-## the character it was rolled for and only repeats when asked.
+## Fixer organizes, so its stock is rolled once and held in campaign state.
+## Every character therefore visits the same event, including after a save/load.
 
 var night := false
 var _body: VBoxContainer
 var _message := ""
-var _stock: Array[Dictionary] = []
-var _categories := PackedStringArray()
-var _midnight := false
-var _night_error := ""
-var _rolled_for := ""
 
 
 func _ready() -> void:
@@ -27,17 +21,11 @@ func _ready() -> void:
 
 
 func _roll_night_market(character: Dictionary, force := false) -> void:
-	var owner_id := String(character.get("id", ""))
-	if not force and _rolled_for == owner_id:
+	if not force and not Store.night_market().is_empty():
 		return
-	var result := GearMarket.night_market(
-		character, ItemDB.catalog(), Dice.SeededRandom.new(randi())
-	)
-	_rolled_for = owner_id
-	_night_error = String(result["error"])
-	_stock = result["stock"]
-	_categories = result["categories"]
-	_midnight = bool(result["midnight"])
+	var result := Store.organize_night_market(character, Dice.SeededRandom.new(randi()))
+	if not bool(result.get("ok", false)):
+		_message = String(result.get("error", "Night Market setup failed."))
 
 
 func _rebuild() -> void:
@@ -64,22 +52,36 @@ func _rebuild() -> void:
 	var stock: Array[Dictionary] = []
 	if night:
 		_roll_night_market(character)
-		if _night_error != "":
-			_body.add_child(_wrapped(_night_error, UI.WARN))
+		var shared := Store.night_market()
+		if shared.is_empty():
+			var unavailable := _message
+			if unavailable == "":
+				unavailable = (
+					"No Night Market is open. A Fixer with Operator Rank 5+ can "
+					+ "organize one for everybody."
+				)
+			_body.add_child(_wrapped(unavailable, UI.WARN))
 			return
-		stock = _stock
-		var summary := "%s · every price category up to Super Luxury" % ", ".join(_categories)
-		if _midnight:
+		stock.assign(shared.get("stock", []))
+		var categories := PackedStringArray(shared.get("categories", []))
+		var summary := "%s · organized by %s · every price category up to Super Luxury" % [
+			", ".join(categories), shared.get("organizer_name", "a Fixer")
+		]
+		if bool(shared.get("midnight", false)):
 			summary += " · Midnight Market seated"
 		_body.add_child(_wrapped(summary, UI.MUTED))
-		var reroll := UI.plain_button("Roll a new Night Market")
-		reroll.pressed.connect(
-			func() -> void:
-				_roll_night_market(Store.active_character(), true)
-				_message = ""
-				_rebuild()
-		)
-		_body.add_child(reroll)
+		var rank := int((character.get("role_ability", {}) as Dictionary).get("rank", 0))
+		if String(character.get("role_key", "")) == "fixer" and rank >= (
+			GearMarket.NIGHT_MARKET_MINIMUM_RANK
+		):
+			var reroll := UI.plain_button("Organize a new Night Market")
+			reroll.pressed.connect(
+				func() -> void:
+					_roll_night_market(Store.active_character(), true)
+					_message = ""
+					_rebuild()
+			)
+			_body.add_child(reroll)
 	else:
 		stock = ItemDB.catalog()
 		var note := "Every item in the global item database. %s" % ItemDB.source_label()
