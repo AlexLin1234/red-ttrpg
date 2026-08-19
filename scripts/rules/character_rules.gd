@@ -245,6 +245,9 @@ static func ensure_character(character: Dictionary) -> void:
 	# Old sheets predate the creation workflow and remain completed rather than
 	# unexpectedly becoming locked behind a point-allocation screen.
 	character["creation_complete"] = bool(character.get("creation_complete", true))
+	# The board token falls back to the default cylinder when this is blank, so
+	# sheets written before model support stay valid.
+	character["model_id"] = String(character.get("model_id", ""))
 	var key := String(character.get("role_key", ""))
 	if role(key).is_empty():
 		key = role_key_from_name(String(character.get("role", "")))
