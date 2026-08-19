@@ -35,23 +35,106 @@ static func item(catalog: Array, item_id: String) -> Dictionary:
 	return {}
 
 
-## Operator controls what a Fixer can reliably source in the limited market.
-static func night_market(character: Dictionary, catalog: Array) -> Array[Dictionary]:
-	if String(character.get("role_key", "")) != "fixer":
-		return []
-	var rank := int((character.get("role_ability", {}) as Dictionary).get("rank", 0))
-	var ceiling := 100
+## Operator Reach: the highest price category a Fixer can always source
+## piece-by-piece, whatever the local supply, by Role Ability rank.
+##
+## Reach is written in price categories rather than raw eurobucks, so the ladder
+## is expressed as the ceiling of each category: Everyday at Ranks 1-2,
+## Expensive at 3-6, Very Expensive at 7-8, Luxury at 9, Super Luxury at 10.
+## Ranks 5 and 6 spend their entry on organizing a Night Market instead of
+## raising the piece-by-piece ceiling, so they share the Rank 3-4 ceiling.
+static func reach_ceiling(rank: int) -> int:
+	if rank >= 10:
+		return 10000
 	if rank >= 9:
-		ceiling = 10000
-	elif rank >= 7:
-		ceiling = 5000
-	elif rank >= 4:
-		ceiling = 1000
-	var result: Array[Dictionary] = []
-	for value in catalog:
-		if int(value["price"]) <= ceiling:
-			result.append(value)
-	return result
+		return 5000
+	if rank >= 7:
+		return 1000
+	if rank >= 3:
+		return 500
+	if rank >= 1:
+		return 20
+	return 0
+
+
+## Rank needed to gather other Fixers and organize a Night Market at all.
+const NIGHT_MARKET_MINIMUM_RANK := 5
+
+## Rank that can additionally seat a Midnight Market inside a Night Market.
+const MIDNIGHT_MARKET_RANK := 9
+
+## The six kinds of goods a Night Market can carry, and the catalog kinds each
+## one draws from. Two are present at any given market.
+const NIGHT_MARKET_GOODS: Array[Dictionary] = [
+	{"id": "food_drugs", "label": "Food and Drugs", "kinds": ["drug", "food"]},
+	{"id": "electronics", "label": "Personal Electronics", "kinds": ["electronics"]},
+	{"id": "weapons_armor", "label": "Weapons and Armor", "kinds": ["weapon", "armor", "ammo"]},
+	{"id": "cyberware", "label": "Cyberware", "kinds": ["cyberware"]},
+	{"id": "fashion", "label": "Clothing and Fashionware", "kinds": ["fashion"]},
+	{"id": "survival", "label": "Survival Gear", "kinds": ["gear", "tool", "medical"]},
+]
+
+
+## Generate a Night Market, rather than filter the catalog by price.
+##
+## A Night Market is an event a Rank 5+ Fixer organizes with other Fixers, not a
+## rank-limited shelf: while at one, every price category up to Super Luxury is
+## available. What varies is the stock. Two of the six kinds of goods are rolled
+## on 1d6 (rerolling a repeat), and each contributes 1d10 types of item.
+##
+## Returns {"ok", "error", "stock", "categories", "midnight"}.
+static func night_market(
+	character: Dictionary, catalog: Array, rng: Dice.RandomSource
+) -> Dictionary:
+	var empty: Array[Dictionary] = []
+	if String(character.get("role_key", "")) != "fixer":
+		return {
+			"ok": false,
+			"error": "Only a Fixer can organize a Night Market.",
+			"stock": empty,
+			"categories": PackedStringArray(),
+			"midnight": false,
+		}
+	var rank := int((character.get("role_ability", {}) as Dictionary).get("rank", 0))
+	if rank < NIGHT_MARKET_MINIMUM_RANK:
+		return {
+			"ok": false,
+			"error": (
+				"Operator Rank %d is needed to organize a Night Market. Rank %d reaches %deb piece by piece."
+				% [NIGHT_MARKET_MINIMUM_RANK, rank, reach_ceiling(rank)]
+			),
+			"stock": empty,
+			"categories": PackedStringArray(),
+			"midnight": false,
+		}
+
+	var first := rng.randint(1, 6)
+	var second := rng.randint(1, 6)
+	while second == first:
+		second = rng.randint(1, 6)
+
+	var stock: Array[Dictionary] = []
+	var labels := PackedStringArray()
+	for index in [first - 1, second - 1]:
+		var goods: Dictionary = NIGHT_MARKET_GOODS[index]
+		labels.append(String(goods["label"]))
+		var pool: Array[Dictionary] = []
+		for value in catalog:
+			var entry: Dictionary = value
+			if (goods["kinds"] as Array).has(String(entry.get("kind", ""))):
+				pool.append(entry)
+		var wanted := rng.randint(1, 10)
+		for _draw in mini(wanted, pool.size()):
+			var pick := rng.randint(0, pool.size() - 1)
+			stock.append(pool[pick])
+			pool.remove_at(pick)
+	return {
+		"ok": true,
+		"error": "",
+		"stock": stock,
+		"categories": labels,
+		"midnight": rank >= MIDNIGHT_MARKET_RANK,
+	}
 
 
 ## Pays for an item and immediately puts its inventory/combat profile on the

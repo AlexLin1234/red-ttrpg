@@ -55,6 +55,24 @@ func _ready() -> void:
 	await _settle(30)
 	await _shoot("1d-forge")
 
+	# The markets render arbitrary catalog text, which is exactly where a row can
+	# grow wider than the viewport, so both are drawn. The Night Market needs a
+	# Fixer of Operator Rank 5 to have any stock at all.
+	app.call("_show", "market")
+	await _settle(30)
+	await _shoot("1e-market")
+
+	var shopper := Store.active_character()
+	if shopper.is_empty():
+		_errors.append("no active character to shop with")
+	else:
+		CharacterRules.select_role(shopper, "fixer")
+		(shopper["role_ability"] as Dictionary)["rank"] = 7
+		shopper["cash"] = 25000
+	app.call("_show", "night_market")
+	await _settle(30)
+	await _shoot("1f-night-market")
+
 	if _errors.is_empty():
 		print("\nall screens rendered to %s" % ProjectSettings.globalize_path(OUT_DIR))
 		get_tree().quit(0)
