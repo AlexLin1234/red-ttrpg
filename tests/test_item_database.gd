@@ -73,6 +73,14 @@ static func run(h: Harness) -> void:
 		h.check(tables.has_weapon(String(entry["name"])), "%s has a table row" % entry["name"])
 	h.equal(weapon_count, 13, "every weapon checked")
 
+	h.it("stocks every kind of goods a Night Market can roll")
+	for goods in GearMarket.NIGHT_MARKET_GOODS:
+		var available := 0
+		for value in catalog:
+			if (goods["kinds"] as Array).has(String((value as Dictionary).get("kind", ""))):
+				available += 1
+		h.check(available > 0, "%s has stock to draw" % goods["label"])
+
 	h.it("covers every range band and every installable body part")
 	var seen_types := {}
 	var seen_parts := {}

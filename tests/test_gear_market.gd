@@ -16,7 +16,7 @@ static func run(h: Harness) -> void:
 	var catalog := _catalog()
 	h.describe("character markets")
 	h.it("offers every catalog item in the full market")
-	h.equal(catalog.size(), 57, "complete built-in catalog")
+	h.equal(catalog.size(), 60, "complete built-in catalog")
 
 	h.it("pays for purchases and puts equipment on the character")
 	var buyer := _character()
@@ -34,16 +34,63 @@ static func run(h: Harness) -> void:
 	h.equal(broke["cash"], 10, "cash unchanged")
 	h.equal(broke["gear"].size(), 0, "inventory unchanged")
 
-	h.it("limits Night Market stock by Fixer Operator rank")
+	h.it("sets Operator Reach by rank, in price categories")
+	h.equal(GearMarket.reach_ceiling(0), 0, "no Reach without the Role Ability")
+	h.equal(GearMarket.reach_ceiling(1), 20, "Ranks 1-2 reach Everyday")
+	h.equal(GearMarket.reach_ceiling(2), 20, "Ranks 1-2 reach Everyday")
+	h.equal(GearMarket.reach_ceiling(3), 500, "Ranks 3-4 reach Expensive")
+	h.equal(GearMarket.reach_ceiling(6), 500, "Ranks 5-6 keep the Expensive ceiling")
+	h.equal(GearMarket.reach_ceiling(7), 1000, "Ranks 7-8 reach Very Expensive")
+	h.equal(GearMarket.reach_ceiling(9), 5000, "Rank 9 reaches Luxury")
+	h.equal(GearMarket.reach_ceiling(10), 10000, "Rank 10 reaches Super Luxury")
+
+	h.it("only lets a Rank 5 or higher Fixer organize a Night Market")
 	var outsider := _character()
-	h.equal(GearMarket.night_market(outsider, catalog).size(), 0, "non-Fixer has no stock")
+	var any_rng := Dice.SeededRandom.new(1)
+	h.equal(GearMarket.night_market(outsider, catalog, any_rng)["ok"], false, "non-Fixer cannot")
+	var junior := _character()
+	junior["role_key"] = "fixer"
+	junior["role_ability"] = {"rank": 4}
+	var refused := GearMarket.night_market(junior, catalog, any_rng)
+	h.equal(refused["ok"], false, "Rank 4 cannot organize one")
+	h.equal(refused["stock"].size(), 0, "no stock is offered")
+
+	h.it("rolls two kinds of goods and stocks each with 1d10 types")
 	var fixer := _character()
 	fixer["role_key"] = "fixer"
-	fixer["role_ability"] = {"rank": 4}
-	var stock := GearMarket.night_market(fixer, catalog)
-	h.equal(stock.size() < catalog.size(), true, "stock is limited")
-	for product in stock:
-		h.equal(int(product["price"]) <= 1000, true, "%s is within reach" % product["name"])
+	fixer["role_ability"] = {"rank": 5}
+	# 1d6 -> 3 (Weapons and Armor) and 4 (Cyberware); then 2 and 1 types drawn.
+	var scripted := Dice.FixedRandom.new([3, 4, 2, 0, 0, 1, 0] as Array[int])
+	var market := GearMarket.night_market(fixer, catalog, scripted)
+	h.equal(market["ok"], true, "Rank 5 organizes a Night Market")
+	h.equal(market["categories"], PackedStringArray(["Weapons and Armor", "Cyberware"]), "goods rolled")
+	h.equal(market["stock"].size(), 3, "1d10 types per kind of goods")
+	h.equal(market["midnight"], false, "Rank 5 seats no Midnight Market")
+	for product in market["stock"]:
+		var kind := String(product["kind"])
+		h.check(
+			["weapon", "armor", "ammo", "cyberware"].has(kind),
+			"%s belongs to a rolled category" % product["name"],
+		)
+
+	h.it("rerolls a repeated goods roll so two kinds are always present")
+	var repeated := Dice.FixedRandom.new([2, 2, 2, 5, 1, 0, 1, 0] as Array[int])
+	var varied := GearMarket.night_market(fixer, catalog, repeated)
+	h.equal(varied["categories"].size(), 2, "two distinct kinds of goods")
+	h.equal(varied["categories"][0] != varied["categories"][1], true, "no repeat")
+
+	h.it("lifts the price ceiling at a Night Market and seats a Midnight Market at Rank 9")
+	var boss := _character()
+	boss["role_key"] = "fixer"
+	boss["role_ability"] = {"rank": 9}
+	var wide := GearMarket.night_market(boss, catalog, Dice.SeededRandom.new(7))
+	h.equal(wide["ok"], true, "Rank 9 organizes a Night Market")
+	h.equal(wide["midnight"], true, "Rank 9 seats a Midnight Market")
+	var priciest := 0
+	for value in catalog:
+		priciest = maxi(priciest, int((value as Dictionary)["price"]))
+	var reachable := GearMarket.night_market(boss, [{"id": "x", "name": "X", "kind": "cyberware", "price": priciest}], Dice.SeededRandom.new(3))
+	h.equal(reachable["ok"], true, "the most expensive stock is still sourceable")
 
 	h.it("attaches owned cyberware to compatible body parts and loses Humanity")
 	var augmented := _character()

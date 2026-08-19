@@ -24,6 +24,7 @@ from pathlib import Path
 RANGED_PAGES = (341,)
 MELEE_PAGES = (92,)
 ARMOR_PAGES = (350,)
+AMMO_PAGES = (345,)
 GEAR_PAGES = (351, 352, 353, 354)
 FASHION_PAGES = (356,)
 DRUG_PAGES = (357,)
@@ -215,6 +216,46 @@ def parse_armor(text: str) -> list[dict]:
     return items
 
 
+# The Master Gear List is one flat table, but the Night Market generator draws
+# on six distinct kinds of goods, so gear is sorted into the kinds those
+# categories look for. Anything unmatched stays survival gear.
+GEAR_KINDS = (
+    (
+        "electronics",
+        (
+            "agent", "recorder", "braindance", "bug detector", "computer", "cyberdeck",
+            "cell phone", "synthesizer", "guitar", "instrument", "homing tracer",
+            "memory chip", "amplifier", "radar", "radio", "scrambler", "smart glasses",
+            "video camera", "virtuality", "techscanner", "scanner/",
+        ),
+    ),
+    (
+        "medical",
+        ("airhypo", "cryopump", "cryotank", "medscanner", "medtech", "carepak"),
+    ),
+    (
+        "tool",
+        ("duct tape", "lock picking", "tech bag", "techtool", "grapple", "handcuffs"),
+    ),
+    ("food", ("food stick", "kibble", "mre")),
+)
+
+# A capture that runs into the prose after a table ends mid-sentence.
+PROSE_TAIL = re.compile(
+    r"\b(?:costs?|is|are|can|takes|requires|allows|provides|which|and|or|the)$",
+    re.IGNORECASE,
+)
+
+
+def gear_kind(name: str) -> str:
+    lowered = name.lower()
+    for kind, needles in GEAR_KINDS:
+        for needle in needles:
+            if needle in lowered:
+                return kind
+    return "gear"
+
+
 def parse_simple(text: str, kind: str) -> list[dict]:
     """Name/cost tables: the Master Gear List, Fashion, and Street Drugs."""
     pattern = re.compile(
@@ -227,6 +268,11 @@ def parse_simple(text: str, kind: str) -> list[dict]:
         name = clean_name(name)
         if len(name) < 3 or name.lower().startswith(("item cost", "cost", "the new")):
             continue
+        # Prose descriptions follow the table on the same pages, so a capture can
+        # land mid-sentence ("Linear Frame ss (Beta): ..."). A real entry always
+        # closes the parentheses it opens.
+        if name.count("(") != name.count(")") or PROSE_TAIL.search(name):
+            continue
         key = slug(name)
         if key in seen:
             continue
@@ -235,7 +281,7 @@ def parse_simple(text: str, kind: str) -> list[dict]:
             {
                 "id": key,
                 "name": name,
-                "kind": kind,
+                "kind": gear_kind(name) if kind == "gear" else kind,
                 "description": name,
                 "price": price_of(cost),
             }
@@ -243,10 +289,56 @@ def parse_simple(text: str, kind: str) -> list[dict]:
     return items
 
 
+# Fashion is a matrix, not a list: styles run down the side and garment slots
+# across the top, with a price in every cell. Reading it as a name/cost list
+# yields junk rows built from the trailing price runs.
+FASHION_SLOTS = (
+    "Bottoms", "Top", "Jacket", "Footwear", "Jewelry",
+    "Mirrorshades", "Glasses", "Contact Lenses", "Hats",
+)
+
+
+def parse_fashion(text: str) -> list[dict]:
+    cell = rf"[\d,]+eb\s*\((?:{PRICE_TIERS})\)"
+    pattern = re.compile(
+        rf"([A-Z][A-Za-z\- ]{{3,60}}?)\s+((?:{cell}\s*){{{len(FASHION_SLOTS)}}})"
+    )
+    price = re.compile(rf"([\d,]+)eb\s*\((?:{PRICE_TIERS})\)")
+    items: list[dict] = []
+    seen: set[str] = set()
+    for style, cells in pattern.findall(text):
+        style = clean_name(style)
+        # The header row sits immediately before the first style, so drop any
+        # slot name the capture swept up with it.
+        for slot in FASHION_SLOTS:
+            style = re.sub(rf"^{re.escape(slot)}\s+", "", style).strip()
+        if len(style) < 3:
+            continue
+        costs = price.findall(cells)
+        if len(costs) != len(FASHION_SLOTS):
+            continue
+        for slot, cost in zip(FASHION_SLOTS, costs):
+            name = f"{style} {slot}"
+            key = slug(name)
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(
+                {
+                    "id": key,
+                    "name": name,
+                    "kind": "fashion",
+                    "description": f"{slot} in the {style} style.",
+                    "price": price_of(cost),
+                }
+            )
+    return items
+
+
 def parse_cyberware(text: str) -> list[dict]:
     sections = re.split(r"[▶▶]", text)
     pattern = re.compile(
-        rf"\b([A-Z][A-Za-z0-9®™'’/()&.\- ]{{2,44}}?)\s+(Mall|Clinic|Hospital)\s+"
+        rf"\b([A-Z][A-Za-z0-9®™'’/()&.\-\u00df\u2211\u03a3 ]{{2,44}}?)\s+(Mall|Clinic|Hospital)\s+"
         rf"(.*?)\s+([\d,]+)eb\s*\((?:{PRICE_TIERS})\)\s+(\d+)\s*\(([^)]*)\)"
     )
     items: list[dict] = []
@@ -260,7 +352,7 @@ def parse_cyberware(text: str) -> list[dict]:
         for name, install, description, cost, loss, _dice in pattern.findall(section):
             name = clean_name(name)
             key = slug(name)
-            if key in seen or len(name) < 3:
+            if key in seen or len(name) < 3 or name.count("(") != name.count(")"):
                 continue
             seen.add(key)
             parts = CYBERWARE_PARTS[current]
@@ -288,8 +380,9 @@ def extract(pages: dict[int, str]) -> list[dict]:
     items += parse_ranged(join(pages, RANGED_PAGES))
     items += parse_melee(join(pages, MELEE_PAGES))
     items += parse_armor(join(pages, ARMOR_PAGES))
+    items += parse_simple(join(pages, AMMO_PAGES), "ammo")
     items += parse_simple(join(pages, GEAR_PAGES), "gear")
-    items += parse_simple(join(pages, FASHION_PAGES), "fashion")
+    items += parse_fashion(join(pages, FASHION_PAGES))
     items += parse_simple(join(pages, DRUG_PAGES), "drug")
     items += parse_cyberware(join(pages, CYBERWARE_PAGES))
 

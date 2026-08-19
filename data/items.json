@@ -61,6 +61,9 @@
     {"id":"trauma_patch","name":"Trauma Patch","kind":"drug","description":"A single-use patch that dulls pain and slows bleeding.","price":50},
     {"id":"combat_stim","name":"Combat Stim","kind":"drug","description":"A stimulant that holds off shock for one fight.","price":100},
     {"id":"sleep_inducer","name":"Sleep Inducer","kind":"drug","description":"A fast sedative delivered by hypo.","price":100},
+    {"id":"kibble","name":"Kibble Pack","kind":"food","description":"A foil pack of dry, pet-food-grade cereal. One meal.","price":10},
+    {"id":"ration_pack","name":"Ration Pack","kind":"food","description":"A sealed field meal that keeps for years.","price":20},
+    {"id":"real_food","name":"Real Food","kind":"food","description":"Actual vegetables and protein. A luxury on The Street.","price":50},
     {"id":"streetwear","name":"Streetwear","kind":"fashion","description":"Generic, forgettable, and cheap.","price":50},
     {"id":"corporate_suit","name":"Corporate Suit","kind":"fashion","description":"Tailored enough to pass a lobby desk.","price":100}
   ]
