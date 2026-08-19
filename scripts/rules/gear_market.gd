@@ -20,6 +20,14 @@ const BODY_PARTS: Array[Dictionary] = [
 ]
 
 
+## Returns the body part row, or an empty Dictionary when the id is unknown.
+static func body_part(part_id: String) -> Dictionary:
+	for part in BODY_PARTS:
+		if String(part["id"]) == part_id:
+			return part
+	return {}
+
+
 static func item(catalog: Array, item_id: String) -> Dictionary:
 	for value in catalog:
 		if String(value["id"]) == item_id:

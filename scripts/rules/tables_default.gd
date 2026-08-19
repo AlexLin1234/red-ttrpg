@@ -110,6 +110,8 @@ static func document() -> Dictionary:
 			"Combat Shotgun": _weapon("shotgun", "Shoulder Arms", 5, 4, 1, 2, false, -1),
 			"Service Rifle": _weapon("assault_rifle", "Shoulder Arms", 5, 25, 1, 2, false, 4),
 			"Marksman Rifle": _weapon("sniper_rifle", "Shoulder Arms", 5, 4, 1, 2, false, -1),
+			"Hunting Bow": _weapon("bow", "Archery", 4, 1, 1, 2, false, -1),
+			"Frag Grenade": _weapon("thrown", "Athletics", 6, 1, 1, 1, true, -1),
 			"Monoblade": _weapon("melee", "Melee Weapon", 2, 1, 2, 1, true, -1),
 			"Heavy Melee": _weapon("melee", "Melee Weapon", 3, 1, 2, 2, false, -1),
 		},
