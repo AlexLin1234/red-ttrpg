@@ -925,9 +925,7 @@ func _build_area_panel() -> Control:
 	stats.add_child(_stat_tile("Population", "~%s" % _thousands(int(area.get("population", 0)))))
 	stats.add_child(_stat_tile("Law response", String(area.get("law_response", "—"))))
 	stats.add_child(_stat_tile("Net density", String(area.get("net_density", "—"))))
-	var control_tile := _stat_tile("Control", String(area.get("control", "—")))
-	UI.expand(control_tile, true, false)
-	box.add_child(control_tile)
+	box.add_child(_stat_tile("Control", String(area.get("control", "—"))))
 
 	box.add_child(UI.micro("Job hooks here"))
 	var hooks := Store.hooks_for_area(_focus_id)
@@ -1000,6 +998,9 @@ func _note_panel(text: String) -> Control:
 
 func _stat_tile(label: String, text: String, color := UI.TEXT_DISPLAY) -> Control:
 	var tile := UI.panel(UI.PANEL_INSET)
+	# Wrapped text asks for no width of its own, so the tile has to claim its
+	# share of the grid itself; otherwise the column shrinks to a single letter.
+	UI.expand(tile, true, false)
 	var box := UI.vbox(1)
 	tile.add_child(UI.margins(box, UI.GAP_2))
 	box.add_child(UI.micro(label))

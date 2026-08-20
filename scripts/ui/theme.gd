@@ -120,9 +120,17 @@ static func micro(text: String, color := MUTED) -> Label:
 	label.add_theme_color_override("font_color", color)
 	label.add_theme_constant_override("line_spacing", 2)
 	# Godot has no letter-spacing property, so the effect is approximated with
-	# spaces between characters for the short labels that carry it.
+	# thin spaces between characters for the short labels that carry it.
 	label.text = _letterspace(label.text)
 	return label
+
+
+## What is put between two letters to hold them apart: a thin space, followed by
+## a word joiner. The joiner draws nothing and takes no width; it is there to
+## deny the line breaker the break it would otherwise take on the space, so a
+## letterspaced line that has to wrap breaks between two words rather than
+## between two letters of the same word.
+const LETTER_GAP := " ⁠"
 
 
 static func _letterspace(text: String) -> String:
@@ -130,7 +138,7 @@ static func _letterspace(text: String) -> String:
 	for index in text.length():
 		spaced += text[index]
 		if index < text.length() - 1 and text[index] != " ":
-			spaced += " "
+			spaced += LETTER_GAP
 	return spaced
 
 
@@ -234,12 +242,20 @@ static func rule_line() -> Panel:
 
 
 ## A label/value row with a hairline above it, used all over the side rails.
+##
+## Both halves expand, so a value too long for the space left beside its key can
+## wrap within its own half of the row rather than running out of the panel. It
+## is drawn against the right edge, where it sits when it is short enough to need
+## only part of that half.
 static func field_row(label: String, value_text: String, value_color := TEXT) -> HBoxContainer:
 	var row := hbox()
 	var key := micro(label)
 	key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(key)
-	row.add_child(value(value_text, 11, value_color))
+	var reading := value(value_text, 11, value_color)
+	reading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	reading.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(reading)
 	return row
 
 
