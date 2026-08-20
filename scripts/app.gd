@@ -10,6 +10,7 @@ const LocationScreen := preload("res://scripts/screens/location.gd")
 const ForgeScreen := preload("res://scripts/screens/forge.gd")
 const MarketScreen := preload("res://scripts/screens/market.gd")
 const ItemWorkshopScreen := preload("res://scripts/screens/item_workshop.gd")
+const AssistantScreen := preload("res://scripts/screens/assistant.gd")
 
 const SCREENS := [
 	{"id": "library", "label": "Library"},
@@ -19,6 +20,7 @@ const SCREENS := [
 	{"id": "forge", "label": "Forge"},
 	{"id": "market", "label": "Market"},
 	{"id": "night_market", "label": "Night Market"},
+	{"id": "assistant", "label": "Assistant"},
 ]
 
 var _current := "library"
@@ -128,7 +130,9 @@ func _build_header() -> Control:
 
 
 func _show(screen_id: String) -> void:
-	if screen_id not in ["library", "workshop"] and not Store.is_open():
+	# The Assistant opens without a campaign so its library and key can be set up
+	# before the first save exists; its Ask tab is the part that needs one.
+	if screen_id not in ["library", "workshop", "assistant"] and not Store.is_open():
 		return
 	_current = screen_id
 	for id in _nav_buttons:
@@ -152,6 +156,8 @@ func _show(screen_id: String) -> void:
 		"night_market":
 			_screen = MarketScreen.new()
 			_screen.set("night", true)
+		"assistant":
+			_screen = AssistantScreen.new()
 		_:
 			_screen = Control.new()
 	_screen.set_anchors_preset(Control.PRESET_FULL_RECT)

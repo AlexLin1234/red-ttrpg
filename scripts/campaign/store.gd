@@ -135,6 +135,7 @@ func _normalize_downtime_state() -> void:
 		campaign["night_market"] = {}
 	if not campaign.has("gm_map"):
 		campaign["gm_map"] = {}
+	Rulebooks.ensure_campaign(campaign)
 	campaign["current_month"] = Lifestyle.month_key(campaign["clock"])
 	if not campaign.has("closed_months"):
 		campaign["closed_months"] = campaign["lifestyle_closed_months"]
@@ -327,6 +328,47 @@ func remove_beat(id: String) -> bool:
 	if changed:
 		mark_dirty()
 	return changed
+
+
+# -- rulebook assistant -----------------------------------------------------------
+
+
+## The rulebooks this campaign asks its questions against.
+##
+## Only IDs live in the save. The books themselves are installed once per machine
+## through the Assistant screen, so a campaign can be handed to another GM
+## without carrying a byte of anyone's sourcebook.
+func active_rulebook_ids() -> Array:
+	return Rulebooks.active_ids(campaign) if is_open() else []
+
+
+func is_rulebook_active(book_id: String) -> bool:
+	return is_open() and Rulebooks.is_active(campaign, book_id)
+
+
+func set_rulebook_active(book_id: String, active: bool) -> bool:
+	if not is_open() or not Rulebooks.set_active(campaign, book_id, active):
+		return false
+	mark_dirty()
+	return true
+
+
+func move_rulebook(book_id: String, delta: int) -> bool:
+	if not is_open() or not Rulebooks.move(campaign, book_id, delta):
+		return false
+	mark_dirty()
+	return true
+
+
+## The active books that this installation holds and has finished indexing.
+func searchable_rulebook_ids(installed: Array) -> Array:
+	return Rulebooks.searchable_ids(campaign, installed) if is_open() else []
+
+
+## Names the campaign's assistant history file. It is a local convenience, kept
+## in application data rather than in the portable save.
+func assistant_campaign_id() -> String:
+	return String(campaign.get("id", "")) if is_open() else ""
 
 
 # -- shared economy ---------------------------------------------------------------
