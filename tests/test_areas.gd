@@ -41,6 +41,15 @@ static func run(h: Harness) -> void:
 	h.equal(NightCity.points_of(parsed), points, "points survive the round trip")
 	h.equal(area["custom"], true, "drawn zones are marked custom")
 	h.equal(area["danger"], 2, "starts at a neutral danger")
+	h.equal(area["opacity"], 1.0, "starts fully visible")
+
+	h.it("allows zone fills to be transparent while clamping invalid values")
+	area["opacity"] = 0.0
+	h.equal(NightCity.zone_opacity(area), 0.0, "transparent fill")
+	area["opacity"] = 2.0
+	h.equal(NightCity.zone_opacity(area), 1.0, "opacity clamped high")
+	area.erase("opacity")
+	h.equal(NightCity.zone_opacity(area), 1.0, "old zones remain fully visible")
 
 	h.it("places a new zone's label inside its own shape")
 	var label := NightCity.label_of(area)

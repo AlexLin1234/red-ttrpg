@@ -215,6 +215,12 @@ static func zone_colors(zone_type: String, focused: bool) -> Dictionary:
 	return {"fill": fill, "stroke": stroke}
 
 
+## Per-zone fill visibility. Outlines, labels, and hit testing remain available
+## even at zero so a transparent zone can still be selected and edited.
+static func zone_opacity(area: Dictionary) -> float:
+	return clampf(float(area.get("opacity", 1.0)), 0.0, 1.0)
+
+
 const _WEATHER: Array = [
 	{"condition": "Clear", "temperature_c": 22, "visibility_pct": 95},
 	{"condition": "Smog", "temperature_c": 26, "visibility_pct": 55},
@@ -301,6 +307,7 @@ static func default_areas() -> Array:
 		area["polygon"] = flatten(entry["polygon"])
 		area["label"] = [entry["label"].x, entry["label"].y]
 		area["custom"] = false
+		area["opacity"] = 1.0
 		areas.append(area)
 	return areas
 
@@ -319,6 +326,7 @@ static func new_area(points: PackedVector2Array) -> Dictionary:
 		"law_response": "Moderate",
 		"net_density": "Medium",
 		"description": "",
+		"opacity": 1.0,
 		"polygon": flatten(points),
 		"label": [label.x, label.y],
 		"custom": true,

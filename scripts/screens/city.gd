@@ -1061,6 +1061,9 @@ func _build_editor() -> Control:
 	var set_population := func(value: int) -> void:
 		area["population"] = value
 		_commit()
+	var set_opacity := func(value: float) -> void:
+		area["opacity"] = value
+		_commit()
 
 	box.add_child(_text_field("Name", String(area.get("name", "")), set_name))
 	box.add_child(_text_field("Subtitle", String(area.get("subtitle", "")), set_subtitle))
@@ -1074,6 +1077,7 @@ func _build_editor() -> Control:
 	box.add_child(
 		_number_field("Population", int(area.get("population", 0)), 0, 5000000, 1000, set_population)
 	)
+	box.add_child(_opacity_field(float(area.get("opacity", 1.0)), set_opacity))
 	box.add_child(
 		_choice_field(
 			"Law response", NightCity.LAW_RESPONSES, String(area.get("law_response", "Moderate")), set_law
@@ -1151,6 +1155,25 @@ func _number_field(
 	spin.value = value
 	spin.value_changed.connect(func(new_value: float) -> void: on_change.call(int(new_value)))
 	box.add_child(spin)
+	return box
+
+
+func _opacity_field(value: float, on_change: Callable) -> Control:
+	var box := UI.vbox(2)
+	var label := UI.micro("Zone fill · %d%%" % roundi(value * 100.0))
+	box.add_child(label)
+	var slider := HSlider.new()
+	slider.min_value = 0.0
+	slider.max_value = 1.0
+	slider.step = 0.05
+	slider.value = value
+	slider.tooltip_text = "Set to 0% to make the zone fill transparent"
+	slider.value_changed.connect(
+		func(new_value: float) -> void:
+			label.text = "Zone fill · %d%%" % roundi(new_value * 100.0)
+			on_change.call(new_value)
+	)
+	box.add_child(slider)
 	return box
 
 
@@ -2141,7 +2164,9 @@ class _MapView extends Control:
 			if points.size() < 3:
 				continue
 
-			draw_colored_polygon(points, colors["fill"])
+			var fill: Color = colors["fill"]
+			fill.a *= NightCity.zone_opacity(entry)
+			draw_colored_polygon(points, fill)
 			var outline := points.duplicate()
 			outline.append(points[0])
 			draw_polyline(outline, colors["stroke"], 2.0 if focused else 1.5)
