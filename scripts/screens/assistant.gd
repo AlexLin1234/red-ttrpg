@@ -107,6 +107,10 @@ func _show_tab(tab_id: String) -> void:
 
 
 func _rebuild() -> void:
+	# The screen is rebuilt whenever anything changes, so a half-typed question
+	# is captured first rather than thrown away with the old field.
+	if is_instance_valid(_question_field):
+		_question = _question_field.text
 	for child in _tab_row.get_children():
 		child.queue_free()
 	for entry in TABS:
@@ -330,9 +334,10 @@ func _on_answer(result: Dictionary) -> void:
 		_message = String(result.get("error", "The assistant could not answer."))
 		_message_good = false
 		if String(result.get("code", "")) in ["missing_key", "invalid_key"]:
-			# The question is kept, so switching tabs to fix the key loses nothing.
-			_show_tab("setup")
-			return
+			# Switch tabs without going through _show_tab, which would clear the
+			# very message that explains why the GM is now looking at Setup. The
+			# question itself is held in _question and comes back with the tab.
+			_tab = "setup"
 		_rebuild()
 		return
 	_answer = result["data"]
