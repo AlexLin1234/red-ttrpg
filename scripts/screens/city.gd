@@ -69,8 +69,12 @@ func _ready() -> void:
 	_map.reshape_changed.connect(_on_reshape_changed)
 	map_shell.add_child(_map)
 
-	var rail_shell := UI.panel()
-	rail_shell.custom_minimum_size = Vector2(320, 0)
+	# Keep hover-driven content swaps from feeding a new minimum width back into
+	# the HBox. Otherwise a long place/zone value makes the map narrower, moves
+	# the polygon out from under the pointer, and starts a hover flicker loop.
+	var rail_shell := _FixedWidthPanel.new()
+	rail_shell.custom_minimum_size = Vector2(_FixedWidthPanel.WIDTH, 0)
+	rail_shell.clip_contents = true
 	UI.expand(rail_shell, false, true)
 	body.add_child(rail_shell)
 
@@ -1751,6 +1755,16 @@ static func _thousands(value: int) -> String:
 
 
 # -- the map ------------------------------------------------------------------------------
+
+
+## A panel whose contents cannot change the width assigned by its parent.
+## PanelContainer normally reports its children's minimum width, which is
+## undesirable for a rail whose contents are replaced on every map hover.
+class _FixedWidthPanel extends PanelContainer:
+	const WIDTH := 320.0
+
+	func _get_minimum_size() -> Vector2:
+		return Vector2(WIDTH, 0)
 
 
 ## Polygons drawn to fit, with point-in-polygon hover and a vertex-by-vertex
