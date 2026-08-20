@@ -229,7 +229,13 @@ func set_tab(tab: String) -> void:
 func _on_hovered(area_id: String) -> void:
 	if _mode != "inspect" or _focus_kind == "poi":
 		return
-	_focus_id = area_id if area_id != "" else _pinned_id
+	var next_focus := area_id if area_id != "" else _pinned_id
+	# Mouse motion is reported continuously while the pointer stays over a plate.
+	# Rebuilding the rail for an unchanged target made its controls disappear and
+	# reappear every frame, which was especially visible when crossing a POI pin.
+	if _focus_id == next_focus:
+		return
+	_focus_id = next_focus
 	_map.set_focus(_focus_id)
 	if _tab == "map":
 		_refresh_rail()
@@ -520,6 +526,9 @@ func _hooked_areas() -> PackedStringArray:
 
 func _refresh_rail() -> void:
 	for child in _rail.get_children():
+		# Detach immediately so two rail layouts never participate in the same
+		# container pass while the old controls wait for queue_free().
+		_rail.remove_child(child)
 		child.queue_free()
 
 	_rail.add_child(_build_clock())
