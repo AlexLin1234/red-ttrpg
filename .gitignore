@@ -24,6 +24,17 @@ data/items_local.json
 build/
 export/
 release/
+dist/
+.pytest_cache/
+
+# The rulebook assistant keeps imported books, extracted text, indexes, question
+# history and the API key in per-user application data and the OS credential
+# vault — never in the repository. These are only here in case a developer
+# points REDLINE_ASSISTANT_HOME at the checkout.
+assistant/books/
+assistant/index/
+assistant/history/
+assistant/library.json
 
 tmp/
 .gstack/

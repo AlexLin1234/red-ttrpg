@@ -116,6 +116,13 @@ damage dice and flat damage, armor SP, or cyberware Humanity loss. Built-ins liv
 in `data/items.json` and custom variants in `user://item_variants.json`, outside
 portable campaign saves.
 
+**Assistant** — a rules reference over the rulebook PDFs a GM legally owns. Ask
+a question in table language and get a short answer that names the file and PDF
+page it came from, or an explicit "the active books did not establish that". It
+searches only the books the open campaign has made active, and it never rolls,
+never does combat arithmetic, and never answers from what the model happens to
+remember about Cyberpunk RED. See **Rules assistant** below.
+
 ## Rules and owned content
 
 No sourcebook pages or extracted images ship with Redline. The built-in combat
@@ -134,6 +141,7 @@ Open `project.godot` in Godot 4.7, or run:
 ```bash
 godot --path .                # run the app
 ./run-tests.sh                # headless logic suite
+./run-assistant-tests.sh      # assistant helper suite and the release audit
 ./run-shots.sh                # render every screen to .shots/ (needs Xvfb)
 ```
 
@@ -180,9 +188,13 @@ scripts/
   encounter/         initiative, rounds, turns
   city/              zone data, the Night City seed, map images
   board/             the isometric board
-  screens/           library, item workshop, city, location, forge, markets
+  screens/           library, item workshop, city, location, forge, markets,
+                     assistant
+  assistant/         the client that runs and calls the local helper
   ui/theme.gd        palette, fonts, widget factories
+assistant/           the local rulebook helper: extraction, index, vault, agent
 tests/               headless runner and suites
+tests/assistant/     the helper's own suite, run by pytest
 docs/mockups/        visual design references
 data/items.json      homebrew placeholder item catalog (shipped)
 data/items_local.json  rulebook-derived catalog, git-ignored, replaces the above
@@ -207,6 +219,75 @@ near-duplicates. The Market header shows which catalog is loaded. Every row is
 validated on load — an unknown weapon type, an autofire rating on a weapon with
 no autofire range band, a bad armor location or an unknown cyberware body part is
 dropped with a warning instead of asserting later inside the resolver.
+
+## Rules assistant
+
+No sourcebook ships with Redline, so the assistant starts empty. A GM imports
+the PDFs they own into an installation-wide library, chooses which of them each
+campaign plays with, and supplies their own Anthropic API key.
+
+**Rulebook Library** — Import PDF copies the file into Redline's private
+application-data folder, so moving the original out of Downloads later breaks
+nothing. Each book is identified by the SHA-256 of its bytes, so the same file
+imported twice is recognised as the same book whatever it was renamed to. Text
+is extracted page by page and indexed locally into SQLite: full-text search plus
+a small deterministic local vector, with no second cloud account and no model
+download. An encrypted or scanned PDF is refused with the reason rather than
+indexed into something that answers nothing.
+
+**Campaign selection** — A campaign stores only the IDs of its active books, in
+the order the GM arranged them. Retrieval is filtered to those IDs in SQL, so a
+campaign can never read a passage — or show a citation — from a book it has not
+enabled. A book this machine does not have is reported as unavailable rather
+than dropped from the save, because the GM who owns it still resolves it on
+theirs.
+
+**Asking** — Claude gets one tool: search across the active books. Each passage
+it is handed carries a marker, and it cites by marker. The helper then rebuilds
+every citation from the passages that request actually retrieved, so a filename
+or page number the model wrote itself cannot reach the screen. An answer with no
+surviving citation is not shown at all; the GM is told the books did not settle
+it.
+
+**Privacy** — Books, extracted text, indexes and question history stay in
+per-user application data. The API key lives in the operating-system credential
+vault, never in a `.red` file, a settings file, a log, a process argument, or an
+export. Asking a question sends the question and the passages found for it to
+Anthropic, using the GM's key; the first-use disclosure in the Assistant tab
+says so before the first question. Nothing else about the campaign — characters,
+notes, beats, clock — is ever sent. `scripts/audit_export.py` fails a release
+that carries a book, an index, extracted text, or a credential.
+
+```text
+Redline application data/assistant/
+  books/         imported PDFs
+  index/         extracted chunks and the SQLite index
+  history/       local per-campaign question history
+  library.json   non-secret book metadata
+OS credential vault    the GM's Anthropic API key
+campaign.red           active_rulebook_ids, and nothing else
+```
+
+### The helper process
+
+Extraction, indexing, the vault, retrieval, and the Anthropic request all live
+in a small Python helper that ships as one executable, so a GM never installs
+Python. Godot starts it on demand, writes it a freshly generated session token
+over the pipe — never on the command line — and reads back the loopback port it
+bound. It listens on `127.0.0.1` only, requires that token on every request, and
+exits when Redline closes the pipe, so a crash leaves no orphan.
+
+Build and verify it with the frozen binary's own self test:
+
+```bash
+python -m pip install -r assistant/requirements-dev.txt
+python assistant/packaging/build_helper.py     # dist/redline-assistant[.exe]
+```
+
+Windows is the first packaging target, since that is where a GM is least likely
+to have Python; the same command builds the macOS and Linux helper. In a
+development checkout with those requirements installed, Godot runs the helper
+from source instead, so no build step is needed to work on it.
 
 ## Save format
 
