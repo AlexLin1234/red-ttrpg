@@ -27,7 +27,7 @@ jobs:
     name: Python suite
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/setup-python@v5
         with:
@@ -50,7 +50,7 @@ jobs:
     name: GDScript suite
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # The headless binary still links against these; a bare runner image does
       # not always carry them.
@@ -89,12 +89,8 @@ jobs:
   ratchets:
     name: Ratchets (advisory)
     runs-on: ubuntu-latest
-    # Reports drift without blocking a merge. Each of these is one cleanup
-    # commit away from being promotable into the jobs above; see ruff.toml and
-    # .gdlintrc for what each currently reports.
-    continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/setup-python@v5
         with:
@@ -103,11 +99,41 @@ jobs:
       - name: Install the tools
         run: pip install ruff mypy "gdtoolkit==4.*" -r assistant/requirements.txt
 
-      - name: Python formatting
-        run: ruff format --check --diff .
+      # Writes what each tool would change into the run summary and always
+      # succeeds. A red X here would read as "this PR is broken" when it means
+      # "the codebase has not adopted this yet", so drift is reported rather
+      # than enforced. When one of these reaches clean, move it into the
+      # blocking jobs above and delete it from here.
+      - name: Report drift
+        run: |
+          report() {
+            title="$1"
+            shift
+            if output=$("$@" 2>&1); then
+              echo "- **$title** — clean, ready to enforce" >> "$GITHUB_STEP_SUMMARY"
+            else
+              {
+                echo "<details><summary><b>$title</b> — drift</summary>"
+                echo
+                echo '```'
+                echo "$output" | tail -50
+                echo '```'
+                echo
+                echo "</details>"
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          }
 
-      - name: Python types
-        run: mypy --ignore-missing-imports assistant service scripts/audit_export.py
+          {
+            echo "## Ratchets"
+            echo
+            echo "Advisory. None of this blocks a merge."
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: GDScript formatting
-        run: gdformat --check $(git ls-files '*.gd')
+          report "Python formatting (ruff format)" \
+            ruff format --check .
+          report "Python types (mypy)" \
+            mypy --ignore-missing-imports assistant service scripts/audit_export.py
+          report "GDScript formatting (gdformat)" \
+            bash -c "gdformat --check \$(git ls-files '*.gd')"

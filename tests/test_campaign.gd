@@ -70,6 +70,9 @@ static func run(h: Harness) -> void:
 	h.equal(summary["hooks"], 5, "open hooks")
 
 	h.it("reports a corrupt save instead of crashing the library listing")
+	# The next three cases feed the decoder JSON that cannot parse, so Godot
+	# prints its own "is not valid JSON" errors to stderr as they run. That
+	# output is the code under test working, not a failing check.
 	# A truncated write leaves a real container holding unparseable JSON. The
 	# library draws an "unreadable" card for it, which it can only do if the
 	# summary comes back as a refusal rather than taking the process down.
