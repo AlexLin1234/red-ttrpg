@@ -1,0 +1,113 @@
+# Runs the two suites that already existed in this repo but had nothing to run
+# them: ./run-tests.sh (GDScript, via a headless Godot) and
+# ./run-assistant-tests.sh (pytest plus the release-content audit).
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  # Must match config/features in project.godot. Bump both together, and check
+  # the release actually publishes this asset name before relying on the job.
+  GODOT_VERSION: "4.7"
+
+jobs:
+  python:
+    name: Python suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: assistant/requirements-dev.txt
+
+      - name: Install the helper's dependencies
+        run: pip install -r assistant/requirements-dev.txt
+
+      - name: Lint
+        run: pip install ruff && ruff check .
+
+      # Runs pytest over tests/assistant and tests/service, then the audit that
+      # checks no rulebook text or credential reached a release artifact.
+      - name: Test
+        run: ./run-assistant-tests.sh
+
+  godot:
+    name: GDScript suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The headless binary still links against these; a bare runner image does
+      # not always carry them.
+      - name: Install runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libxcursor1 libxinerama1 libxrandr2 libxi6 fontconfig
+
+      - name: Install Godot ${{ env.GODOT_VERSION }}
+        run: |
+          set -euo pipefail
+          base="Godot_v${GODOT_VERSION}-stable_linux.x86_64"
+          url="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/${base}.zip"
+          echo "Fetching $url"
+          curl -fL --retry 3 -o godot.zip "$url"
+          unzip -q godot.zip
+          mkdir -p "$HOME/.local/bin"
+          mv "$base" "$HOME/.local/bin/godot"
+          chmod +x "$HOME/.local/bin/godot"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Show the engine version
+        run: godot --version
+
+      - name: Lint
+        run: |
+          pip install "gdtoolkit==4.*"
+          gdlint $(git ls-files '*.gd')
+
+      # run-tests.sh imports the project first, then runs res://tests/run_tests.gd,
+      # which exits non-zero on any failed check.
+      - name: Test
+        run: ./run-tests.sh
+
+  ratchets:
+    name: Ratchets (advisory)
+    runs-on: ubuntu-latest
+    # Reports drift without blocking a merge. Each of these is one cleanup
+    # commit away from being promotable into the jobs above; see ruff.toml and
+    # .gdlintrc for what each currently reports.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install the tools
+        run: pip install ruff mypy "gdtoolkit==4.*" -r assistant/requirements.txt
+
+      - name: Python formatting
+        run: ruff format --check --diff .
+
+      - name: Python types
+        run: mypy --ignore-missing-imports assistant service scripts/audit_export.py
+
+      - name: GDScript formatting
+        run: gdformat --check $(git ls-files '*.gd')

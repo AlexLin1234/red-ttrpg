@@ -1,0 +1,41 @@
+# Linting for the Python halves: the local assistant helper and the hosted
+# campaign API. The Godot side is covered by .gdlintrc instead.
+#
+# The selection below is what the codebase already satisfies, so CI is green
+# from the commit that introduced it. The rules listed under "ratchets" at the
+# bottom are the next ones worth turning on, each with the cleanup it needs.
+
+target-version = "py311"
+line-length = 120
+
+[lint]
+# Ruff's defaults (pycodestyle errors, Pyflakes) plus flake8-bugbear, which is
+# the set that catches real mistakes rather than formatting preferences.
+select = ["E4", "E7", "E9", "F", "B"]
+
+ignore = [
+    # zip() without strict=. Both call sites are deliberate and neither wants
+    # the check: the bigram pass in embedding.py pairs a list with its own
+    # tail, so the lengths differ by one by construction, and similarity()
+    # documents equal length as a precondition of its callers. Turning this on
+    # means auditing both rather than adding strict= mechanically.
+    "B905",
+]
+
+[lint.per-file-ignores]
+# The test suites insert the repository root on sys.path before importing the
+# package under test, which has to happen after the import block starts.
+"tests/**" = ["E402"]
+
+[format]
+# Not enforced yet: `ruff format` currently rewrites ~1400 lines. Run it as one
+# dedicated commit, then add a --check step to CI.
+quote-style = "double"
+indent-style = "space"
+
+# Ratchets, in the order they are cheapest to adopt:
+#   I    import sorting          — 7 files
+#   UP   pyupgrade               — 5 sites, all quoted annotations
+#   SIM  flake8-simplify         — 3 sites
+#   RUF  ruff-specific           — mostly unsorted __all__
+#   E501 line length             — 1 site, a long SQL literal in index.py

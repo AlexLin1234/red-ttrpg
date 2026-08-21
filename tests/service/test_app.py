@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from starlette.websockets import WebSocketDisconnect
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -163,8 +164,9 @@ def test_a_socket_that_cannot_be_greeted_is_never_left_in_the_broadcast_set(api)
     client, module, write, _path = api
     write("{not json")
 
-    with pytest.raises(Exception):
-        with client.websocket_connect("/ws") as socket:
-            socket.receive_json()
+    # The server closes the socket instead of greeting it, which surfaces here
+    # as a disconnect rather than a message.
+    with pytest.raises(WebSocketDisconnect), client.websocket_connect("/ws") as socket:
+        socket.receive_json()
 
     assert module.clients == set()

@@ -1,0 +1,25 @@
+# Keeps the pinned versions moving. Everything here is pinned exactly, which is
+# right for reproducibility but goes stale silently — PyMuPDF was already at
+# 1.26.3 in requirements.txt and 1.28.2 in assistant/requirements.txt when this
+# was added.
+
+version: 2
+updates:
+  # The Docker image for the hosted campaign API.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # The local assistant helper, including its dev and packaging tools.
+  - package-ecosystem: pip
+    directory: /assistant
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

@@ -219,7 +219,10 @@ def test_transport_failures_become_codes_the_setup_tab_can_act_on(books):
     for code, exception in cases.items():
         class Exploding:
             def create(self, **_kwargs):
-                raise exception
+                # The rule below fires on late binding, which cannot happen
+                # here: the class is built and fully consumed inside this
+                # iteration, before the loop rebinds anything.
+                raise exception  # noqa: B023
 
         client = FakeClient([])
         client.messages = Exploding()
