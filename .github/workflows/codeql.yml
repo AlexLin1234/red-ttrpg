@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
   security-events: write
+  # codeql-action reads the workflow run it is part of. On a private repository
+  # that call is not covered by the default token, and without this the analysis
+  # completes and then reports "Resource not accessible by integration".
+  actions: read
 
 jobs:
   analyze:
