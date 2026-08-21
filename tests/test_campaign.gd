@@ -69,6 +69,66 @@ static func run(h: Harness) -> void:
 	h.equal(summary["npcs"], 17, "npc count")
 	h.equal(summary["hooks"], 5, "open hooks")
 
+	h.it("reports a corrupt save instead of crashing the library listing")
+	# A truncated write leaves a real container holding unparseable JSON. The
+	# library draws an "unreadable" card for it, which it can only do if the
+	# summary comes back as a refusal rather than taking the process down.
+	var corrupt_path := "user://test_corrupt.red"
+	var corrupt := ZIPPacker.new()
+	h.equal(corrupt.open(corrupt_path), OK, "opened the corrupt container")
+	corrupt.start_file(CampaignContainer.MANIFEST)
+	corrupt.write_file('{"format": "redline", "entr'.to_utf8_buffer())
+	corrupt.close_file()
+	corrupt.start_file(CampaignContainer.CAMPAIGN)
+	corrupt.write_file('{"name": "Half A Sav'.to_utf8_buffer())
+	corrupt.close_file()
+	corrupt.close()
+	var corrupt_summary := CampaignContainer.read_summary(corrupt_path)
+	h.equal(corrupt_summary["ok"], false, "corrupt summary refused")
+	h.equal(CampaignContainer.load_file(corrupt_path)["ok"], false, "corrupt load refused")
+
+	h.it("summarizes a save whose campaign holds the wrong types")
+	# Nothing in a .red is signed, so a hand-edited one can hold anything at any
+	# key. The card still has to render.
+	var odd_path := "user://test_odd_types.red"
+	var odd := ZIPPacker.new()
+	h.equal(odd.open(odd_path), OK, "opened the odd container")
+	odd.start_file(CampaignContainer.MANIFEST)
+	odd.write_file('{"format": "redline", "entries": "not an object"}'.to_utf8_buffer())
+	odd.close_file()
+	odd.start_file(CampaignContainer.CAMPAIGN)
+	odd.write_file('{"name": "Odd", "hooks": "not a list"}'.to_utf8_buffer())
+	odd.close_file()
+	odd.start_file(CampaignContainer.ROSTER)
+	odd.write_file('{"characters": [7, {"kind": "npc"}]}'.to_utf8_buffer())
+	odd.close_file()
+	odd.close()
+	var odd_summary := CampaignContainer.read_summary(odd_path)
+	h.equal(odd_summary["ok"], true, "odd summary read")
+	h.equal(odd_summary["name"], "Odd", "name")
+	h.equal(odd_summary["locations"], 0, "no locations counted")
+	h.equal(odd_summary["hooks"], 0, "no hooks counted")
+	h.equal(odd_summary["npcs"], 1, "only the one real character counts")
+
+	h.it("refuses a campaign with neither current_month nor a usable clock")
+	# The month default used to be computed eagerly, so this indexed a missing
+	# clock on every load rather than only on the saves that need it.
+	var clockless_path := "user://test_clockless.red"
+	var clockless := ZIPPacker.new()
+	h.equal(clockless.open(clockless_path), OK, "opened the clockless container")
+	clockless.start_file(CampaignContainer.MANIFEST)
+	clockless.write_file(
+		('{"format": "%s", "entries": {}}' % CampaignSchema.SAVE_FORMAT).to_utf8_buffer()
+	)
+	clockless.close_file()
+	clockless.start_file(CampaignContainer.CAMPAIGN)
+	clockless.write_file('{"name": "No Clock"}'.to_utf8_buffer())
+	clockless.close_file()
+	clockless.close()
+	var clockless_loaded := CampaignContainer.load_file(clockless_path)
+	h.equal(clockless_loaded["ok"], false, "clockless load refused")
+	h.contains(String(clockless_loaded["error"]), "current_month", "names the missing month")
+
 	h.it("rejects a file that is not a container")
 	var junk := FileAccess.open("user://not_a_save.red", FileAccess.WRITE)
 	junk.store_string("this is not a zip")
@@ -110,4 +170,7 @@ static func run(h: Harness) -> void:
 
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(tampered_path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(corrupt_path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(odd_path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(clockless_path))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://not_a_save.red"))

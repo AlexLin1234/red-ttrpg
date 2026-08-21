@@ -137,17 +137,74 @@ static func _move_armor_profile(
 		return
 	if not recipient.has("armor") or not recipient["armor"] is Dictionary:
 		recipient["armor"] = CampaignSchema.empty_armor()
-	var profile: Dictionary = entry.get("armor_profile", {})
+	if not source.has("armor") or not source["armor"] is Dictionary:
+		source["armor"] = CampaignSchema.empty_armor()
+	var worn_by_source: Dictionary = source["armor"]
+	var worn_by_recipient: Dictionary = recipient["armor"]
+
+	var profile := _profile_of(entry)
 	if not profile.is_empty():
 		var location := String(profile.get("location", ""))
-		if location != "":
-			(source["armor"] as Dictionary)[location] = {"sp": 0, "ablated": false}
-			(recipient["armor"] as Dictionary)[location] = {
-				"sp": int(profile.get("sp", 0)), "ablated": false
-			}
+		if location == "":
+			return
+		# The giver can still be wearing a second piece at that location, so the
+		# location is only lowered to whatever is left in their gear.
+		var left := _best_carried_sp(source, location)
+		var still_worn: Dictionary = _worn_at(worn_by_source, location)
+		if int(still_worn.get("sp", 0)) > left:
+			worn_by_source[location] = {"sp": left, "ablated": false}
+		worn_by_recipient[location] = {"sp": int(profile.get("sp", 0)), "ablated": false}
 		return
-	# Older saves model one carried armor entry as the whole worn suit. Preserve
-	# that behavior when it changes hands.
-	var worn: Dictionary = source.get("armor", CampaignSchema.empty_armor())
-	recipient["armor"] = worn.duplicate(true)
+
+	# Older saves — and the sample party — carry one armor entry with no profile
+	# to say which location it covers, and model it as the whole worn suit. That
+	# reading only holds while it is the giver's last armor entry, and it must
+	# not strip armor the recipient already wears.
+	if _carries_armor(source):
+		return
+	for location in worn_by_source:
+		if int(_worn_at(worn_by_recipient, location).get("sp", 0)) <= 0:
+			worn_by_recipient[location] = _worn_at(worn_by_source, location).duplicate(true)
 	source["armor"] = CampaignSchema.empty_armor()
+
+
+static func _worn_at(armor: Dictionary, location: String) -> Dictionary:
+	var value: Variant = armor.get(location, {})
+	return value if typeof(value) == TYPE_DICTIONARY else {}
+
+
+static func _profile_of(item: Dictionary) -> Dictionary:
+	var value: Variant = item.get("armor_profile", {})
+	return value if typeof(value) == TYPE_DICTIONARY else {}
+
+
+## Every armor entry still in the character's gear.
+static func _carried_armor(character: Dictionary) -> Array[Dictionary]:
+	var carried: Array[Dictionary] = []
+	var gear: Variant = character.get("gear", [])
+	if typeof(gear) != TYPE_ARRAY:
+		return carried
+	for value in gear as Array:
+		if typeof(value) != TYPE_DICTIONARY:
+			continue
+		if String((value as Dictionary).get("kind", "")) == "armor":
+			carried.append(value as Dictionary)
+	return carried
+
+
+## Does the character still carry an armor entry that stands for a whole suit?
+static func _carries_armor(character: Dictionary) -> bool:
+	for item in _carried_armor(character):
+		if _profile_of(item).is_empty():
+			return true
+	return false
+
+
+## The best SP the character's remaining gear still provides at [param location].
+static func _best_carried_sp(character: Dictionary, location: String) -> int:
+	var best := 0
+	for item in _carried_armor(character):
+		var profile := _profile_of(item)
+		if String(profile.get("location", "")) == location:
+			best = maxi(best, int(profile.get("sp", 0)))
+	return best

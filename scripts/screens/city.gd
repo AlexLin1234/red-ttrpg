@@ -1822,7 +1822,6 @@ class _MapView extends Control:
 	var _scale := 1.0
 	var _origin := Vector2.ZERO
 	var _backdrop: ImageTexture
-	var _backdrop_size := Vector2.ONE
 	var _backdrop_signature := 0
 	var _backdrop_opacity := 0.72
 	var _backdrop_visible := true
@@ -1858,7 +1857,6 @@ class _MapView extends Control:
 
 	func _adopt(image: Image) -> void:
 		_backdrop = ImageTexture.create_from_image(image)
-		_backdrop_size = Vector2(image.get_width(), image.get_height())
 
 	func toggle_map() -> void:
 		_backdrop_visible = not _backdrop_visible
@@ -2133,13 +2131,14 @@ class _MapView extends Control:
 			y += step
 
 		if _backdrop != null and _backdrop_visible:
-			# The backdrop occupies the same letterboxed rect the zones map into, so
-			# a zone drawn over a landmark stays on that landmark.
-			var fit := minf(size.x / _backdrop_size.x, size.y / _backdrop_size.y)
-			var drawn := _backdrop_size * fit
+			# The backdrop fills exactly the letterboxed rect the zones map into,
+			# so a zone drawn over a landmark stays on that landmark. An upload
+			# that is not 1000 × 700 is stretched to it rather than fitted by its
+			# own aspect: fitting would slide the picture out from under every
+			# zone and every click.
 			draw_texture_rect(
 				_backdrop,
-				Rect2((size - drawn) * 0.5, drawn),
+				Rect2(_origin, NightCity.MAP_SIZE * _scale),
 				false,
 				Color(1, 1, 1, _backdrop_opacity),
 			)

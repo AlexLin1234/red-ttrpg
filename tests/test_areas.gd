@@ -203,6 +203,20 @@ static func run(h: Harness) -> void:
 	h.equal(NightCity.points_of(slid)[2], Vector2(150, 80), "third corner slid")
 	h.equal(NightCity.label_of(slid), Vector2(60, 70), "label came along")
 
+	h.it("moves a zone whose label is only its centroid exactly once")
+	# label_of falls back to the centroid, so reading it after the corners had
+	# already been slid applied the drag a second time.
+	var unlabelled := NightCity.new_area(square)
+	unlabelled.erase("label")
+	var centre := NightCity.label_of(unlabelled)
+	NightCity.move_area(unlabelled, Vector2(50, -20))
+	h.equal(NightCity.label_of(unlabelled), centre + Vector2(50, -20), "label moved with the zone")
+	h.equal(
+		NightCity.label_of(unlabelled),
+		NightCity.centroid_of(NightCity.points_of(unlabelled)),
+		"and still sits on the shape",
+	)
+
 	h.it("adds a corner on the edge that was clicked")
 	var grown := NightCity.insert_corner(square, 0, Vector2(50, -30))
 	h.equal(grown.size(), 5, "one more corner")

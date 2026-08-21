@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import threading
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
@@ -102,6 +103,11 @@ class RulebookLibrary:
         paths.ensure_layout()
         self.index = index if index is not None else ChunkIndex()
         self._books: dict[str, Book] = {}
+        # Indexing runs on a worker thread while the API keeps answering, so the
+        # book table and the file it is written to are guarded here. The lock is
+        # only ever held for a dictionary update and a small write — never for
+        # extraction, which is the slow part.
+        self._lock = threading.RLock()
         self._load()
 
     # -- persistence --------------------------------------------------------
@@ -156,21 +162,24 @@ class RulebookLibrary:
     def _save(self) -> None:
         location = paths.library_file()
         location.parent.mkdir(parents=True, exist_ok=True)
-        document = {
-            "version": LIBRARY_VERSION,
-            "books": [book.as_dict() for book in self.books()],
-        }
-        temporary = location.with_suffix(".json.tmp")
-        temporary.write_text(json.dumps(document, indent=2), encoding="utf-8")
-        temporary.replace(location)
+        with self._lock:
+            document = {
+                "version": LIBRARY_VERSION,
+                "books": [book.as_dict() for book in self.books()],
+            }
+            temporary = location.with_suffix(".json.tmp")
+            temporary.write_text(json.dumps(document, indent=2), encoding="utf-8")
+            temporary.replace(location)
 
     # -- reading ------------------------------------------------------------
 
     def books(self) -> list[Book]:
-        return sorted(self._books.values(), key=lambda book: book.label.lower())
+        with self._lock:
+            return sorted(self._books.values(), key=lambda book: book.label.lower())
 
     def book(self, book_id: str) -> Book | None:
-        return self._books.get(book_id)
+        with self._lock:
+            return self._books.get(book_id)
 
     def book_path(self, book: Book) -> Path:
         return paths.books_dir() / book.stored_name
@@ -179,14 +188,15 @@ class RulebookLibrary:
         """Split a campaign's stored IDs into searchable, missing and not-ready."""
 
         selection = ActiveSelection()
-        for book_id in dict.fromkeys(book_ids):
-            book = self._books.get(str(book_id))
-            if book is None:
-                selection.missing.append(str(book_id))
-            elif book.searchable:
-                selection.books.append(book)
-            else:
-                selection.not_ready.append(book)
+        with self._lock:
+            for book_id in dict.fromkeys(book_ids):
+                book = self._books.get(str(book_id))
+                if book is None:
+                    selection.missing.append(str(book_id))
+                elif book.searchable:
+                    selection.books.append(book)
+                else:
+                    selection.not_ready.append(book)
         return selection
 
     # -- importing ----------------------------------------------------------
@@ -213,7 +223,8 @@ class RulebookLibrary:
 
         sha256 = file_digest(source)
         book_id = book_id_for(sha256)
-        existing = self._books.get(book_id)
+        with self._lock:
+            existing = self._books.get(book_id)
         if existing is not None and self.book_path(existing).is_file():
             return existing, False
 
@@ -238,32 +249,37 @@ class RulebookLibrary:
         )
         if existing is not None:
             book = replace(book, label=existing.label, imported_at=existing.imported_at)
-        self._books[book_id] = book
-        self._save()
+        with self._lock:
+            self._books[book_id] = book
+            self._save()
         return book, True
 
     def rename(self, book_id: str, label: str) -> Book:
-        book = self._require(book_id)
         cleaned = label.strip()
         if not cleaned:
             raise LibraryError("Give the book a name.")
-        book.label = cleaned[:MAX_LABEL_LENGTH]
-        self._save()
+        with self._lock:
+            book = self._require(book_id)
+            book.label = cleaned[:MAX_LABEL_LENGTH]
+            self._save()
         return book
 
     def remove(self, book_id: str) -> None:
         """Forget a book locally. Campaigns that reference it stay valid."""
 
-        book = self._require(book_id)
-        self.index.remove_book(book_id)
-        stored = self.book_path(book)
-        if stored.is_file():
-            try:
-                stored.unlink()
-            except OSError as exc:
-                raise LibraryError(f"The book file could not be deleted: {safe_error(exc)}") from exc
-        del self._books[book_id]
-        self._save()
+        with self._lock:
+            book = self._require(book_id)
+            self.index.remove_book(book_id)
+            stored = self.book_path(book)
+            if stored.is_file():
+                try:
+                    stored.unlink()
+                except OSError as exc:
+                    raise LibraryError(
+                        f"The book file could not be deleted: {safe_error(exc)}"
+                    ) from exc
+            del self._books[book_id]
+            self._save()
 
     # -- indexing -----------------------------------------------------------
 
@@ -272,21 +288,26 @@ class RulebookLibrary:
 
         A failure leaves the book marked failed with a readable reason; it never
         leaves a half-indexed book claiming to be searchable.
+
+        Extraction runs outside the library lock. A core rulebook takes minutes,
+        and holding the lock across it would stall every request Godot makes —
+        including the /library poll whose timeout kills the helper mid-index.
         """
 
-        book = self._require(book_id)
-        source = self.book_path(book)
-        if not source.is_file():
-            book.status = STATUS_UNAVAILABLE
-            book.error = "The imported file is missing from Redline's library folder."
-            self._save()
-            raise LibraryError(book.error)
+        with self._lock:
+            book = self._require(book_id)
+            source = self.book_path(book)
+            if not source.is_file():
+                book.status = STATUS_UNAVAILABLE
+                book.error = "The imported file is missing from Redline's library folder."
+                self._save()
+                raise LibraryError(book.error)
 
-        book.status = STATUS_INDEXING
-        book.error = ""
-        book.indexed_pages = 0
-        book.chunk_count = 0
-        self._save()
+            book.status = STATUS_INDEXING
+            book.error = ""
+            book.indexed_pages = 0
+            book.chunk_count = 0
+            self._save()
         if on_progress is not None:
             on_progress(book)
 
@@ -301,36 +322,34 @@ class RulebookLibrary:
                 book_id, extract.chunk_document(source, book_id), on_progress=progress
             )
         except UnsupportedPDF as exc:
-            self.index.remove_book(book_id)
-            book.status = STATUS_FAILED
-            book.error = str(exc)
-            book.chunk_count = 0
-            self._save()
-            raise LibraryError(book.error) from exc
+            raise self._indexing_failed(book, str(exc)) from exc
         except Exception as exc:
-            self.index.remove_book(book_id)
-            book.status = STATUS_FAILED
-            book.error = f"Indexing failed: {safe_error(exc)}"
-            book.chunk_count = 0
-            self._save()
-            raise LibraryError(book.error) from exc
+            raise self._indexing_failed(book, f"Indexing failed: {safe_error(exc)}") from exc
 
         if count == 0:
-            self.index.remove_book(book_id)
-            book.status = STATUS_FAILED
-            book.error = "No searchable text was found in that PDF."
-            self._save()
-            raise LibraryError(book.error)
+            raise self._indexing_failed(book, "No searchable text was found in that PDF.")
 
-        book.status = STATUS_INDEXED
-        book.chunk_count = count
-        book.indexed_pages = book.page_count
-        book.indexed_at = _now()
-        book.error = ""
-        self._save()
+        with self._lock:
+            book.status = STATUS_INDEXED
+            book.chunk_count = count
+            book.indexed_pages = book.page_count
+            book.indexed_at = _now()
+            book.error = ""
+            self._save()
         if on_progress is not None:
             on_progress(book)
         return book
+
+    def _indexing_failed(self, book: Book, reason: str) -> LibraryError:
+        """Roll one book back to a clean failed state and describe why."""
+
+        with self._lock:
+            self.index.remove_book(book.book_id)
+            book.status = STATUS_FAILED
+            book.error = reason
+            book.chunk_count = 0
+            self._save()
+        return LibraryError(reason)
 
     def _require(self, book_id: str) -> Book:
         book = self._books.get(str(book_id))

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -206,3 +208,56 @@ def test_a_question_longer_than_the_limit_is_rejected_before_any_request(answeri
     )
 
     assert response.status_code == 422
+
+
+def test_the_library_answers_while_a_book_is_being_indexed(make_pdf, monkeypatch):
+    """The indexing worker must not hold the lock the request handlers take.
+
+    Godot times a request out after two minutes and restarts the helper when one
+    expires, which kills the running index. A tab left open on a large import
+    could therefore never finish it: the listing queued behind the extraction,
+    timed out, and took the extraction down with it.
+    """
+
+    library = RulebookLibrary()
+    started, release = threading.Event(), threading.Event()
+
+    def slow_index(book_id, on_progress=None):
+        started.set()
+        assert release.wait(timeout=10), "the listing never came back"
+        return library.book(book_id)
+
+    monkeypatch.setattr(library, "index_book", slow_index)
+    app = create_app(TOKEN, library=library)
+    with TestClient(app) as client:
+        client.headers.update({TOKEN_HEADER: TOKEN})
+        imported = client.post(
+            "/library/import", json={"path": str(make_pdf("Core Rules.pdf", [ARMOR_RULE]))}
+        )
+        assert imported.status_code == 200, imported.text
+        assert started.wait(timeout=10), "indexing never began"
+
+        # Read the listing off another thread, so a handler that blocks fails
+        # the test instead of hanging the suite. The answer has to arrive while
+        # the index is still held open — releasing first would let a serialized
+        # listing through and prove nothing.
+        answered = {}
+        replied = threading.Event()
+
+        def read_listing() -> None:
+            answered["response"] = client.get("/library")
+            replied.set()
+
+        reader = threading.Thread(target=read_listing)
+        reader.start()
+        try:
+            in_time = replied.wait(timeout=10)
+        finally:
+            release.set()
+        reader.join(timeout=10)
+
+    assert in_time, "/library did not answer while a book was being indexed"
+    assert answered["response"].status_code == 200
+    assert [book["filename"] for book in answered["response"].json()["books"]] == [
+        "Core Rules.pdf"
+    ]

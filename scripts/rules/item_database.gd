@@ -151,12 +151,16 @@ static func validate_item(entry: Variant) -> PackedStringArray:
 	if String(item.get("kind", "")) == "cyberware":
 		if int(item.get("humanity_cost", -1)) < 0:
 			problems.append("%s: humanity_cost must be zero or more" % label)
-		var parts: Array = item.get("body_parts", [])
-		if parts.is_empty():
-			problems.append("%s: cyberware needs at least one body part" % label)
-		for part in parts:
-			if GearMarket.body_part(String(part)).is_empty():
-				problems.append("%s: unknown body part %s" % [label, part])
+		var listed: Variant = item.get("body_parts", [])
+		if typeof(listed) != TYPE_ARRAY:
+			problems.append("%s: body_parts is not a list" % label)
+		else:
+			var parts: Array = listed
+			if parts.is_empty():
+				problems.append("%s: cyberware needs at least one body part" % label)
+			for part in parts:
+				if GearMarket.body_part(String(part)).is_empty():
+					problems.append("%s: unknown body part %s" % [label, part])
 
 	return problems
 

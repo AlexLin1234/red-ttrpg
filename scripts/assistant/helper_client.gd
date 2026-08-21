@@ -36,7 +36,10 @@ var _stdio: FileAccess
 var _stderr: FileAccess
 var _thread: Thread
 var _restarts := 0
-var _pending: Array[Callable] = []
+## Requests that arrived before the helper was ready. Held as their parts rather
+## than as closures so a queue that cannot be replayed can still be answered:
+## every caller gets its on_done exactly once, success or failure.
+var _pending: Array[Dictionary] = []
 
 
 func _ready() -> void:
@@ -65,15 +68,14 @@ func start() -> void:
 		return
 	var command := _resolve_command()
 	if command.is_empty():
-		_set_state(
-			STATE_FAILED,
+		_fail(
 			"Redline could not find its assistant helper. Reinstall Redline, or run it from a checkout with Python available.",
 		)
 		return
 	_token = Crypto.new().generate_random_bytes(TOKEN_BYTES).hex_encode()
 	var launched := OS.execute_with_pipe(String(command["path"]), command["arguments"])
 	if launched.is_empty() or not launched.has("stdio"):
-		_set_state(STATE_FAILED, "The assistant helper could not be started.")
+		_fail("The assistant helper could not be started.")
 		return
 	_process_id = int(launched.get("pid", -1))
 	_stdio = launched["stdio"]
@@ -105,7 +107,9 @@ func stop() -> void:
 		_stderr = null
 	_token = ""
 	port = 0
-	_pending.clear()
+	# Queued requests survive a stop: restart() and the crash retry below both
+	# start the helper again, and _on_handshake replays them. Dropping them here
+	# would strand every caller that is still waiting on an answer.
 	_set_state(STATE_STOPPED, "")
 
 
@@ -137,14 +141,38 @@ func _handshake(pipe: FileAccess, process_id: int) -> void:
 func _on_handshake(line: String) -> void:
 	var parsed: Variant = JSON.parse_string(line)
 	if not parsed is Dictionary or not (parsed as Dictionary).has("port"):
-		_set_state(STATE_FAILED, "The assistant helper did not start correctly.")
+		_fail("The assistant helper did not start correctly.")
 		return
 	port = int((parsed as Dictionary)["port"])
 	_set_state(STATE_READY, "")
+	for request in _take_pending():
+		call_helper(
+			int(request["method"]),
+			String(request["path"]),
+			request["body"],
+			request["on_done"] as Callable,
+		)
+
+
+## Give up on the helper and answer everyone still waiting, so no screen is left
+## on a spinner that will never resolve.
+##
+## The attempt is counted before the queue is answered: a caller that retries
+## from its own callback then gets the recorded failure instead of provoking
+## another respawn. `restart()` clears the count when the GM asks for one.
+func _fail(message: String) -> void:
+	_restarts += 1
+	_set_state(STATE_FAILED, message)
+	for request in _take_pending():
+		(request["on_done"] as Callable).call(
+			{"ok": false, "status": 0, "error": message, "data": {}}
+		)
+
+
+func _take_pending() -> Array[Dictionary]:
 	var queued := _pending.duplicate()
 	_pending.clear()
-	for call in queued:
-		(call as Callable).call()
+	return queued
 
 
 func _resolve_command() -> Dictionary:
@@ -177,15 +205,17 @@ func _set_state(next: String, message: String) -> void:
 ## `ok`, `status`, `data` and, when something went wrong, a readable `error`.
 func call_helper(method: int, path: String, body: Variant, on_done: Callable) -> void:
 	if state == STATE_STOPPED or state == STATE_FAILED:
-		_pending.append(func() -> void: call_helper(method, path, body, on_done))
 		if state == STATE_FAILED and _restarts >= MAX_RESTARTS:
-			_pending.clear()
 			on_done.call({"ok": false, "status": 0, "error": detail, "data": {}})
 			return
+		_pending.append({"method": method, "path": path, "body": body, "on_done": on_done})
+		# A start that fails outright calls _fail, which answers the queue this
+		# request just joined; a start that succeeds replays it after the
+		# handshake.
 		start()
 		return
 	if state == STATE_STARTING:
-		_pending.append(func() -> void: call_helper(method, path, body, on_done))
+		_pending.append({"method": method, "path": path, "body": body, "on_done": on_done})
 		return
 
 	var request := HTTPRequest.new()
@@ -220,17 +250,12 @@ func _complete(
 		if _restarts < MAX_RESTARTS:
 			_restarts += 1
 			stop()
-			_pending.append(func() -> void: call_helper(method, path, body, on_done))
+			_pending.append({"method": method, "path": path, "body": body, "on_done": on_done})
 			start()
 			return
-		on_done.call(
-			{
-				"ok": false,
-				"status": 0,
-				"error": "The assistant helper stopped responding. Restart Redline to try again.",
-				"data": {},
-			}
-		)
+		var message := "The assistant helper stopped responding. Restart Redline to try again."
+		_fail(message)
+		on_done.call({"ok": false, "status": 0, "error": message, "data": {}})
 		return
 
 	var parsed: Variant = JSON.parse_string(bytes.get_string_from_utf8())
@@ -238,12 +263,19 @@ func _complete(
 	if code >= 200 and code < 300:
 		on_done.call({"ok": true, "status": code, "error": "", "data": data})
 		return
+	# Only the helper's own errors carry a coded detail object. FastAPI answers a
+	# rejected body with a list and a bad route with a string, so the code is read
+	# from a dictionary or not at all.
+	var detail_value: Variant = data.get("detail", null)
+	var code_name := ""
+	if detail_value is Dictionary:
+		code_name = String((detail_value as Dictionary).get("code", ""))
 	on_done.call(
 		{
 			"ok": false,
 			"status": code,
 			"error": describe_error(data, code),
-			"code": String((data.get("detail", {}) as Dictionary).get("code", "")),
+			"code": code_name,
 			"data": data,
 		}
 	)
@@ -260,8 +292,10 @@ static func describe_error(data: Dictionary, code: int) -> String:
 		return String(detail_value)
 	if detail_value is Array and not (detail_value as Array).is_empty():
 		# FastAPI's validation errors arrive as a list of field problems.
-		var first: Dictionary = (detail_value as Array)[0]
-		return String(first.get("msg", "That request was not accepted."))
+		var first: Variant = (detail_value as Array)[0]
+		if first is Dictionary:
+			return String((first as Dictionary).get("msg", "That request was not accepted."))
+		return "That request was not accepted."
 	return "The assistant returned an error (%d)." % code
 
 

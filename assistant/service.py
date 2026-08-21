@@ -82,6 +82,9 @@ def create_app(
     books = library if library is not None else RulebookLibrary(ChunkIndex())
     retriever = Retriever(books.index, books)
 
+    # Serializes the request handlers against each other: two imports arriving
+    # together must not copy over the same destination. Indexing does not take
+    # it — see start_indexing.
     guard = threading.Lock()
     # One worker, so two imports queue instead of fighting over the library file.
     workers = ThreadPoolExecutor(max_workers=1, thread_name_prefix="redline-index")
@@ -124,14 +127,19 @@ def create_app(
             return
 
         def job() -> None:
-            with guard:
-                try:
-                    books.index_book(book_id)
-                except LibraryError:
-                    # The failure is already recorded on the book, which the
-                    # library listing reports; nothing is logged, because a log
-                    # line is one more place book text could surface.
-                    pass
+            # Deliberately outside `guard`. Indexing a core rulebook runs for
+            # minutes, and the library keeps its own short-lived lock, so the
+            # tab stays answerable while a book is being read: holding `guard`
+            # here would stall /library past Godot's request timeout, and that
+            # timeout restarts the helper and kills the very index it is
+            # waiting on.
+            try:
+                books.index_book(book_id)
+            except LibraryError:
+                # The failure is already recorded on the book, which the
+                # library listing reports; nothing is logged, because a log
+                # line is one more place book text could surface.
+                pass
 
         jobs[book_id] = workers.submit(job)
 
