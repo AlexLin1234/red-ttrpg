@@ -1,0 +1,29 @@
+# Optional local hooks: `pip install pre-commit && pre-commit install`.
+#
+# These mirror the blocking half of .github/workflows/ci.yml, so anything that
+# would fail CI fails at commit time instead. The formatters are deliberately
+# absent — see the ratchets job.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.4
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+
+  - repo: https://github.com/Scony/godot-gdscript-toolkit
+    rev: 4.5.0
+    hooks:
+      - id: gdlint
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-json
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        # GDScript indents with tabs; the hook leaves those alone, but keep it
+        # off the Godot import cache entirely.
+        exclude: ^\.godot/
+      - id: check-merge-conflict

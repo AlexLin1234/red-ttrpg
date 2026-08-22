@@ -1,0 +1,27 @@
+# GDScript linting. Mirrors gdtoolkit's defaults except for five rules that
+# flag the project's existing shape rather than mistakes in it — each is
+# recorded below with what it would currently report, so they can be turned
+# back on one at a time.
+#
+# Everything still enabled is a correctness or naming rule, and the tree is
+# clean against all of it.
+
+disable:
+  # 95 lines, tailing off to a 213-character worst case in city.gd. Worth
+  # fixing with `gdformat`, which owns wrapping, rather than by hand.
+  - max-line-length
+  # 16 classes declare members in a different order than gdtoolkit's canonical
+  # one. A pure convention, and the codebase is internally consistent.
+  - class-definitions-order
+  # scripts/screens/city.gd (2287), forge.gd (1507), location.gd (1035).
+  # Splitting a screen is a refactor, not a lint fix.
+  - max-file-lines
+  # 4 functions, all validators that return early per problem found.
+  - max-returns
+  # 1 class. Same reason as max-file-lines.
+  - max-public-methods
+
+# The Godot import cache holds generated scripts that were never ours to lint.
+excluded_directories: !!set
+  .git: null
+  .godot: null

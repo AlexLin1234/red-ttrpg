@@ -1,0 +1,139 @@
+# Runs the two suites that already existed in this repo but had nothing to run
+# them: ./run-tests.sh (GDScript, via a headless Godot) and
+# ./run-assistant-tests.sh (pytest plus the release-content audit).
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  # Must match config/features in project.godot. Bump both together, and check
+  # the release actually publishes this asset name before relying on the job.
+  GODOT_VERSION: "4.7"
+
+jobs:
+  python:
+    name: Python suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: assistant/requirements-dev.txt
+
+      - name: Install the helper's dependencies
+        run: pip install -r assistant/requirements-dev.txt
+
+      - name: Lint
+        run: pip install ruff && ruff check .
+
+      # Runs pytest over tests/assistant and tests/service, then the audit that
+      # checks no rulebook text or credential reached a release artifact.
+      - name: Test
+        run: ./run-assistant-tests.sh
+
+  godot:
+    name: GDScript suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The headless binary still links against these; a bare runner image does
+      # not always carry them.
+      - name: Install runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libxcursor1 libxinerama1 libxrandr2 libxi6 fontconfig
+
+      - name: Install Godot ${{ env.GODOT_VERSION }}
+        run: |
+          set -euo pipefail
+          base="Godot_v${GODOT_VERSION}-stable_linux.x86_64"
+          url="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/${base}.zip"
+          echo "Fetching $url"
+          curl -fL --retry 3 -o godot.zip "$url"
+          unzip -q godot.zip
+          mkdir -p "$HOME/.local/bin"
+          mv "$base" "$HOME/.local/bin/godot"
+          chmod +x "$HOME/.local/bin/godot"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Show the engine version
+        run: godot --version
+
+      - name: Lint
+        run: |
+          pip install "gdtoolkit==4.*"
+          gdlint $(git ls-files '*.gd')
+
+      # run-tests.sh imports the project first, then runs res://tests/run_tests.gd,
+      # which exits non-zero on any failed check.
+      - name: Test
+        run: ./run-tests.sh
+
+  ratchets:
+    name: Ratchets (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install the tools
+        run: pip install ruff mypy "gdtoolkit==4.*" -r assistant/requirements.txt
+
+      # Writes what each tool would change into the run summary and always
+      # succeeds. A red X here would read as "this PR is broken" when it means
+      # "the codebase has not adopted this yet", so drift is reported rather
+      # than enforced. When one of these reaches clean, move it into the
+      # blocking jobs above and delete it from here.
+      - name: Report drift
+        run: |
+          report() {
+            title="$1"
+            shift
+            if output=$("$@" 2>&1); then
+              echo "- **$title** — clean, ready to enforce" >> "$GITHUB_STEP_SUMMARY"
+            else
+              {
+                echo "<details><summary><b>$title</b> — drift</summary>"
+                echo
+                echo '```'
+                echo "$output" | tail -50
+                echo '```'
+                echo
+                echo "</details>"
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          }
+
+          {
+            echo "## Ratchets"
+            echo
+            echo "Advisory. None of this blocks a merge."
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          report "Python formatting (ruff format)" \
+            ruff format --check .
+          report "Python types (mypy)" \
+            mypy --ignore-missing-imports assistant service scripts/audit_export.py
+          report "GDScript formatting (gdformat)" \
+            bash -c "gdformat --check \$(git ls-files '*.gd')"

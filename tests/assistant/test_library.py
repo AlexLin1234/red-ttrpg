@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from assistant import paths
 from assistant.library import (
     STATUS_FAILED,
     STATUS_INDEXED,
+    STATUS_INDEXING,
     STATUS_PENDING,
     STATUS_UNAVAILABLE,
     LibraryError,
@@ -118,3 +121,38 @@ def test_renaming_changes_the_label_but_never_the_cited_filename(library, make_p
 
     assert renamed.label == "My table's core book"
     assert renamed.filename == "Core Rules.pdf"
+
+
+def test_the_library_stays_readable_while_a_book_is_being_indexed(library, make_pdf, monkeypatch):
+    """Indexing must not lock out the tab that shows its progress.
+
+    Godot gives every helper request a timeout and restarts the helper when one
+    expires — which kills the index. So a listing taken during an index has to
+    come back on its own, not queue behind the extraction.
+    """
+
+    book, _ = library.import_pdf(make_pdf("Core Rules.pdf", [ARMOR_RULE]))
+    started = threading.Event()
+    release = threading.Event()
+    real_replace = library.index.replace_book
+
+    def slow_replace(*args, **kwargs):
+        started.set()
+        assert release.wait(timeout=10), "the listing never came back"
+        return real_replace(*args, **kwargs)
+
+    monkeypatch.setattr(library.index, "replace_book", slow_replace)
+    worker = threading.Thread(target=library.index_book, args=(book.book_id,))
+    worker.start()
+    try:
+        assert started.wait(timeout=10), "indexing never began"
+        # The listing is taken while the index thread is inside replace_book.
+        listed = library.books()
+        assert [entry.book_id for entry in listed] == [book.book_id]
+        assert listed[0].status == STATUS_INDEXING
+    finally:
+        release.set()
+        worker.join(timeout=10)
+
+    assert not worker.is_alive()
+    assert library.book(book.book_id).status == STATUS_INDEXED

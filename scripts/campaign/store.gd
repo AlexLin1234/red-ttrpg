@@ -107,6 +107,10 @@ func open(save_path: String) -> bool:
 	var characters: Array = roster.get("characters", [])
 	active_character_id = String((characters[0] as Dictionary)["id"]) if not characters.is_empty() else ""
 	_normalize_downtime_state()
+	# A month snapshot only means anything against the campaign it was taken
+	# from, so neither stack survives a change of campaign.
+	_month_undo.clear()
+	_month_redo.clear()
 	campaign_opened.emit()
 	return true
 
@@ -120,6 +124,8 @@ func close() -> void:
 	dirty = false
 	active_location_id = ""
 	active_character_id = ""
+	_month_undo.clear()
+	_month_redo.clear()
 
 
 func mark_dirty() -> void:

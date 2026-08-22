@@ -26,6 +26,19 @@ static func _encode(value: Variant) -> PackedByteArray:
 	return JSON.stringify(value, "  ").to_utf8_buffer()
 
 
+## Read [param key] from [param source] as a Dictionary, or an empty one. A
+## hand-edited or truncated save can hold anything at any key, and neither the
+## library listing nor a load may crash over it.
+static func _dict_of(source: Dictionary, key: String) -> Dictionary:
+	var value: Variant = source.get(key, {})
+	return value if typeof(value) == TYPE_DICTIONARY else {}
+
+
+static func _array_of(source: Dictionary, key: String) -> Array:
+	var value: Variant = source.get(key, [])
+	return value if typeof(value) == TYPE_ARRAY else []
+
+
 static func _decode(bytes: PackedByteArray, what: String) -> Variant:
 	var parser := JSON.new()
 	if parser.parse(bytes.get_string_from_utf8()) != OK:
@@ -121,7 +134,7 @@ static func load_file(path: String) -> Dictionary:
 
 	var campaign: Variant = _decode(reader.read_file(CAMPAIGN), CAMPAIGN)
 	if typeof(campaign) == TYPE_DICTIONARY:
-		var gm_map: Dictionary = (campaign as Dictionary).get("gm_map", {})
+		var gm_map: Dictionary = _dict_of(campaign as Dictionary, "gm_map")
 		var image_entry := String(gm_map.get("image_entry", ""))
 		if image_entry != "" and names.has(image_entry):
 			gm_map["png_base64"] = Marshalls.raw_to_base64(reader.read_file(image_entry))
@@ -132,14 +145,23 @@ static func load_file(path: String) -> Dictionary:
 	if typeof(campaign) != TYPE_DICTIONARY or typeof(roster) != TYPE_DICTIONARY:
 		reader.close()
 		return {"ok": false, "error": "campaign state is unreadable"}
-	var current_month: Variant = (campaign as Dictionary).get(
-		"current_month", Lifestyle.month_key((campaign as Dictionary).get("clock", {}))
-	)
+	# GDScript evaluates a get() default eagerly, so the clock is only read when
+	# the save predates current_month — and only when it is a usable clock.
+	var current_month: Variant = (campaign as Dictionary).get("current_month", null)
+	if current_month == null:
+		var clock: Dictionary = _dict_of(campaign as Dictionary, "clock")
+		if not clock.has("year") or not clock.has("month"):
+			reader.close()
+			return {"ok": false, "error": "campaign has neither current_month nor a clock"}
+		current_month = Lifestyle.month_key(clock)
 	if not Lifestyle.is_month(current_month):
 		reader.close()
 		return {"ok": false, "error": "campaign current_month must use YYYY-MM"}
 	(campaign as Dictionary)["current_month"] = current_month
-	for value in (roster as Dictionary).get("characters", []):
+	for value in _array_of(roster as Dictionary, "characters"):
+		if typeof(value) != TYPE_DICTIONARY:
+			reader.close()
+			return {"ok": false, "error": "roster holds an entry that is not a character"}
 		var character: Dictionary = value
 		CharacterRules.ensure_character(character)
 		if String(character.get("kind", "npc")) == "pc" or character.has("lifestyle"):
@@ -156,22 +178,27 @@ static func load_file(path: String) -> Dictionary:
 			if typeof(location) == TYPE_DICTIONARY:
 				locations.append(location)
 	locations.sort_custom(
-		func(a: Dictionary, b: Dictionary) -> bool: return String(a["name"]) < String(b["name"])
+		func(a: Dictionary, b: Dictionary) -> bool:
+			return String(a.get("name", "")) < String(b.get("name", ""))
 	)
 
 	var problems := PackedStringArray()
-	var entries: Dictionary = (manifest as Dictionary).get("entries", {})
+	var entries: Dictionary = _dict_of(manifest as Dictionary, "entries")
 	for name in entries:
 		if not names.has(name):
 			problems.append("%s is listed in the manifest but missing from the file" % name)
 			continue
+		var expected: Dictionary = _dict_of(entries, name)
+		if expected.is_empty():
+			problems.append("%s has no usable manifest entry" % name)
+			continue
 		var bytes := reader.read_file(name)
-		var expected: Dictionary = entries[name]
-		if bytes.size() != int(expected["bytes"]):
+		if bytes.size() != int(expected.get("bytes", -1)):
 			problems.append(
-				"%s is %d bytes, manifest says %d" % [name, bytes.size(), int(expected["bytes"])]
+				"%s is %d bytes, manifest says %d"
+				% [name, bytes.size(), int(expected.get("bytes", -1))]
 			)
-		elif _sha256(bytes) != String(expected["sha256"]):
+		elif _sha256(bytes) != String(expected.get("sha256", "")):
 			problems.append("%s does not match its manifest checksum" % name)
 	for name in names:
 		# ZIPPacker emits a directory entry for each nested path; those carry no
@@ -205,25 +232,37 @@ static func read_summary(path: String) -> Dictionary:
 		reader.close()
 		return {"ok": false, "error": "container is missing its index entries"}
 
-	var manifest: Dictionary = _decode(reader.read_file(MANIFEST), MANIFEST)
-	var campaign: Dictionary = _decode(reader.read_file(CAMPAIGN), CAMPAIGN)
-	var roster: Dictionary = (
+	var manifest_value: Variant = _decode(reader.read_file(MANIFEST), MANIFEST)
+	var campaign_value: Variant = _decode(reader.read_file(CAMPAIGN), CAMPAIGN)
+	var roster_value: Variant = (
 		_decode(reader.read_file(ROSTER), ROSTER) if names.has(ROSTER) else {"characters": []}
 	)
 	reader.close()
+	# A card is drawn from whatever survives: a save with a corrupt entry still
+	# lists, as the unreadable card the library already knows how to draw.
+	if typeof(manifest_value) != TYPE_DICTIONARY or typeof(campaign_value) != TYPE_DICTIONARY:
+		return {"ok": false, "error": "container index entries are unreadable"}
+	var manifest: Dictionary = manifest_value
+	var campaign: Dictionary = campaign_value
+	var roster: Dictionary = roster_value if typeof(roster_value) == TYPE_DICTIONARY else {}
 
 	var location_count := 0
-	for name in (manifest.get("entries", {}) as Dictionary):
+	for name in _dict_of(manifest, "entries"):
 		if String(name).begins_with(LOCATION_PREFIX):
 			location_count += 1
 
+	var characters := _array_of(roster, "characters")
 	var npcs := 0
-	for character in roster.get("characters", []):
+	for character in characters:
+		if typeof(character) != TYPE_DICTIONARY:
+			continue
 		if String((character as Dictionary).get("kind", "npc")) != "pc":
 			npcs += 1
 
 	var open_hooks := 0
-	for hook in campaign.get("hooks", []):
+	for hook in _array_of(campaign, "hooks"):
+		if typeof(hook) != TYPE_DICTIONARY:
+			continue
 		if String((hook as Dictionary).get("status", "open")) != "closed":
 			open_hooks += 1
 
@@ -240,7 +279,7 @@ static func read_summary(path: String) -> Dictionary:
 		"updated": String(manifest.get("updated", "")),
 		"locations": location_count,
 		"npcs": npcs,
-		"characters": (roster.get("characters", []) as Array).size(),
+		"characters": characters.size(),
 		"hooks": open_hooks,
 		"size": _file_size(path),
 	}

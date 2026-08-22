@@ -60,6 +60,70 @@ static func run(h: Harness) -> void:
 	h.equal(giver["weapons"].size(), 0, "combat profile removed")
 	h.equal(recipient["weapons"][0]["damage_dice"], 3, "combat profile received")
 
+	h.it("moves only the given armor's location, and only what left with it")
+	var armed := _character("armed", "solo", 4, 0)
+	var bare := _character("bare", "tech", 4, 0)
+	armed["gear"] = [
+		{"name": "Kevlar Weave (body)", "kind": "armor", "armor_profile": {"location": "body", "sp": 7}},
+		{"name": "Light Plate (head)", "kind": "armor", "armor_profile": {"location": "head", "sp": 11}},
+	]
+	armed["armor"] = {"body": {"sp": 7, "ablated": false}, "head": {"sp": 11, "ablated": false}}
+	h.equal(EconomyRules.transfer_item(armed, bare, 0)["ok"], true, "armor transfer succeeds")
+	h.equal(armed["armor"]["body"]["sp"], 0, "giver loses the body SP that left")
+	h.equal(armed["armor"]["head"]["sp"], 11, "giver keeps the head piece they still wear")
+	h.equal(bare["armor"]["body"]["sp"], 7, "recipient wears the body piece")
+	h.equal(bare["armor"]["head"]["sp"], 0, "recipient's head is untouched")
+
+	h.it("keeps a location covered while a second piece of that armor remains")
+	var doubled := _character("doubled", "solo", 4, 0)
+	var taker := _character("taker", "tech", 4, 0)
+	var vest := {
+		"name": "Kevlar Weave (body)",
+		"kind": "armor",
+		"armor_profile": {"location": "body", "sp": 7},
+	}
+	doubled["gear"] = [vest.duplicate(true), vest.duplicate(true)]
+	doubled["armor"] = {"body": {"sp": 7, "ablated": false}, "head": {"sp": 0, "ablated": false}}
+	h.equal(EconomyRules.transfer_item(doubled, taker, 0)["ok"], true, "spare vest given away")
+	h.equal(doubled["armor"]["body"]["sp"], 7, "the spare left, the worn one did not")
+	h.equal(taker["armor"]["body"]["sp"], 7, "recipient wears the spare")
+
+	h.it("treats a profile-less armor entry as the whole suit only when it is the last one")
+	# The sample party carries armor with no profile to say what it covers.
+	var legacy := _character("legacy", "solo", 4, 0)
+	var receiver := _character("receiver", "tech", 4, 0)
+	legacy["gear"] = [{"name": "Light Plate", "kind": "armor", "detail": "SP11"}]
+	legacy["armor"] = {"body": {"sp": 11, "ablated": false}, "head": {"sp": 11, "ablated": false}}
+	receiver["armor"] = {"body": {"sp": 7, "ablated": false}, "head": {"sp": 0, "ablated": false}}
+	h.equal(EconomyRules.transfer_item(legacy, receiver, 0)["ok"], true, "suit given away")
+	h.equal(legacy["armor"]["body"]["sp"], 0, "giver is stripped")
+	h.equal(receiver["armor"]["body"]["sp"], 7, "recipient's own body armor stands")
+	h.equal(receiver["armor"]["head"]["sp"], 11, "recipient covers the location they had bare")
+
+	h.it("leaves a worn suit alone when the giver still carries other armor")
+	var hoarder := _character("hoarder", "solo", 4, 0)
+	var other := _character("other", "tech", 4, 0)
+	hoarder["gear"] = [
+		{"name": "Light Plate", "kind": "armor", "detail": "SP11"},
+		{"name": "Kevlar Weave", "kind": "armor", "detail": "SP7"},
+	]
+	hoarder["armor"] = {"body": {"sp": 11, "ablated": false}, "head": {"sp": 11, "ablated": false}}
+	h.equal(EconomyRules.transfer_item(hoarder, other, 0)["ok"], true, "one of two given away")
+	h.equal(hoarder["armor"]["body"]["sp"], 11, "the suit they still carry stays worn")
+	h.equal(other["armor"]["body"]["sp"], 0, "recipient gets the item, not a guessed suit")
+
+	h.it("transfers armor onto a sheet that has no armor block at all")
+	var plain := _character("plain", "solo", 4, 0)
+	var sheetless := _character("sheetless", "tech", 4, 0)
+	plain.erase("armor")
+	sheetless.erase("armor")
+	plain["gear"] = [
+		{"name": "Kevlar Weave (body)", "kind": "armor", "armor_profile": {"location": "body", "sp": 7}},
+	]
+	h.equal(EconomyRules.transfer_item(plain, sheetless, 0)["ok"], true, "transfer succeeds")
+	h.equal(sheetless["armor"]["body"]["sp"], 7, "recipient gains an armor block")
+	h.equal(plain["armor"]["body"]["sp"], 0, "giver gains an empty one")
+
 	h.it("requires installed cyberware to be detached before transfer")
 	giver["gear"] = [{"name": "Cyberarm", "kind": "cyberware", "installed_on": "left_arm"}]
 	h.equal(EconomyRules.transfer_item(giver, recipient, 0)["ok"], false, "installed item rejected")

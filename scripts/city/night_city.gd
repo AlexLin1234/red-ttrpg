@@ -408,11 +408,13 @@ static func set_points(area: Dictionary, points: PackedVector2Array) -> void:
 ## Slide the whole zone, label included, so a moved district keeps its name in
 ## the same spot relative to its outline.
 static func move_area(area: Dictionary, delta: Vector2) -> void:
+	# The label is read first: a zone with no stored label falls back to its
+	# centroid, and reading that after the move would apply delta a second time.
+	var label := label_of(area) + delta
 	var moved := PackedVector2Array()
 	for point in points_of(area):
 		moved.append(point + delta)
 	set_points(area, moved)
-	var label := label_of(area) + delta
 	area["label"] = [label.x, label.y]
 
 

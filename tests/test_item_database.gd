@@ -137,6 +137,18 @@ static func run(h: Harness) -> void:
 		not ItemDatabase.validate_item({"id": "p", "name": "P", "kind": "gear", "price": -1}).is_empty(),
 		"negative price rejected",
 	)
+	# One malformed row must be reported, not throw: the reader skips the row it
+	# names and keeps the rest of the operator's catalog.
+	h.contains(
+		ItemDatabase.validate_item(
+			{
+				"id": "c", "name": "C", "kind": "cyberware", "price": 10,
+				"humanity_cost": 2, "body_parts": "left_arm",
+			}
+		),
+		"C: body_parts is not a list",
+		"body_parts holding a string reported",
+	)
 
 	h.it("keeps a bought weapon identical to its table row")
 	var buyer := {

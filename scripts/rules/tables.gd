@@ -115,6 +115,9 @@ static func validate(value: Variant) -> PackedStringArray:
 			if not injuries.has(location):
 				problems.append('missing "%s" critical injury table' % location)
 				continue
+			if typeof(injuries[location]) != TYPE_DICTIONARY:
+				problems.append('"%s" critical injury table is not an object' % location)
+				continue
 			var table: Dictionary = injuries[location]
 			for roll in range(2, 13):
 				if not table.has(str(roll)):
@@ -123,6 +126,9 @@ static func validate(value: Variant) -> PackedStringArray:
 	if doc.has("weapons") and typeof(doc["weapons"]) == TYPE_DICTIONARY:
 		var weapons: Dictionary = doc["weapons"]
 		for name in weapons:
+			if typeof(weapons[name]) != TYPE_DICTIONARY:
+				problems.append("%s: weapon profile is not an object" % name)
+				continue
 			var profile: Dictionary = weapons[name]
 			if int(profile.get("damage_dice", 0)) <= 0:
 				problems.append("%s: damage_dice must be positive" % name)

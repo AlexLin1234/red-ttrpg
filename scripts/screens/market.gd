@@ -10,6 +10,10 @@ extends Control
 var night := false
 var _body: VBoxContainer
 var _message := ""
+## The stalls currently on screen. A Night Market is a rolled snapshot held in
+## campaign state, so a purchase must resolve against what the GM is looking at
+## rather than against today's ItemDB, which may no longer hold those ids.
+var _stock: Array[Dictionary] = []
 
 
 func _ready() -> void:
@@ -49,6 +53,7 @@ func _rebuild() -> void:
 	head.add_child(purse)
 	_body.add_child(head)
 
+	_stock = []
 	var stock: Array[Dictionary] = []
 	if night:
 		_roll_night_market(character)
@@ -106,6 +111,7 @@ func _rebuild() -> void:
 	UI.expand(list, true, false)
 	scroll.add_child(list)
 
+	_stock = stock
 	if stock.is_empty():
 		list.add_child(UI.micro("Nothing on the shelves."))
 		return
@@ -151,7 +157,7 @@ func _wrapped(text: String, color: Color) -> Label:
 
 
 func _buy(item_id: String) -> void:
-	var result := GearMarket.buy(Store.active_character(), ItemDB.catalog(), item_id)
+	var result := GearMarket.buy(Store.active_character(), _stock, item_id)
 	if bool(result.get("ok", false)):
 		_message = "Bought %s for %deb." % [result["item"], result["price"]]
 		Store.mark_dirty()

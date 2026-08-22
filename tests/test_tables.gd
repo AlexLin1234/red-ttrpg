@@ -71,6 +71,24 @@ static func run(h: Harness) -> void:
 		Tables.validate(broken), "Heavy Sidearm: damage_dice must be positive", "bad weapon"
 	)
 
+	h.it("reports a section holding the wrong type rather than failing on it")
+	# A validator that dies on bad input tells the operator nothing about the
+	# file they have to fix.
+	var mistyped := TablesDefault.document()
+	mistyped["critical_injuries"]["head"] = "not a table"
+	h.contains(
+		Tables.validate(mistyped),
+		'"head" critical injury table is not an object',
+		"mistyped injury table",
+	)
+	var mistyped_weapon := TablesDefault.document()
+	mistyped_weapon["weapons"]["Heavy Sidearm"] = 3
+	h.contains(
+		Tables.validate(mistyped_weapon),
+		"Heavy Sidearm: weapon profile is not an object",
+		"mistyped weapon profile",
+	)
+
 	h.it("resolves an attack end to end against the shipped tables")
 	var result := Resolver.resolve_attack(
 		Resolver.AttackRequest.new(

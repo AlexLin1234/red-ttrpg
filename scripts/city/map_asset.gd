@@ -43,4 +43,7 @@ static func load_external(path: String = EXTERNAL_PATH) -> Dictionary:
 	var loaded := from_file(path)
 	if not bool(loaded.get("ok", false)):
 		return loaded
-	return {"ok": true, "image": decode(loaded["map"]), "path": path}
+	var image := decode(loaded["map"])
+	if image == null:
+		return {"ok": false, "error": "Night City map could not be decoded"}
+	return {"ok": true, "image": image, "path": path}
