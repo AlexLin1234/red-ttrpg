@@ -113,7 +113,7 @@ Midnight Market.
 is opened. Browse every built-in or custom item, read its description, and make
 persistent variations by changing price and type-specific stats such as weapon
 damage dice and flat damage, armor SP, or cyberware Humanity loss. Built-ins live
-in `data/items.json` and custom variants in `user://item_variants.json`, outside
+in `catalog/items.json` and custom variants in `user://item_variants.json`, outside
 portable campaign saves.
 
 **Assistant** — a rules reference over the rulebook PDFs a GM legally owns. Ask
@@ -196,14 +196,17 @@ assistant/           the local rulebook helper: extraction, index, vault, agent
 tests/               headless runner and suites
 tests/assistant/     the helper's own suite, run by pytest
 docs/mockups/        visual design references
-data/items.json      homebrew placeholder item catalog (shipped)
+catalog/items.json   homebrew placeholder item catalog (shipped, packed into builds)
 data/items_local.json  rulebook-derived catalog, git-ignored, replaces the above
 ```
 
 ## Private item catalog
 
-`data/items.json` ships **homebrew placeholders**, exactly as `tables_default.gd`
-does for the rules tables, so the app boots with a usable catalog. Its weapon and
+`catalog/items.json` ships **homebrew placeholders**, exactly as `tables_default.gd`
+does for the rules tables, so the app boots with a usable catalog. It sits outside
+`data/` because `data/.gdignore` keeps Godot from importing the extracted tables,
+and an ignored directory is skipped by the export scan too — anything under it is
+missing from an exported build. Its weapon and
 armor names and stats deliberately match the rows in `tables_default.gd`, so a
 purchased weapon resolves the same way its table row does.
 
@@ -215,7 +218,10 @@ python scripts/extract_items.py --pdf "/input/Cyberpunk Red.pdf"
 
 That writes `data/items_local.json`, which is git-ignored and, when present,
 replaces the placeholders at runtime rather than sitting beside them as
-near-duplicates. The Market header shows which catalog is loaded. Every row is
+near-duplicates. Book-derived data is never packed into a build, so to use a local
+catalog with an exported Redline, copy that file to `items_local.json` in the
+user data directory (`%APPDATA%\Godotpp_userdata\Redline` on Windows).
+The Market header shows which catalog is loaded. Every row is
 validated on load — an unknown weapon type, an autofire rating on a weapon with
 no autofire range band, a bad armor location or an unknown cyberware body part is
 dropped with a warning instead of asserting later inside the resolver.

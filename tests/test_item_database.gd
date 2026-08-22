@@ -12,7 +12,7 @@ const ItemDatabase := preload("res://scripts/rules/item_database.gd")
 
 static func _catalog() -> Array:
 	var document: Dictionary = JSON.parse_string(
-		FileAccess.get_file_as_string("res://data/items.json")
+		FileAccess.get_file_as_string("res://catalog/items.json")
 	)
 	return document["items"]
 
@@ -179,7 +179,12 @@ static func run(h: Harness) -> void:
 	h.it("layers a local rulebook catalog over the shipped placeholders")
 	var database: Node = ItemDatabase.new()
 	database.reload()
-	if FileAccess.file_exists(ItemDatabase.LOCAL_PATH):
+	var local_path := ""
+	for candidate in ItemDatabase.LOCAL_PATHS:
+		if FileAccess.file_exists(candidate):
+			local_path = candidate
+			break
+	if not local_path.is_empty():
 		# Only present for a GM who ran scripts/extract_items.py against their
 		# own book, so this arm is skipped on a fresh clone.
 		h.equal(database.has_local_catalog(), true, "local catalog detected")
@@ -188,7 +193,7 @@ static func run(h: Harness) -> void:
 			"local catalog replaces the placeholders",
 		)
 		var local: Dictionary = JSON.parse_string(
-			FileAccess.get_file_as_string(ItemDatabase.LOCAL_PATH)
+			FileAccess.get_file_as_string(local_path)
 		)
 		var local_problems := PackedStringArray()
 		for value in local["items"]:

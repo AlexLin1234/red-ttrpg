@@ -143,7 +143,7 @@ static func run(h: Harness) -> void:
 	store.roster = {"characters": [organizer, shopper]}
 	store.active_character_id = "organizer"
 	var document: Dictionary = JSON.parse_string(
-		FileAccess.get_file_as_string("res://data/items.json")
+		FileAccess.get_file_as_string("res://catalog/items.json")
 	)
 	var opened := store.organize_night_market(
 		organizer,
