@@ -1,7 +1,7 @@
 # The packaged local helper. Godot needs none of this at runtime: it is frozen
 # into the helper executable so a Game Master never installs Python.
 anthropic==0.125.0
-fastapi==0.116.1
+fastapi==0.141.1
 uvicorn[standard]==0.35.0
 PyMuPDF==1.28.2
 keyring==25.7.0
