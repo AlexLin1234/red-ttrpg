@@ -48,6 +48,19 @@ static func _apply_one(state: Dictionary, event: Dictionary) -> Dictionary:
 			"weapon": event["weapon"],
 		}
 
+	if kind == "actor_moved":
+		# Exactly self-inverse: the inverse carries the cell the actor stood on
+		# before this move, so undoing a move is a move back rather than a
+		# reconstructed guess. A null destination means "had no position yet".
+		var actor := _actor(state, String(event["actor_id"]))
+		var previous: Variant = actor.get("position", null)
+		var destination: Variant = event.get("to", null)
+		if destination == null:
+			actor.erase("position")
+		else:
+			actor["position"] = (destination as Dictionary).duplicate(true)
+		return {"kind": "actor_moved", "actor_id": event["actor_id"], "to": previous}
+
 	var target := _actor(state, String(event.get("target_id", "")))
 
 	if kind == "cover_set":

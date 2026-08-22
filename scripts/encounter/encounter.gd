@@ -7,6 +7,56 @@ extends RefCounted
 ## to [Resolver], records the resulting events through the reversible [Events]
 ## session, and renders a snapshot the board can draw. Initiative, rounds and the
 ## per-turn action list live here too.
+##
+## Nothing here crashes on an illegal order. Every mutator asks [method
+## check_action] first and, when the answer is no, records a refusal the screen
+## can print instead of changing state — so the reason a shot did not happen
+## reaches the GM rather than an assertion.
+
+## What each recorded action costs from the actor's turn. Cyberpunk RED gives a
+## character one Action and one Move Action per turn (core rulebook p. 168), and
+## reloading spends the Action (p. 183) — which is why a character who reloads
+## does not also shoot that turn.
+const ACTION_COSTS := {
+	"Attack": "action",
+	"Aimed Shot": "action",
+	"Autofire": "action",
+	"Reload": "action",
+	"Clear Jam": "action",
+	"Move": "move",
+}
+
+## How each cost reads on the screen.
+const COST_LABELS := {"action": "Action", "move": "Move Action"}
+
+## Terse forms of every refusal, for the places on screen too narrow for the
+## whole sentence — a budget row keeps the short form and puts the sentence on
+## its tooltip.
+const SHORT_REASONS := {
+	"unknown_actor": "No unit",
+	"actor_down": "Down",
+	"not_your_turn": "Not their turn",
+	"action_spent": "Action spent",
+	"move_spent": "Move spent",
+	"no_weapon": "No weapon",
+	"unknown_weapon": "Not carried",
+	"no_attack_base": "No skill",
+	"weapon_jammed": "Jammed",
+	"no_autofire": "No autofire",
+	"no_ammo": "Empty",
+	"not_enough_ammo": "Low ammo",
+	"self_target": "Itself",
+	"unknown_target": "No target",
+	"no_evasion_base": "No Evasion",
+	"target_down": "Target down",
+	"magazine_full": "Full",
+	"not_jammed": "Not jammed",
+	"out_of_reach": "Too far",
+	"already_there": "Same cell",
+}
+
+## Metres a Move Action covers per point of MOVE (core rulebook p. 168).
+const METRES_PER_MOVE := 2.0
 
 var tables: Tables
 var session: Events.Session
@@ -14,6 +64,8 @@ var revision := 0
 var card: Dictionary = {}
 var events: Array[Dictionary] = []
 var result: Dictionary = {}
+## The last refusal, empty once anything succeeds. See [method check_action].
+var warning: Dictionary = {}
 
 var round_number := 0
 var initiative: Array[Dictionary] = []
@@ -22,6 +74,12 @@ var turn_index := 0
 var actions_taken: Dictionary = {}
 
 var _rng: Dice.RandomSource
+## Turn bookkeeping is not part of the event state, so it rides alongside the
+## session log: one entry pushed per recorded action, popped back on undo. That
+## is what gives an actor their Action back when the attack that spent it is
+## taken off the board.
+var _turn_undo: Array[Dictionary] = []
+var _turn_redo: Array[Dictionary] = []
 
 
 func _init(p_tables: Tables, actors := {}, rng: Dice.RandomSource = null) -> void:
@@ -69,6 +127,12 @@ static func _normalise_actor(actor_id: String, entry: Dictionary) -> Dictionary:
 	actor["death_save_due"] = bool(actor.get("death_save_due", false))
 	actor["critical_injuries"] = actor.get("critical_injuries", [])
 	actor["weapons"] = weapons
+	var cell: Dictionary = actor.get("position", {})
+	actor["position"] = {
+		"x": int(cell.get("x", 0)),
+		"z": int(cell.get("z", 0)),
+		"layer": int(cell.get("layer", 0)),
+	}
 	return actor
 
 
@@ -83,10 +147,13 @@ func load_actors(actors: Dictionary) -> void:
 	card = {}
 	events = []
 	result = {}
+	warning = {}
 	round_number = 0
 	initiative = []
 	turn_index = 0
 	actions_taken = {}
+	_turn_undo = []
+	_turn_redo = []
 
 
 func actor(actor_id: String) -> Dictionary:
@@ -165,11 +232,13 @@ func roll_initiative() -> Array[Dictionary]:
 				return a["ref"] > b["ref"]
 			return String(a["name"]) < String(b["name"])
 	)
+	# Recorded with no state event of its own, so rolling can be taken back the
+	# same way a shot can: the turn snapshot below is what undo restores.
+	_record({"kind": "roll_initiative", "round": 1}, [{"kind": "noop"}])
 	initiative = entries
 	round_number = 1
 	turn_index = 0
 	actions_taken = {}
-	revision += 1
 	return entries
 
 
@@ -183,13 +252,20 @@ func end_turn() -> void:
 	if initiative.is_empty():
 		return
 	var current := current_turn()
+	_record(
+		{
+			"kind": "end_turn",
+			"actor_id": String(current.get("actor_id", "")),
+			"round": round_number,
+		},
+		[{"kind": "noop"}],
+	)
 	if not current.is_empty():
 		actions_taken.erase(String(current["actor_id"]))
 	turn_index += 1
 	if turn_index >= initiative.size():
 		turn_index = 0
 		round_number += 1
-	revision += 1
 
 
 func _note_action(actor_id: String, action: String) -> void:
@@ -198,13 +274,422 @@ func _note_action(actor_id: String, action: String) -> void:
 	(actions_taken[actor_id] as Array).append(action)
 
 
+# -- turn economy ---------------------------------------------------------------
+
+
+## The labels of everything [param actor_id] has already spent this turn.
+func spent_labels(actor_id: String) -> Array:
+	return (actions_taken.get(actor_id, []) as Array).duplicate()
+
+
+## The label an actor spent [param cost] on this turn, or "" if they still have
+## it. Cyberpunk RED budgets one Action and one Move Action per turn.
+func spent_on(actor_id: String, cost: String) -> String:
+	for label in spent_labels(actor_id):
+		if String(ACTION_COSTS.get(String(label), "action")) == cost:
+			return String(label)
+	return ""
+
+
+## Metres one Move Action covers for this actor: MOVE x 2.
+func move_allowance(actor_id: String) -> float:
+	var stats: Dictionary = actor(actor_id).get("stats", {})
+	return float(int(stats.get("MOVE", 0))) * METRES_PER_MOVE
+
+
+## What one action kind is called on the card and in the spent list.
+static func action_label(kind: String, options := {}) -> String:
+	if kind == "attack":
+		var mode := String(options.get("mode", "single"))
+		if mode == "autofire":
+			return "Autofire"
+		if mode == "aimed":
+			return "Aimed Shot"
+		return "Attack"
+	if kind == "reload":
+		return "Reload"
+	if kind == "clear_jam":
+		return "Clear Jam"
+	if kind == "move":
+		return "Move"
+	return kind.capitalize()
+
+
+static func _ok() -> Dictionary:
+	return {"ok": true, "code": "", "reason": "", "short": "", "hint": "", "override": false}
+
+
+static func _blocked(code: String, reason: String, hint := "", override := false) -> Dictionary:
+	return {
+		"ok": false,
+		"code": code,
+		"reason": reason,
+		"short": String(SHORT_REASONS.get(code, "Blocked")),
+		"hint": hint,
+		"override": override,
+	}
+
+
+func _display_name(actor_id: String) -> String:
+	if not has_actor(actor_id):
+		return actor_id
+	return String(actor(actor_id)["name"])
+
+
+## Why [param actor_id] cannot take [param kind] right now.
+##
+## Answers {"ok": true} when nothing is in the way. Otherwise it is a refusal
+## written to be printed as it stands: a machine-readable "code", the "reason" a
+## GM reads, a "hint" naming the way out, and "override" — which separates a
+## ruling the table can waive, like turn order, from one the dice cannot be
+## rolled around, like an empty magazine.
+func check_action(actor_id: String, kind: String, options := {}) -> Dictionary:
+	if not has_actor(actor_id):
+		return _blocked("unknown_actor", "No unit is selected.", "Click a unit on the board first.")
+
+	var entry := actor(actor_id)
+	var who := String(entry["name"])
+	if int(entry["hp"]) <= 0:
+		return _blocked(
+			"actor_down",
+			"%s is down at %d HP and cannot act." % [who, int(entry["hp"])],
+			"Undo the hit that dropped them, or leave them out of the round.",
+		)
+
+	var turn_check := _check_turn(actor_id, kind, options)
+	if not bool(turn_check["ok"]):
+		return turn_check
+
+	if kind == "attack":
+		return _check_attack(actor_id, options)
+	if kind == "reload":
+		return _check_reload(actor_id, options)
+	if kind == "clear_jam":
+		return _check_clear_jam(actor_id, options)
+	if kind == "move":
+		return _check_move(actor_id, options)
+	return _ok()
+
+
+## Turn order and the Action/Move Action budget. Both are waivable: the GM at the
+## table is the one who decides a held action or an out-of-order interrupt.
+func _check_turn(actor_id: String, kind: String, options: Dictionary) -> Dictionary:
+	if round_number == 0:
+		return _ok()
+
+	var who := _display_name(actor_id)
+	var current := current_turn()
+	var acting := String(current.get("actor_id", ""))
+	if acting != "" and acting != actor_id:
+		return _blocked(
+			"not_your_turn",
+			"It is %s's turn, not %s's." % [_display_name(acting), who],
+			"End the turn to come round to %s, or resolve it anyway as a held action." % who,
+			true,
+		)
+
+	var label := action_label(kind, options)
+	var cost := String(ACTION_COSTS.get(label, "action"))
+	var already := spent_on(actor_id, cost)
+	if already != "":
+		var cost_name := String(COST_LABELS.get(cost, cost))
+		var hint := "End the turn to get it back."
+		if already != label:
+			hint = "%s spends this turn's %s too. %s" % [label, cost_name, hint]
+		return _blocked(
+			"%s_spent" % cost,
+			"%s already spent this turn's %s on %s." % [who, cost_name, already],
+			hint,
+			true,
+		)
+	return _ok()
+
+
+func _check_weapon(actor_id: String, options: Dictionary) -> Dictionary:
+	var who := _display_name(actor_id)
+	var weapon_name := String(options.get("weapon", ""))
+	if weapon_name == "":
+		return _blocked(
+			"no_weapon",
+			"%s has no weapon selected." % who,
+			"Give them one in the Forge, or pick a weapon on their sheet.",
+		)
+	if not (actor(actor_id)["weapons"] as Dictionary).has(weapon_name):
+		return _blocked("unknown_weapon", "%s is not carrying %s." % [who, weapon_name])
+	return _ok()
+
+
+func _check_attack(actor_id: String, options: Dictionary) -> Dictionary:
+	var carried := _check_weapon(actor_id, options)
+	if not bool(carried["ok"]):
+		return carried
+
+	var who := _display_name(actor_id)
+	var entry := actor(actor_id)
+	if not entry.has("attack_base"):
+		return _blocked(
+			"no_attack_base",
+			"%s has no attack skill on their sheet." % who,
+			"Add Handgun, Shoulder Arms or Melee Weapon in the Forge.",
+		)
+
+	var weapon_name := String(options["weapon"])
+	var state := _weapon_state(actor_id, weapon_name)
+	if bool(state["jammed"]):
+		return _blocked(
+			"weapon_jammed",
+			"%s is jammed." % weapon_name,
+			"Clearing the jam costs this turn's Action.",
+		)
+
+	var mode := String(options.get("mode", "single"))
+	if mode == "autofire" and _autofire_rating(actor_id, weapon_name) <= 0:
+		return _blocked(
+			"no_autofire",
+			"%s has no autofire rating." % weapon_name,
+			"Fire it single shot, or pick a weapon that sprays.",
+		)
+
+	var ammo := int(state["ammo"])
+	var needed: int = int(Resolver.RULES["autofire_ammo_cost"]) if mode == "autofire" else 1
+	if ammo < needed:
+		var short_reason := (
+			"%s is empty." % weapon_name
+			if ammo == 0
+			else "%s holds %d rounds and autofire needs %d." % [weapon_name, ammo, needed]
+		)
+		return _blocked(
+			"no_ammo" if ammo == 0 else "not_enough_ammo",
+			short_reason,
+			"Reloading costs this turn's Action, so the shot lands next turn.",
+		)
+
+	var target_id := String(options.get("target_id", ""))
+	if target_id != "":
+		if target_id == actor_id:
+			return _blocked("self_target", "%s cannot shoot themselves." % who)
+		if not has_actor(target_id):
+			return _blocked("unknown_target", "That unit is not in this encounter.")
+		var target := actor(target_id)
+		if bool(options.get("contested", false)) and not target.has("evasion_base"):
+			return _blocked(
+				"no_evasion_base",
+				"%s has no Evasion on their sheet to dodge with." % String(target["name"]),
+			)
+		if int(target["hp"]) <= 0:
+			return _blocked(
+				"target_down",
+				"%s is already down at %d HP." % [String(target["name"]), int(target["hp"])],
+				"Shoot them anyway only if the table is finishing them off.",
+				true,
+			)
+	return _ok()
+
+
+func _check_reload(actor_id: String, options: Dictionary) -> Dictionary:
+	var carried := _check_weapon(actor_id, options)
+	if not bool(carried["ok"]):
+		return carried
+	var weapon_name := String(options["weapon"])
+	var state := _weapon_state(actor_id, weapon_name)
+	var magazine := _magazine_of(actor_id, weapon_name)
+	if int(state["ammo"]) >= magazine:
+		return _blocked(
+			"magazine_full",
+			"%s is already loaded, %d of %d." % [weapon_name, int(state["ammo"]), magazine],
+		)
+	return _ok()
+
+
+func _check_clear_jam(actor_id: String, options: Dictionary) -> Dictionary:
+	var carried := _check_weapon(actor_id, options)
+	if not bool(carried["ok"]):
+		return carried
+	var weapon_name := String(options["weapon"])
+	if not bool(_weapon_state(actor_id, weapon_name)["jammed"]):
+		return _blocked("not_jammed", "%s is not jammed." % weapon_name)
+	return _ok()
+
+
+func _check_move(actor_id: String, options: Dictionary) -> Dictionary:
+	# Before initiative the GM is arranging the scene, not spending anyone's
+	# Move Action, so distance is not policed.
+	if round_number == 0:
+		return _ok()
+	var distance := float(options.get("distance_m", -1.0))
+	if distance < 0.0:
+		return _ok()
+	var allowance := move_allowance(actor_id)
+	if allowance <= 0.0 or distance <= allowance + 0.001:
+		return _ok()
+	return _blocked(
+		"out_of_reach",
+		(
+			"That cell is %s m away and one Move Action covers %s m."
+			% [String.num(distance, 1), String.num(allowance, 1)]
+		),
+		"Move partway now, or run it as a double Move and take the rest of the turn.",
+		true,
+	)
+
+
+# -- recording ------------------------------------------------------------------
+
+
+## The turn bookkeeping as it stands, so undo can put it back verbatim.
+func _turn_state() -> Dictionary:
+	return {
+		"round_number": round_number,
+		"turn_index": turn_index,
+		"initiative": initiative.duplicate(true),
+		"actions_taken": actions_taken.duplicate(true),
+	}
+
+
+func _restore_turn_state(state: Dictionary) -> void:
+	round_number = int(state["round_number"])
+	turn_index = int(state["turn_index"])
+	var restored: Array[Dictionary] = []
+	for entry in (state["initiative"] as Array):
+		restored.append((entry as Dictionary).duplicate(true))
+	initiative = restored
+	actions_taken = (state["actions_taken"] as Dictionary).duplicate(true)
+
+
+## Apply one action's events and stack the turn state that undoes it.
+func _record(action: Dictionary, action_events: Array) -> void:
+	_turn_undo.append(_turn_state())
+	_turn_redo.clear()
+	session.record(action, action_events)
+	revision += 1
+	warning = {}
+
+
+## Refuse an action: nothing changes, and the reason becomes the card the GM
+## sees. Returns the refusal so a caller can branch on it too.
+func _refuse(check: Dictionary) -> Dictionary:
+	warning = check.duplicate(true)
+	revision += 1
+	var lines := PackedStringArray([String(check["reason"])])
+	if String(check.get("hint", "")) != "":
+		lines.append(String(check["hint"]))
+	card = {
+		"kind": "blocked",
+		"title": "CANNOT",
+		"code": String(check["code"]),
+		"lines": lines,
+		"override": bool(check.get("override", false)),
+		"tone": "blocked",
+	}
+	events = []
+	result = {}
+	return check
+
+
+static func _allowed(check: Dictionary, override: bool) -> bool:
+	return bool(check["ok"]) or (override and bool(check["override"]))
+
+
+## True when the weapon has numbers to read, inline or from the tables. An
+## uncosted homebrew name still has to answer the turn-budget checks, so nothing
+## below may reach for a profile that was never written.
+func _has_profile(actor_id: String, weapon_name: String) -> bool:
+	var state := _weapon_state(actor_id, weapon_name)
+	return state.has("damage_dice") or tables.has_weapon(weapon_name)
+
+
+func _magazine_of(actor_id: String, weapon_name: String) -> int:
+	var state := _weapon_state(actor_id, weapon_name)
+	var magazine := int(state.get("magazine", 0))
+	if magazine <= 0 and _has_profile(actor_id, weapon_name):
+		magazine = weapon(actor_id, weapon_name).magazine
+	if magazine <= 0:
+		magazine = int(state["ammo"])
+	return maxi(1, magazine)
+
+
+func _autofire_rating(actor_id: String, weapon_name: String) -> int:
+	if _has_profile(actor_id, weapon_name):
+		return weapon(actor_id, weapon_name).autofire_rating
+	return int(_weapon_state(actor_id, weapon_name).get("autofire_rating", -1))
+
+
 # -- actions -------------------------------------------------------------------
 
 
+## Where an actor stands, in board cells.
+func position(actor_id: String) -> Dictionary:
+	return (actor(actor_id).get("position", {}) as Dictionary).duplicate(true)
+
+
+## Put an actor on a cell without recording it. This is the setup-phase drag:
+## before initiative there is no turn to spend and nothing to take back.
+func place(actor_id: String, cell: Dictionary) -> void:
+	actor(actor_id)["position"] = {
+		"x": int(cell.get("x", 0)),
+		"z": int(cell.get("z", 0)),
+		"layer": int(cell.get("layer", 0)),
+	}
+
+
+## Move an actor to [param cell] as a Move Action.
+##
+## [param options] accepts distance_m — checked against MOVE x 2 — and override,
+## which pushes past a waivable refusal. Recorded, so undo walks them back to the
+## cell they left rather than to an approximation of it.
+func move(actor_id: String, cell: Dictionary, options := {}) -> Dictionary:
+	var distance := float(options.get("distance_m", -1.0))
+	# A refusal is returned as-is so the caller can print it; an action that goes
+	# ahead — including one the GM waived — answers plain ok.
+	var check := check_action(actor_id, "move", {"distance_m": distance})
+	if not _allowed(check, bool(options.get("override", false))):
+		return _refuse(check)
+
+	var destination := {
+		"x": int(cell.get("x", 0)),
+		"z": int(cell.get("z", 0)),
+		"layer": int(cell.get("layer", 0)),
+	}
+	var previous := position(actor_id)
+	if previous == destination:
+		return _refuse(
+			_blocked("already_there", "%s is already on that cell." % _display_name(actor_id))
+		)
+
+	var move_events: Array[Dictionary] = [
+		{"kind": "actor_moved", "actor_id": actor_id, "to": destination}
+	]
+	_record(
+		{"kind": "move", "actor_id": actor_id, "from": previous, "to": destination},
+		move_events,
+	)
+	card = {
+		"kind": "move",
+		"title": "MOVE",
+		"attacker": _display_name(actor_id),
+		"lines": PackedStringArray(
+			[
+				"(%d, %d) to (%d, %d)" % [previous["x"], previous["z"], destination["x"], destination["z"]],
+				(
+					"%s m of %s m"
+					% [String.num(maxf(distance, 0.0), 1), String.num(move_allowance(actor_id), 1)]
+					if distance >= 0.0
+					else "Move Action spent"
+				),
+			]
+		),
+		"tone": "neutral",
+	}
+	events = move_events.duplicate(true)
+	result = {}
+	_note_action(actor_id, "Move")
+	return _ok()
+
+
 ## Resolve one attack. [param command] accepts attacker_id, target_id, weapon,
-## distance_m, and optionally location, mode, modifiers, contested, cover_hp and
-## cover_id.
-func attack(command: Dictionary) -> void:
+## distance_m, and optionally location, mode, modifiers, contested, cover_hp,
+## cover_id and override.
+func attack(command: Dictionary) -> Dictionary:
 	var attacker_id := String(command["attacker_id"])
 	var target_id := String(command["target_id"])
 	var weapon_name := String(command["weapon"])
@@ -217,10 +702,21 @@ func attack(command: Dictionary) -> void:
 	var cover_hp: Variant = command.get("cover_hp", null)
 	assert(cover_id == null or cover_hp != null, "cover_id requires cover_hp")
 
+	var check := check_action(
+		attacker_id,
+		"attack",
+		{
+			"weapon": weapon_name,
+			"mode": mode,
+			"target_id": target_id,
+			"contested": contested,
+		},
+	)
+	if not _allowed(check, bool(command.get("override", false))):
+		return _refuse(check)
+
 	var attacker := actor(attacker_id)
 	var weapon_state := _weapon_state(attacker_id, weapon_name)
-	assert(not bool(weapon_state["jammed"]), "%s is jammed and must be cleared first" % weapon_name)
-	assert(attacker.has("attack_base"), "%s has no attack_base" % attacker_id)
 
 	var defender_evasion_base := -1
 	if contested:
@@ -279,7 +775,7 @@ func attack(command: Dictionary) -> void:
 			copy["cover_id"] = cover_id
 		applied.append(copy)
 
-	session.record(
+	_record(
 		{
 			"kind": "attack",
 			"attacker_id": attacker_id,
@@ -295,67 +791,74 @@ func attack(command: Dictionary) -> void:
 		},
 		applied,
 	)
-	revision += 1
 	card = _attack_card(attacker_id, target_id, weapon_name, mode, location, attack_result)
 	events = applied.duplicate(true)
 	result = attack_result.to_dict()
-	var label := "Attack"
-	if mode == "autofire":
-		label = "Autofire"
-	elif mode == "aimed":
-		label = "Aimed Shot"
-	_note_action(attacker_id, label)
+	_note_action(attacker_id, action_label("attack", {"mode": mode}))
+	return _ok()
 
 
-func reload(actor_id: String, weapon_name: String, amount := -1) -> void:
+## Refill a magazine. Reloading is an Action in Cyberpunk RED (core rulebook
+## p. 183), so it spends the whole of this turn's Action: a character who
+## reloads does not also shoot until the turn comes round again.
+func reload(actor_id: String, weapon_name: String, amount := -1, override := false) -> Dictionary:
+	var check := check_action(actor_id, "reload", {"weapon": weapon_name})
+	if not _allowed(check, override):
+		return _refuse(check)
+
 	var state := _weapon_state(actor_id, weapon_name)
-	var magazine := int(state.get("magazine", 0))
-	if magazine <= 0:
-		magazine = weapon(actor_id, weapon_name).magazine
+	var magazine := _magazine_of(actor_id, weapon_name)
 	var missing := magazine - int(state["ammo"])
-	var refill := missing if amount < 0 else amount
-	assert(refill > 0, "%s does not need a reload" % weapon_name)
-	assert(refill <= missing, "%s can accept at most %d rounds" % [weapon_name, missing])
+	var refill := missing if amount < 0 else mini(amount, missing)
 	var reload_events: Array[Dictionary] = [
 		{"kind": "ammo_restored", "actor_id": actor_id, "weapon": weapon_name, "amount": refill}
 	]
-	session.record(
+	_record(
 		{"kind": "reload", "actor_id": actor_id, "weapon": weapon_name, "amount": refill},
 		reload_events,
 	)
-	revision += 1
 	card = {
 		"kind": "reload",
 		"title": "RELOAD",
 		"attacker": String(actor(actor_id)["name"]),
 		"lines": PackedStringArray(
 			[
-				"%s: +%d rounds" % [weapon_name, refill],
-				"Ammo: %d" % int(_weapon_state(actor_id, weapon_name)["ammo"]),
+				"%s: +%d rounds, now %d of %d"
+				% [weapon_name, refill, int(_weapon_state(actor_id, weapon_name)["ammo"]), magazine],
+				"Spends this turn's Action — the next shot is next turn.",
 			]
 		),
 		"tone": "neutral",
 	}
 	events = reload_events.duplicate(true)
+	result = {}
 	_note_action(actor_id, "Reload")
+	return _ok()
 
 
-func clear_jam(actor_id: String, weapon_name: String) -> void:
-	var state := _weapon_state(actor_id, weapon_name)
-	assert(bool(state["jammed"]), "%s is not jammed" % weapon_name)
+## Clearing a jam is an Action too, so the cleared weapon fires next turn.
+func clear_jam(actor_id: String, weapon_name: String, override := false) -> Dictionary:
+	var check := check_action(actor_id, "clear_jam", {"weapon": weapon_name})
+	if not _allowed(check, override):
+		return _refuse(check)
+
 	var jam_events: Array[Dictionary] = [
 		{"kind": "weapon_unjammed", "actor_id": actor_id, "weapon": weapon_name}
 	]
-	session.record({"kind": "clear_jam", "actor_id": actor_id, "weapon": weapon_name}, jam_events)
-	revision += 1
+	_record({"kind": "clear_jam", "actor_id": actor_id, "weapon": weapon_name}, jam_events)
 	card = {
 		"kind": "clear_jam",
 		"title": "JAM CLEARED",
 		"attacker": String(actor(actor_id)["name"]),
-		"lines": PackedStringArray(["%s is ready to fire" % weapon_name]),
+		"lines": PackedStringArray(
+			["%s is ready to fire" % weapon_name, "Spends this turn's Action."]
+		),
 		"tone": "neutral",
 	}
 	events = jam_events.duplicate(true)
+	result = {}
+	_note_action(actor_id, "Clear Jam")
+	return _ok()
 
 
 func can_undo() -> bool:
@@ -366,15 +869,65 @@ func can_redo() -> bool:
 	return session.can_redo()
 
 
+## What the next undo would take back, as a phrase for a button tooltip.
+func undo_label() -> String:
+	if not can_undo():
+		return ""
+	return _action_phrase(session.log[session.log.size() - 1].action)
+
+
+## What the next redo would put back.
+func redo_label() -> String:
+	if not can_redo():
+		return ""
+	return _action_phrase(session.redo_log[session.redo_log.size() - 1].action)
+
+
+func _action_phrase(action: Dictionary) -> String:
+	var kind := String(action.get("kind", ""))
+	if kind == "attack":
+		return (
+			"%s's %s on %s"
+			% [
+				_display_name(String(action.get("attacker_id", ""))),
+				action_label("attack", {"mode": String(action.get("mode", "single"))}).to_lower(),
+				_display_name(String(action.get("target_id", ""))),
+			]
+		)
+	if kind == "move":
+		var to: Dictionary = action.get("to", {})
+		return (
+			"%s's move to (%d, %d)"
+			% [_display_name(String(action.get("actor_id", ""))), int(to.get("x", 0)), int(to.get("z", 0))]
+		)
+	if kind == "reload" or kind == "clear_jam":
+		return (
+			"%s's %s"
+			% [
+				_display_name(String(action.get("actor_id", ""))),
+				action_label(kind).to_lower(),
+			]
+		)
+	if kind == "end_turn":
+		return "the end of %s's turn" % _display_name(String(action.get("actor_id", "")))
+	if kind == "roll_initiative":
+		return "the initiative roll"
+	return kind.replace("_", " ")
+
+
 func undo() -> void:
 	assert(can_undo(), "nothing to undo")
+	var phrase := undo_label()
 	var inverse := session.log[session.log.size() - 1].inverse.duplicate(true)
 	session.undo()
+	_turn_redo.append(_turn_state())
+	_restore_turn_state(_turn_undo.pop_back())
 	revision += 1
+	warning = {}
 	card = {
 		"kind": "undo",
 		"title": "UNDO",
-		"lines": PackedStringArray(["Previous action reversed."]),
+		"lines": PackedStringArray(["Reversed %s." % phrase, "The turn it cost is back."]),
 		"tone": "undo",
 	}
 	events = inverse
@@ -383,16 +936,21 @@ func undo() -> void:
 
 func redo() -> void:
 	assert(can_redo(), "nothing to redo")
+	var phrase := redo_label()
 	var replayed := session.redo_log[session.redo_log.size() - 1].events.duplicate(true)
 	session.redo()
+	_turn_undo.append(_turn_state())
+	_restore_turn_state(_turn_redo.pop_back())
 	revision += 1
+	warning = {}
 	card = {
 		"kind": "redo",
 		"title": "REDO",
-		"lines": PackedStringArray(["Previous action applied again."]),
+		"lines": PackedStringArray(["Reapplied %s." % phrase]),
 		"tone": "neutral",
 	}
 	events = replayed
+	result = {}
 
 
 # -- presentation ---------------------------------------------------------------
@@ -461,6 +1019,20 @@ func _weapon_view(actor_id: String, name: String, state: Dictionary) -> Dictiona
 	}
 
 
+## Every action this actor could take, each already carrying the reason it
+## cannot — so the screen greys a button and says why in the same pass, instead
+## of finding out only once the GM has clicked it.
+func _availability(actor_id: String, weapon_name: String) -> Dictionary:
+	return {
+		"attack": check_action(actor_id, "attack", {"weapon": weapon_name, "mode": "single"}),
+		"aimed": check_action(actor_id, "attack", {"weapon": weapon_name, "mode": "aimed"}),
+		"autofire": check_action(actor_id, "attack", {"weapon": weapon_name, "mode": "autofire"}),
+		"reload": check_action(actor_id, "reload", {"weapon": weapon_name}),
+		"clear_jam": check_action(actor_id, "clear_jam", {"weapon": weapon_name}),
+		"move": check_action(actor_id, "move", {}),
+	}
+
+
 func _actor_view(actor_id: String, entry: Dictionary) -> Dictionary:
 	var weapons: Array[Dictionary] = []
 	var selected := ""
@@ -468,6 +1040,7 @@ func _actor_view(actor_id: String, entry: Dictionary) -> Dictionary:
 		if selected == "":
 			selected = String(name)
 		weapons.append(_weapon_view(actor_id, String(name), entry["weapons"][name]))
+	var chosen := String(entry.get("selected_weapon", selected))
 	return {
 		"id": actor_id,
 		"name": String(entry["name"]),
@@ -483,8 +1056,15 @@ func _actor_view(actor_id: String, entry: Dictionary) -> Dictionary:
 		"side": String(entry.get("side", "neutral")),
 		"stats": (entry.get("stats", {}) as Dictionary).duplicate(),
 		"skills": (entry.get("skills", {}) as Dictionary).duplicate(),
-		"selected_weapon": String(entry.get("selected_weapon", selected)),
+		"selected_weapon": chosen,
 		"weapons": weapons,
+		"position": (entry.get("position", {}) as Dictionary).duplicate(true),
+		"spent": {
+			"action": spent_on(actor_id, "action"),
+			"move": spent_on(actor_id, "move"),
+		},
+		"move_allowance": move_allowance(actor_id),
+		"available": _availability(actor_id, chosen),
 	}
 
 
@@ -503,6 +1083,9 @@ func snapshot() -> Dictionary:
 		"actions_taken": actions_taken.duplicate(true),
 		"can_undo": can_undo(),
 		"can_redo": can_redo(),
+		"undo_label": undo_label(),
+		"redo_label": redo_label(),
+		"warning": warning.duplicate(true),
 		"actors": actor_views,
 		"card": card.duplicate(true),
 		"events": events.duplicate(true),

@@ -82,6 +82,27 @@ undo. During setup, tokens can be dragged directly around the board and the
 selected character can make Skill Checks with modifiers and a DV before anyone
 rolls initiative.
 
+Once initiative is rolled, a move is a Move Action rather than a free drag, and
+it goes into the same event log a shot does. **Undo** and **Redo** therefore
+walk tokens back across the board as exactly as they walk damage back off a
+sheet, and each button names what it would take back before it is clicked —
+"Take back Spike Adebayo's move to (7, 4)". Undoing an action also returns the
+turn it cost, so a shot taken back leaves the character with their Action again.
+
+Each turn carries one Action and one Move Action, and the rail prints the whole
+budget with the reason beside anything unavailable — `Empty`, `Jammed`, `Action
+spent`, `Too far` — rather than greying a control out and leaving the GM to
+guess. Attempting one anyway raises a banner with the reason in full and the way
+out of it. Turn order and the action budget are rulings a table can waive, so
+that banner also offers **Do it anyway**; an empty magazine or a jammed weapon
+is not, so it does not. Moving shows the reach of one Move Action as a ring on
+the board, and a cell beyond it lights red under the cursor before it is
+clicked.
+
+**Reloading is an Action**, as it is in the book, so it spends the turn: a
+character who reloads shoots on their next turn, not this one. Clearing a jam
+costs the same.
+
 **Forge** — edits PCs, NPCs, and mook templates. Players can choose any of the
 ten Roles, configure Role Ability ranks and specialty/allocation points, and
 build a sheet from the complete Skill catalog. Role Ability and Skill Checks
@@ -132,7 +153,14 @@ inside their local campaign save.
 
 The combat resolver handles exploding and fumbling d10s, defender-wins ties,
 armor ablation, critical injuries, and cover. Each action records its exact
-inverse so undo restores previous state structurally.
+inverse so undo restores previous state structurally. Moves, initiative and the
+end of a turn are recorded the same way, so undo covers the whole of a round
+rather than only the damage in it.
+
+Nothing in an encounter is refused by crashing. Every action is checked first,
+and a refusal is a printable answer — a code, the sentence the GM reads, the
+hint naming the way out, and whether it is a ruling the table may waive — which
+the screen shows rather than an assertion.
 
 ## Running it
 
