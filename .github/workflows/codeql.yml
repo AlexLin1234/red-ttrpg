@@ -1,15 +1,28 @@
 # GitHub's static analysis. Python only — there is no GDScript support, so this
 # covers assistant/, service/ and scripts/, not the engine-side rules.
+#
+# PARKED: manual-only until code scanning is switched on for this repository.
+# The analysis itself works — a trial run scanned 30 of 30 Python files and
+# produced its SARIF — but the upload is refused with "Code scanning is not
+# enabled for this repository", which is a settings toggle under
+# Settings → Code security, and on a private repository needs a plan that
+# includes it. Leaving the automatic triggers on would paint every pull
+# request red for a reason no one on the PR can fix.
+#
+# To turn it on: enable code scanning in settings, then replace the
+# workflow_dispatch trigger below with:
+#
+#   on:
+#     pull_request:
+#     push:
+#       branches: [main]
+#     schedule:
+#       - cron: "0 6 * * 1"   # catches new rules against unchanged code
 
 name: CodeQL
 
 on:
-  pull_request:
-  push:
-    branches: [main]
-  schedule:
-    # Catches newly published rules against unchanged code.
-    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
