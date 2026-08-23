@@ -92,7 +92,8 @@ static func run(h: Harness) -> void:
 	var fresh := _encounter().snapshot()
 	var goon := _actor(fresh, "goon")
 	h.equal(goon["name"], "Booster", "name")
-	h.equal(goon["wound_state"], "unhurt", "wound state")
+	# Read off the HP it was loaded with, 30 of 40, rather than assumed unhurt.
+	h.equal(goon["wound_state"], "lightly_wounded", "wound state")
 	h.equal(goon["death_save_due"], false, "death save")
 	h.equal(goon["critical_injuries"], [], "injuries")
 	var solo := _actor(fresh, "solo")
@@ -143,7 +144,9 @@ static func run(h: Harness) -> void:
 	)
 	var hurt := _actor(downed, "goon")
 	h.equal(hurt["hp"], -2, "hp")
-	h.equal(hurt["wound_state"], "seriously_wounded", "wound state")
+	# The hit crosses the serious threshold and carries on past zero, so the
+	# state it settles on is the worse of the two the shot passed through.
+	h.equal(hurt["wound_state"], "mortally_wounded", "wound state")
 	h.equal(hurt["death_save_due"], true, "death save")
 
 	h.it("lets cover absorb the hit instead of the target")

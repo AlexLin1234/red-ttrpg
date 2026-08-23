@@ -472,7 +472,10 @@ static func actor_input(character: Dictionary) -> Dictionary:
 	if not (character.get("weapons", []) as Array).is_empty():
 		first_weapon = String((character["weapons"][0] as Dictionary)["name"])
 
-	return {
+	# Wound state travels with the sheet in both directions: a character who was
+	# left Mortally Wounded at the end of the last fight walks into the next one
+	# still owing a Death Save, rather than quietly resetting to unhurt.
+	var input := {
 		"name": String(character["name"]),
 		"max_hp": int(character["max_hp"]),
 		"hp": int(character["hp"]),
@@ -486,6 +489,10 @@ static func actor_input(character: Dictionary) -> Dictionary:
 		"skills": skill_map,
 		"weapons": weapons,
 	}
+	for key in ["wound_state", "death_save_due", "death_save_penalty", "critical_injuries"]:
+		if character.has(key):
+			input[key] = character[key]
+	return input
 
 
 ## An empty board, sized like the seeded parkade so a new place is immediately

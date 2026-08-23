@@ -186,7 +186,14 @@ static func _apply_one(state: Dictionary, event: Dictionary) -> Dictionary:
 			"rolls": event.get("rolls", PackedInt32Array()),
 		}
 
-	if kind == "seriously_wounded" or kind == "wound_state_restored":
+	# "seriously_wounded" is the one transition the resolver names outright; every
+	# other move between states — mortally wounded, dead, or climbing back after
+	# healing — arrives as wound_state_set carrying the state it wants.
+	if (
+		kind == "seriously_wounded"
+		or kind == "wound_state_set"
+		or kind == "wound_state_restored"
+	):
 		var previous := String(target.get("wound_state", "unhurt"))
 		if kind == "seriously_wounded":
 			target["wound_state"] = "seriously_wounded"
@@ -196,6 +203,26 @@ static func _apply_one(state: Dictionary, event: Dictionary) -> Dictionary:
 			"kind": "wound_state_restored",
 			"target_id": event["target_id"],
 			"state": previous,
+		}
+
+	if kind == "death_save_penalty_increased" or kind == "death_save_penalty_decreased":
+		var amount := int(event["amount"])
+		var previous := int(target.get("death_save_penalty", 0))
+		var next: int = (
+			previous + amount if kind == "death_save_penalty_increased" else maxi(0, previous - amount)
+		)
+		target["death_save_penalty"] = next
+		var actual: int = (
+			next - previous if kind == "death_save_penalty_increased" else previous - next
+		)
+		return {
+			"kind": (
+				"death_save_penalty_decreased"
+				if kind == "death_save_penalty_increased"
+				else "death_save_penalty_increased"
+			),
+			"target_id": event["target_id"],
+			"amount": actual,
 		}
 
 	if kind == "death_save_due" or kind == "death_save_cleared":

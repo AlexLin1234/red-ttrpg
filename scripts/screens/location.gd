@@ -442,6 +442,77 @@ func select_unit(unit_id: String) -> void:
 	_refresh()
 
 
+## Roll the Death Save the selected actor owes. Public for the same reason
+## [method roll_initiative] is: the screenshot harness drives the GM's path.
+func roll_death_save(actor_id: String) -> void:
+	if _encounter == null or not _encounter.has_actor(actor_id):
+		return
+	if not Mortality.owes_death_save(_encounter.actor(actor_id)):
+		return
+	_encounter.death_save(actor_id)
+	_after_medical_action()
+
+
+func stabilize(patient_id: String, medic_id: String, skill_name: String, dv: int) -> void:
+	if _encounter == null or not _encounter.has_actor(patient_id):
+		return
+	_encounter.stabilize(patient_id, medic_id, skill_name, dv)
+	_after_medical_action()
+
+
+func heal_actor(actor_id: String, amount: int) -> void:
+	if _encounter == null or amount <= 0 or not _encounter.has_actor(actor_id):
+		return
+	_encounter.heal(actor_id, amount)
+	_after_medical_action()
+
+
+func treat_injury(patient_id: String, medic_id: String, injury: String, skill_name: String, dv: int) -> void:
+	if _encounter == null or not _encounter.has_actor(patient_id):
+		return
+	_encounter.treat_injury(patient_id, medic_id, injury, skill_name, dv)
+	_after_medical_action()
+
+
+func _after_medical_action() -> void:
+	_snapshot = _encounter.snapshot()
+	_sync_units()
+	_refresh()
+
+
+## Write what the fight did back onto the roster.
+##
+## The encounter is a scratch copy of the party, so an NPC killed here would
+## otherwise be alive again the moment the GM changes screen. Committing is the
+## GM's own button rather than something that happens quietly, because an
+## encounter is often replayed before it counts.
+func commit_to_roster() -> void:
+	if _encounter == null:
+		return
+	var written := 0
+	for unit in Store.active_location().get("units", []):
+		var entry: Dictionary = unit
+		var unit_id := String(entry["id"])
+		if not _encounter.has_actor(unit_id):
+			continue
+		var character := Store.character_by_id(String(entry["character_id"]))
+		if character.is_empty():
+			continue
+		var actor := _encounter.actor(unit_id)
+		character["hp"] = int(actor["hp"])
+		character["wound_state"] = String(actor["wound_state"])
+		character["death_save_due"] = bool(actor["death_save_due"])
+		character["death_save_penalty"] = int(actor["death_save_penalty"])
+		character["critical_injuries"] = (actor["critical_injuries"] as Array).duplicate()
+		written += 1
+	if written == 0:
+		return
+	Store.mark_dirty()
+	Store.set_status("%d sheets updated" % written)
+	_message = "Committed HP, wounds and injuries for %d characters." % written
+	_refresh_card()
+
+
 func unit_ids() -> PackedStringArray:
 	var ids := PackedStringArray()
 	for unit in Store.active_location().get("units", []):
@@ -697,6 +768,11 @@ func _build_rail() -> Control:
 	top.add_child(_undo_button)
 	actions.add_child(top)
 
+	var commit := UI.plain_button("Save results to roster")
+	commit.tooltip_text = "Write HP, wounds and injuries onto the character sheets"
+	commit.pressed.connect(commit_to_roster)
+	actions.add_child(commit)
+
 	_end_turn_button = UI.primary_button("End turn ▸")
 	_end_turn_button.pressed.connect(
 		func() -> void:
@@ -725,14 +801,16 @@ func _sync_units() -> void:
 			continue
 		var hp := int(character["hp"])
 		var max_hp := int(character["max_hp"])
+		var wound_state := String(character.get("wound_state", Mortality.UNHURT))
 		for actor in _snapshot.get("actors", []):
 			if String((actor as Dictionary)["id"]) == String(entry["id"]):
 				hp = int((actor as Dictionary)["hp"])
 				max_hp = int((actor as Dictionary)["max_hp"])
+				wound_state = String((actor as Dictionary)["wound_state"])
 		visuals[String(entry["id"])] = {
 			"side": String(character.get("side", "neutral")),
 			"hp_ratio": clampf(float(hp) / maxf(1.0, float(max_hp)), 0.0, 1.0),
-			"down": hp <= 0,
+			"down": hp <= 0 or wound_state == Mortality.DEAD,
 			"model_id": String(character.get("model_id", "")),
 		}
 	_board.set_units(location.get("units", []), visuals)
@@ -826,14 +904,17 @@ func _build_initiative_row(entry: Dictionary, actor: Dictionary, is_current: boo
 	text.add_child(UI.elide(UI.value(String(entry["name"]), 11)))
 
 	var status := ""
+	var tone := UI.MUTED
 	if not actor.is_empty():
-		if int(actor["hp"]) <= 0:
-			status = "Down"
-		elif int(actor["hp"]) <= CampaignSchema.serious_wound_threshold(int(actor["max_hp"])):
-			status = "Seriously wounded"
+		var wound_state := String(actor.get("wound_state", Mortality.UNHURT))
+		if wound_state != Mortality.UNHURT and wound_state != Mortality.LIGHTLY_WOUNDED:
+			status = Mortality.label(wound_state)
+			tone = UI.WARN if wound_state == Mortality.SERIOUSLY_WOUNDED else UI.ALERT_BRIGHT
+		if bool(actor.get("death_save_due", false)):
+			status += " · save due"
 	if is_current:
 		status = "Acting now" if status == "" else "Acting now · " + status
-	text.add_child(UI.elide(UI.micro(status, UI.ALERT_BRIGHT if status.contains("wounded") else UI.MUTED)))
+	text.add_child(UI.elide(UI.micro(status, tone)))
 
 	if not actor.is_empty():
 		text.add_child(UI.hp_bar(float(actor["hp"]) / maxf(1.0, float(actor["max_hp"]))))
@@ -881,6 +962,8 @@ func _refresh_selected() -> void:
 		grid.add_child(tile)
 	_selected_box.add_child(UI.margins(grid, UI.GAP_2))
 
+	_build_condition(actor)
+
 	if _is_setup():
 		_build_setup_skill_check()
 
@@ -899,6 +982,139 @@ func _refresh_selected() -> void:
 	)
 	actions.add_child(_action_row("Aimed shot · head", "−8 DV", false))
 	_selected_box.add_child(UI.margins(actions, UI.GAP_2))
+
+
+## Condition, and the medicine that answers it.
+##
+## Everything here is one click from the selected unit, because the moment a
+## character hits zero the GM is looking at this rail and nowhere else.
+func _build_condition(actor: Dictionary) -> void:
+	var wound_state := String(actor.get("wound_state", Mortality.UNHURT))
+	var penalty := int(actor.get("action_penalty", 0))
+	var injuries: Array = actor.get("critical_injuries", [])
+
+	_selected_box.add_child(UI.rule_line())
+	var tone := UI.MUTED
+	if wound_state == Mortality.SERIOUSLY_WOUNDED:
+		tone = UI.WARN
+	elif wound_state == Mortality.MORTALLY_WOUNDED or wound_state == Mortality.DEAD:
+		tone = UI.ALERT_BRIGHT
+	var rows := UI.vbox(UI.GAP_1)
+	rows.add_child(UI.field_row("Condition", Mortality.label(wound_state), tone))
+	if penalty != 0:
+		rows.add_child(UI.field_row("All actions", "%+d" % penalty, UI.ALERT_BRIGHT))
+	if bool(actor.get("death_save_due", false)):
+		rows.add_child(
+			UI.field_row(
+				"Death save", "penalty %+d" % -int(actor.get("death_save_penalty", 0)), UI.ALERT_BRIGHT
+			)
+		)
+	_selected_box.add_child(UI.margins(rows, UI.GAP_2))
+
+	if Mortality.is_dead(actor):
+		return
+
+	var medics := _medic_options()
+	if bool(actor.get("death_save_due", false)):
+		_build_death_save_row(actor, medics)
+	_build_treatment_row(actor, medics, injuries)
+
+
+## Everyone still standing, so the GM can pick who is doing the patching.
+func _medic_options() -> Array[Dictionary]:
+	var options: Array[Dictionary] = []
+	var current := String(_snapshot.get("current_actor_id", ""))
+	for candidate in _snapshot.get("actors", []):
+		var entry: Dictionary = candidate
+		if Mortality.is_dead(entry):
+			continue
+		options.append({"id": String(entry["id"]), "name": String(entry["name"])})
+	options.sort_custom(
+		func(a: Dictionary, b: Dictionary) -> bool:
+			# Whoever is acting comes first: usually they are the one reaching for
+			# the medkit.
+			if String(a["id"]) == current:
+				return true
+			if String(b["id"]) == current:
+				return false
+			return String(a["name"]) < String(b["name"])
+	)
+	return options
+
+
+func _build_death_save_row(actor: Dictionary, medics: Array[Dictionary]) -> void:
+	var actor_id := String(actor["id"])
+	var spent: Array = (_snapshot.get("actions_taken", {}) as Dictionary).get(actor_id, [])
+	var row := UI.hbox(UI.GAP_2)
+	var save := UI.primary_button("Roll death save")
+	UI.expand(save, true, false)
+	save.disabled = spent.has("Death Save")
+	save.tooltip_text = (
+		"Already rolled this turn"
+		if save.disabled
+		else "d10 + accumulated penalty against BODY"
+	)
+	save.pressed.connect(roll_death_save.bind(actor_id))
+	row.add_child(save)
+
+	var stabilize_button := UI.plain_button("Stabilize")
+	UI.expand(stabilize_button, true, false)
+	stabilize_button.disabled = medics.is_empty()
+	stabilize_button.tooltip_text = "First Aid against DV %d" % int(
+		Mortality.RULES["stabilize_dv"]
+	)
+	if not medics.is_empty():
+		var medic_id := String((medics[0] as Dictionary)["id"])
+		stabilize_button.pressed.connect(
+			func() -> void: stabilize(actor_id, medic_id, "First Aid", -1)
+		)
+	row.add_child(stabilize_button)
+	_selected_box.add_child(UI.margins(row, UI.GAP_2))
+
+
+func _build_treatment_row(
+	actor: Dictionary, medics: Array[Dictionary], injuries: Array
+) -> void:
+	var actor_id := String(actor["id"])
+	var row := UI.hbox(UI.GAP_2)
+	var amount := SpinBox.new()
+	amount.min_value = 1
+	amount.max_value = 60
+	amount.value = 5
+	amount.prefix = "HP "
+	amount.custom_minimum_size = Vector2(84, 0)
+	row.add_child(amount)
+	var heal := UI.plain_button("Heal")
+	UI.expand(heal, true, false)
+	heal.disabled = int(actor["hp"]) >= int(actor["max_hp"])
+	heal.pressed.connect(func() -> void: heal_actor(actor_id, int(amount.value)))
+	row.add_child(heal)
+	_selected_box.add_child(UI.margins(row, UI.GAP_2))
+
+	if injuries.is_empty():
+		return
+	_selected_box.add_child(UI.margins(UI.micro("Critical injuries"), UI.GAP_2))
+	var list := UI.vbox(UI.GAP_1)
+	var medic_id := String((medics[0] as Dictionary)["id"]) if not medics.is_empty() else ""
+	for injury in injuries:
+		var name := String(injury)
+		var injury_row := UI.hbox(UI.GAP_2)
+		var label := UI.elide(UI.body(name, 11, UI.ALERT_BRIGHT))
+		UI.expand(label, true, false)
+		injury_row.add_child(label)
+		var treat := UI.plain_button("Treat")
+		treat.disabled = medic_id == ""
+		treat.tooltip_text = "Surgery against DV %d" % int(Mortality.RULES["treatment_dv"])
+		if medic_id != "":
+			treat.pressed.connect(
+				func() -> void:
+					treat_injury(
+						actor_id, medic_id, name, "Surgery", int(Mortality.RULES["treatment_dv"])
+					)
+			)
+		injury_row.add_child(treat)
+		list.add_child(injury_row)
+	_selected_box.add_child(UI.margins(list, UI.GAP_2))
 
 
 func _selected_character() -> Dictionary:

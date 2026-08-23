@@ -13,6 +13,7 @@ const SUITES := [
 	preload("res://tests/test_events.gd"),
 	preload("res://tests/test_tables.gd"),
 	preload("res://tests/test_encounter.gd"),
+	preload("res://tests/test_mortality.gd"),
 	preload("res://tests/test_campaign.gd"),
 	preload("res://tests/test_areas.gd"),
 	preload("res://tests/test_map_rail.gd"),

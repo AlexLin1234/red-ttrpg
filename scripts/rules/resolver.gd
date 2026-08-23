@@ -110,6 +110,10 @@ class AttackRequest extends RefCounted:
 	## -1 means the defender is not making an opposed check.
 	var defender_evasion_base: int
 	var modifiers: int
+	## Wound-state penalties, set after construction rather than passed in: they
+	## are read off the actor's state by whoever owns it, not chosen per shot.
+	var wound_penalty := 0
+	var defender_wound_penalty := 0
 
 	func _init(
 		p_attacker_id: String,
@@ -210,7 +214,12 @@ static func resolve_attack(
 		int(RULES["excellent_quality_attack_bonus"]) if request.weapon.quality == "excellent" else 0
 	)
 	var attack_total: int = (
-		request.attack_base + request.modifiers + aimed_modifier + quality_modifier + check_total
+		request.attack_base
+		+ request.modifiers
+		+ aimed_modifier
+		+ quality_modifier
+		+ request.wound_penalty
+		+ check_total
 	)
 
 	if (
@@ -238,18 +247,26 @@ static func resolve_attack(
 	else:
 		defense_kind = "evasion"
 		var defense_roll := Dice.roll_check(rng)
-		defense = request.defender_evasion_base + int(defense_roll["total"])
+		defense = (
+			request.defender_evasion_base
+			+ request.defender_wound_penalty
+			+ int(defense_roll["total"])
+		)
 		defense_card = "Defense %d (evasion)" % defense
+		if request.defender_wound_penalty != 0:
+			defense_card += ", wounds %d" % request.defender_wound_penalty
 
 	var attack_card := (
 		"Attack: base %d + d10 %d + modifiers %d = %d"
 		% [
 			request.attack_base,
 			check_total,
-			request.modifiers + aimed_modifier + quality_modifier,
+			request.modifiers + aimed_modifier + quality_modifier + request.wound_penalty,
 			attack_total,
 		]
 	)
+	if request.wound_penalty != 0:
+		attack_card += " (wounds %d)" % request.wound_penalty
 
 	result.attack_rolls = check_rolls
 	result.attack_total = attack_total
@@ -367,6 +384,15 @@ static func resolve_attack(
 	if request.target.hp > serious_threshold and serious_threshold >= new_hp:
 		events.append({"kind": "seriously_wounded", "target_id": request.target.target_id})
 	if new_hp <= 0:
+		# Dropping to zero a second time re-arms the save, which is how a
+		# stabilised character who is shot again goes back on the clock.
+		events.append(
+			{
+				"kind": "wound_state_set",
+				"target_id": request.target.target_id,
+				"state": "mortally_wounded",
+			}
+		)
 		events.append({"kind": "death_save_due", "target_id": request.target.target_id})
 
 	card_lines.append("Armor: %d - SP %d = %d" % [raw_damage, armor_sp, after_armor])
