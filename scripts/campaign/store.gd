@@ -33,6 +33,7 @@ var status := ""
 
 var active_location_id := ""
 var active_character_id := ""
+var active_architecture_id := ""
 var _month_undo: Array[Dictionary] = []
 var _month_redo: Array[Dictionary] = []
 var _player_view: Dictionary = {}
@@ -146,6 +147,7 @@ func close() -> void:
 	dirty = false
 	active_location_id = ""
 	active_character_id = ""
+	active_architecture_id = ""
 	_month_undo.clear()
 	_month_redo.clear()
 
@@ -586,6 +588,38 @@ func add_cover(cover: Dictionary) -> void:
 
 func _ensure_areas() -> void:
 	CampaignSchema.migrate_areas(campaign)
+
+
+func architectures() -> Array:
+	CampaignSchema.ensure_architectures(campaign)
+	return campaign["architectures"]
+
+
+func architecture_by_id(id: String) -> Dictionary:
+	return CampaignSchema.architecture_by_id(campaign, id)
+
+
+func add_architecture(architecture: Dictionary) -> void:
+	architectures().append(architecture)
+	active_architecture_id = String(architecture["id"])
+	mark_dirty()
+
+
+func remove_architecture(id: String) -> bool:
+	if not CampaignSchema.remove_architecture(campaign, id):
+		return false
+	if active_architecture_id == id:
+		active_architecture_id = ""
+	mark_dirty()
+	return true
+
+
+func active_architecture() -> Dictionary:
+	var found := architecture_by_id(active_architecture_id)
+	if not found.is_empty():
+		return found
+	var all := architectures()
+	return all[0] if not all.is_empty() else {}
 
 
 func areas() -> Array:

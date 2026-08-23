@@ -11,6 +11,7 @@ const ForgeScreen := preload("res://scripts/screens/forge.gd")
 const MarketScreen := preload("res://scripts/screens/market.gd")
 const ItemWorkshopScreen := preload("res://scripts/screens/item_workshop.gd")
 const AssistantScreen := preload("res://scripts/screens/assistant.gd")
+const NetrunScreen := preload("res://scripts/screens/netrun.gd")
 const PlayerDisplayScreen := preload("res://scripts/screens/player_display.gd")
 
 const SCREENS := [
@@ -18,6 +19,7 @@ const SCREENS := [
 	{"id": "workshop", "label": "Item Workshop"},
 	{"id": "city", "label": "City"},
 	{"id": "location", "label": "Location"},
+	{"id": "netrun", "label": "Netrun"},
 	{"id": "forge", "label": "Forge"},
 	{"id": "market", "label": "Market"},
 	{"id": "night_market", "label": "Night Market"},
@@ -163,6 +165,8 @@ func _show(screen_id: String) -> void:
 			_screen = CityScreen.new()
 		"location":
 			_screen = LocationScreen.new()
+		"netrun":
+			_screen = NetrunScreen.new()
 		"forge":
 			_screen = ForgeScreen.new()
 		"market":

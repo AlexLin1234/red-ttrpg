@@ -77,6 +77,10 @@ func _ready() -> void:
 	await _shoot("1c-location")
 	await _drive_combat(app)
 
+	app.call("_show", "netrun")
+	await _settle(30)
+	await _drive_netrun(app)
+
 	app.call("_show", "forge")
 	await _settle(30)
 	await _shoot("1d-forge")
@@ -345,6 +349,52 @@ func _drive_player_display(app: Control, screen: Node) -> void:
 	if not ids.is_empty():
 		screen.call("set_unit_hidden", ids[ids.size() - 1], false)
 	await _settle(6)
+
+
+## Roll an architecture and walk the first two floors of it, which is the whole
+## loop: a door, then whatever was waiting behind it.
+func _drive_netrun(app: Control) -> void:
+	var screen: Node = app.get("_screen")
+	if screen == null or not screen.has_method("jack_in"):
+		_errors.append("netrun screen did not expose the run path")
+		return
+
+	screen.call("generate_architecture", "standard")
+	await _settle(12)
+	if Store.architectures().is_empty():
+		_errors.append("rolling an architecture did not add one to the campaign")
+		return
+	await _shoot("1g-architecture")
+
+	var netrunner := ""
+	for character in Store.characters():
+		if String((character as Dictionary).get("role", "")).to_lower() == "netrunner":
+			netrunner = String((character as Dictionary)["id"])
+	if netrunner == "":
+		_errors.append("the demo campaign has no Netrunner to run with")
+		return
+
+	screen.call("jack_in", netrunner, 6)
+	await _settle(12)
+	screen.call("perform", "pathfinder", "")
+	await _settle(8)
+	screen.call("perform", "move", "")
+	await _settle(8)
+	screen.call("perform", "backdoor", "")
+	await _settle(12)
+	await _shoot("1g-netrun")
+
+	var snapshot: Dictionary = screen.get("_snapshot")
+	if snapshot.is_empty():
+		_errors.append("the run produced no snapshot")
+		return
+	var runner: Dictionary = snapshot["runner"]
+	if int(runner["level"]) != 1:
+		_errors.append("the runner did not reach the first floor")
+	if int(runner["actions_left"]) != 3:
+		_errors.append(
+			"three NET Actions should have been spent, %d left of 6" % int(runner["actions_left"])
+		)
 
 
 func _settle(frames: int) -> void:

@@ -20,6 +20,17 @@ static func _weapon(actor: Dictionary, name: String) -> Dictionary:
 	return weapons[name]
 
 
+static func _runner(state: Dictionary) -> Dictionary:
+	assert(state.has("runner"), "this state carries no netrunner")
+	return state["runner"]
+
+
+static func _floor(state: Dictionary, floor_id: String) -> Dictionary:
+	var floors: Dictionary = state.get("floors", {})
+	assert(floors.has(floor_id), "unknown floor: %s" % floor_id)
+	return floors[floor_id]
+
+
 ## Apply one event in place and return the event that undoes it.
 static func _apply_one(state: Dictionary, event: Dictionary) -> Dictionary:
 	var kind := String(event.get("kind", ""))
@@ -47,6 +58,109 @@ static func _apply_one(state: Dictionary, event: Dictionary) -> Dictionary:
 			"actor_id": event["actor_id"],
 			"weapon": event["weapon"],
 		}
+
+	# -- netrun --------------------------------------------------------------
+	#
+	# A run is not a fight, but it wants the same thing a fight wants: an undo
+	# that is a real inverse rather than a restored snapshot. These kinds reuse
+	# this machinery over a state of {"floors", "runner"} rather than {"actors"},
+	# which is why they are answered before the actor lookup below.
+	if kind == "netrun_moved":
+		var runner := _runner(state)
+		var previous_floor := String(runner.get("floor_id", ""))
+		var previous_level := int(runner.get("level", 0))
+		runner["floor_id"] = String(event["floor_id"])
+		runner["level"] = int(event["level"])
+		return {
+			"kind": "netrun_moved", "floor_id": previous_floor, "level": previous_level
+		}
+
+	if kind == "net_action_spent" or kind == "net_action_restored":
+		var runner := _runner(state)
+		var amount := int(event["amount"])
+		var previous := int(runner.get("actions_left", 0))
+		var next: int = (
+			maxi(0, previous - amount) if kind == "net_action_spent" else previous + amount
+		)
+		runner["actions_left"] = next
+		var actual: int = previous - next if kind == "net_action_spent" else next - previous
+		return {
+			"kind": "net_action_restored" if kind == "net_action_spent" else "net_action_spent",
+			"amount": actual,
+		}
+
+	if kind == "floor_state_set":
+		var floor_entry := _floor(state, String(event["floor_id"]))
+		var previous := String(floor_entry.get("state", "intact"))
+		floor_entry["state"] = String(event["state"])
+		return {"kind": "floor_state_set", "floor_id": event["floor_id"], "state": previous}
+
+	if kind == "floor_revealed" or kind == "floor_concealed":
+		var floor_entry := _floor(state, String(event["floor_id"]))
+		var previous := bool(floor_entry.get("revealed", false))
+		floor_entry["revealed"] = kind == "floor_revealed"
+		return {
+			"kind": "floor_revealed" if previous else "floor_concealed",
+			"floor_id": event["floor_id"],
+		}
+
+	if kind == "ice_damaged" or kind == "ice_repaired":
+		var floor_entry := _floor(state, String(event["floor_id"]))
+		var amount := int(event["amount"])
+		var previous := int(floor_entry.get("rez", 0))
+		var ceiling := int(floor_entry.get("max_rez", previous))
+		var next: int = (
+			maxi(0, previous - amount) if kind == "ice_damaged" else mini(ceiling, previous + amount)
+		)
+		floor_entry["rez"] = next
+		var actual: int = previous - next if kind == "ice_damaged" else next - previous
+		return {
+			"kind": "ice_repaired" if kind == "ice_damaged" else "ice_damaged",
+			"floor_id": event["floor_id"],
+			"amount": actual,
+		}
+
+	if kind == "runner_damaged" or kind == "runner_healed":
+		var runner := _runner(state)
+		var amount := int(event["amount"])
+		var previous := int(runner.get("hp", 0))
+		var next: int = (
+			previous - amount
+			if kind == "runner_damaged"
+			else mini(int(runner.get("max_hp", previous)), previous + amount)
+		)
+		runner["hp"] = next
+		var actual: int = previous - next if kind == "runner_damaged" else next - previous
+		return {
+			"kind": "runner_healed" if kind == "runner_damaged" else "runner_damaged",
+			"amount": actual,
+		}
+
+	if kind == "trace_advanced" or kind == "trace_reduced":
+		var runner := _runner(state)
+		var amount := int(event["amount"])
+		var previous := int(runner.get("trace", 0))
+		var next: int = (
+			previous + amount if kind == "trace_advanced" else maxi(0, previous - amount)
+		)
+		runner["trace"] = next
+		var actual: int = next - previous if kind == "trace_advanced" else previous - next
+		return {
+			"kind": "trace_reduced" if kind == "trace_advanced" else "trace_advanced",
+			"amount": actual,
+		}
+
+	if kind == "alert_raised" or kind == "alert_cleared":
+		var runner := _runner(state)
+		var previous := bool(runner.get("alerted", false))
+		runner["alerted"] = kind == "alert_raised"
+		return {"kind": "alert_raised" if previous else "alert_cleared"}
+
+	if kind == "runner_jacked_out" or kind == "runner_jacked_in":
+		var runner := _runner(state)
+		var previous := bool(runner.get("jacked_out", false))
+		runner["jacked_out"] = kind == "runner_jacked_out"
+		return {"kind": "runner_jacked_out" if previous else "runner_jacked_in"}
 
 	var target := _actor(state, String(event.get("target_id", "")))
 
