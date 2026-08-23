@@ -38,6 +38,9 @@ var active_vehicle_id := ""
 var _month_undo: Array[Dictionary] = []
 var _month_redo: Array[Dictionary] = []
 var _player_view: Dictionary = {}
+## Bumped on every edit. Screens are kept alive between visits, and this is how
+## one of them knows whether what it drew is still what the campaign says.
+var edit_revision := 0
 
 
 func is_open() -> bool:
@@ -118,6 +121,7 @@ func open(save_path: String) -> bool:
 	# from, so neither stack survives a change of campaign.
 	_month_undo.clear()
 	_month_redo.clear()
+	edit_revision += 1
 	# Never carry one campaign's board onto the table's screen while another one
 	# is being opened.
 	publish_player_view({})
@@ -139,6 +143,7 @@ func player_view() -> Dictionary:
 
 
 func close() -> void:
+	edit_revision += 1
 	publish_player_view({})
 	path = ""
 	manifest = {}
@@ -156,6 +161,7 @@ func close() -> void:
 
 func mark_dirty() -> void:
 	dirty = true
+	edit_revision += 1
 	campaign_changed.emit()
 
 

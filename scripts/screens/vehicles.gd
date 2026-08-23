@@ -550,6 +550,12 @@ func commit_damage() -> void:
 # -- refresh ----------------------------------------------------------------------
 
 
+## The app keeps this screen alive between visits, so it catches itself up on
+## the campaign as it stands rather than being rebuilt.
+func on_shown() -> void:
+	_refresh()
+
+
 func _refresh() -> void:
 	_refresh_garage()
 	_refresh_road()

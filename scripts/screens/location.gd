@@ -40,6 +40,7 @@ var _hint_label: Label
 var _header_label: Label
 var _undo_button: Button
 var _end_turn_button: Button
+var _location_id := ""
 
 
 func _ready() -> void:
@@ -71,7 +72,40 @@ func _ready() -> void:
 	_refresh()
 
 
+## The app keeps this screen alive between visits, which is the whole point
+## here: a GM who looks a price up in the Market comes back to the fight they
+## left rather than to a board that has never been rolled.
+##
+## So the encounter is deliberately not rebuilt. Only what can go stale without
+## it is: the palette, the cover blocks (a car may have been added to the garage
+## since), and the tokens.
+func on_shown() -> void:
+	if _viewport != null:
+		_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	var location := Store.active_location()
+	if location.is_empty() or _board == null:
+		return
+	_rebuild_palette()
+	_board.set_location(location, Store.cover_palette())
+	_sync_units()
+	_refresh()
+
+
+## A three-dimensional board redrawn every frame behind a screen nobody is
+## looking at is pure heat.
+func on_hidden() -> void:
+	if _viewport != null:
+		_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+
+
+## A different board entirely shares nothing with this one — not the deck, not
+## the units, and certainly not the fight — so it is built again from scratch.
+func wants_rebuild() -> bool:
+	return String(Store.active_location().get("id", "")) != _location_id
+
+
 func _build_encounter(location: Dictionary) -> void:
+	_location_id = String(location.get("id", ""))
 	var actors := {}
 	for unit in location.get("units", []):
 		var entry: Dictionary = unit
@@ -247,7 +281,11 @@ func spawn_squad(squad_key: String, count := 0) -> Array:
 		placed.append(unit)
 
 	Store.mark_dirty()
-	_build_encounter(location)
+	var joining := {}
+	for unit in placed:
+		joining[String((unit as Dictionary)["id"])] = String((unit as Dictionary)["character_id"])
+	if not joining.is_empty():
+		_join_encounter(location, joining)
 	_board.set_location(location, Store.cover_palette())
 	_sync_units()
 	_message = "%d %s on the deck." % [
@@ -480,22 +518,43 @@ func _place(cell: Dictionary) -> void:
 				}
 			)
 		"units":
+			var unit_id := "unit-%d" % Time.get_ticks_usec()
 			(location["units"] as Array).append(
 				{
-					"id": "unit-%d" % Time.get_ticks_usec(),
+					"id": unit_id,
 					"character_id": id,
 					"x": cell["x"],
 					"z": cell["z"],
 					"layer": cell.get("layer", 0),
 				}
 			)
-			_build_encounter(location)
+			_join_encounter(location, {unit_id: id})
 
 	Store.mark_dirty()
 	_board.set_location(location, Store.cover_palette())
 	_sync_units()
 	_message = "Placed."
 	_refresh()
+
+
+## Put newly placed units into the fight rather than starting a new one.
+##
+## Rebuilding the encounter was how a placed unit used to reach it, which threw
+## away the round, the initiative order and every undo step with it. A squad
+## arriving mid-fight is reinforcements, not a new fight.
+func _join_encounter(location: Dictionary, units: Dictionary) -> void:
+	if _encounter == null:
+		_build_encounter(location)
+		return
+	var actors := {}
+	for unit_id in units:
+		var character := Store.character_by_id(String(units[unit_id]))
+		if not character.is_empty():
+			actors[String(unit_id)] = CampaignFixtures.actor_input(character)
+	if actors.is_empty():
+		return
+	_encounter.add_actors(actors)
+	_snapshot = _encounter.snapshot()
 
 
 func _move_unit(unit_id: String, cell: Dictionary, commit := true) -> void:

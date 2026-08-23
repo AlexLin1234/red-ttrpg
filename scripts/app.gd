@@ -30,6 +30,8 @@ const SCREENS := [
 
 var _current := "library"
 var _nav_buttons: Dictionary = {}
+var _screens: Dictionary = {}
+var _screen_revisions: Dictionary = {}
 var _content: Control
 var _screen: Control
 var _title_label: Label
@@ -150,6 +152,18 @@ func _build_header() -> Control:
 	return bar
 
 
+## Show a screen, building it the first time and keeping it afterwards.
+##
+## Screens used to be freed and reconstructed on every press of the nav bar,
+## which threw away scroll position, selection, the City's pan and zoom, the
+## Assistant's answer, and — worst of it — a fight in progress, so a GM who
+## looked something up in the Market came back to an encounter that had never
+## happened. They are kept alive and hidden instead.
+##
+## A kept screen can go stale, so each one is offered the chance to catch up:
+## [code]wants_rebuild()[/code] says it cannot, [code]on_shown()[/code] says how
+## it does, and a screen with neither is rebuilt whenever the campaign has been
+## edited since it was last drawn.
 func _show(screen_id: String) -> void:
 	# The Assistant opens without a campaign so its library and key can be set up
 	# before the first save exists; its Ask tab is the part that needs one.
@@ -159,43 +173,97 @@ func _show(screen_id: String) -> void:
 	for id in _nav_buttons:
 		(_nav_buttons[id] as Button).button_pressed = id == screen_id
 
-	if is_instance_valid(_screen):
-		_screen.queue_free()
+	if is_instance_valid(_screen) and _screen != _screens.get(screen_id):
+		_screen.visible = false
+		if _screen.has_method("on_hidden"):
+			_screen.call("on_hidden")
+
+	var cached: Control = _screens.get(screen_id)
+	if is_instance_valid(cached) and _is_stale(screen_id, cached):
+		_forget(screen_id)
+		cached = null
+
+	if not is_instance_valid(cached):
+		cached = _build_screen(screen_id)
+		cached.set_anchors_preset(Control.PRESET_FULL_RECT)
+		cached.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		cached.grow_vertical = Control.GROW_DIRECTION_BOTH
+		_screens[screen_id] = cached
+		_content.add_child(cached)
+	elif cached.has_method("on_shown"):
+		cached.call("on_shown")
+
+	cached.visible = true
+	_screen_revisions[screen_id] = Store.edit_revision
+	_screen = cached
+	_refresh_header()
+
+
+## Whether a kept screen has to be thrown away rather than caught up.
+func _is_stale(screen_id: String, screen: Control) -> bool:
+	if screen.has_method("wants_rebuild") and bool(screen.call("wants_rebuild")):
+		return true
+	if int(_screen_revisions.get(screen_id, -1)) == Store.edit_revision:
+		return false
+	# Nothing has changed for a screen that can catch itself up.
+	return not screen.has_method("on_shown")
+
+
+func _forget(screen_id: String) -> void:
+	var screen: Control = _screens.get(screen_id)
+	if is_instance_valid(screen):
+		# queue_free defers to the end of the frame, so a screen being replaced
+		# by its own rebuild would draw underneath it for one frame.
+		screen.visible = false
+		screen.queue_free()
+	_screens.erase(screen_id)
+	_screen_revisions.erase(screen_id)
+
+
+## Throw every kept screen away.
+##
+## A screen built against one campaign must never be shown for another, so this
+## runs whenever the open campaign changes rather than being reasoned about
+## screen by screen.
+func _drop_screens() -> void:
+	for id in _screens.keys():
+		_forget(String(id))
+	_screen = null
+
+
+func _build_screen(screen_id: String) -> Control:
 	match screen_id:
 		"library":
-			_screen = LibraryScreen.new()
+			return LibraryScreen.new()
 		"workshop":
-			_screen = ItemWorkshopScreen.new()
+			return ItemWorkshopScreen.new()
 		"city":
-			_screen = CityScreen.new()
+			return CityScreen.new()
 		"location":
-			_screen = LocationScreen.new()
+			return LocationScreen.new()
 		"netrun":
-			_screen = NetrunScreen.new()
+			return NetrunScreen.new()
 		"vehicles":
-			_screen = VehiclesScreen.new()
+			return VehiclesScreen.new()
 		"forge":
-			_screen = ForgeScreen.new()
+			return ForgeScreen.new()
 		"market":
-			_screen = MarketScreen.new()
+			return MarketScreen.new()
 		"night_market":
-			_screen = MarketScreen.new()
-			_screen.set("night", true)
+			var night := MarketScreen.new()
+			night.set("night", true)
+			return night
 		"assistant":
-			_screen = AssistantScreen.new()
+			return AssistantScreen.new()
 		_:
-			_screen = Control.new()
-	_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_screen.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_screen.grow_vertical = Control.GROW_DIRECTION_BOTH
-	_content.add_child(_screen)
-	_refresh_header()
+			return Control.new()
 
 
 func _on_campaign_opened() -> void:
 	# Never carry private GM material visibly from one opened save into another.
 	if is_instance_valid(_gm_window):
 		_gm_window.hide()
+	_drop_screens()
 	_gm_notes_campaign_path = ""
 	_show("city")
 

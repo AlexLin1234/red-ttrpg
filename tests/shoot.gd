@@ -331,6 +331,38 @@ func _drive_combat(app: Control) -> void:
 	await _drive_condition(screen)
 	await _drive_player_display(app, screen)
 	await _drive_spawn(screen)
+	await _drive_screen_cache(app)
+
+
+## The fight has to survive the GM looking something up.
+##
+## This is the whole point of keeping screens alive between visits, so it is
+## checked rather than assumed: leave mid-encounter, come back, and the round
+## number and the initiative order are still the ones that were rolled.
+func _drive_screen_cache(app: Control) -> void:
+	var before: Node = app.get("_screen")
+	var round_before: int = int((before.get("_snapshot") as Dictionary).get("round", 0))
+	if round_before <= 0:
+		_errors.append("expected an encounter in progress before leaving the screen")
+		return
+
+	app.call("_show", "market")
+	await _settle(12)
+	app.call("_show", "location")
+	await _settle(12)
+
+	var after: Node = app.get("_screen")
+	if after != before:
+		_errors.append("the location screen was rebuilt rather than kept")
+		return
+	var snapshot: Dictionary = after.get("_snapshot")
+	if int(snapshot.get("round", 0)) != round_before:
+		_errors.append(
+			"the fight did not survive the trip: round %d became %d"
+			% [round_before, int(snapshot.get("round", 0))]
+		)
+	if (snapshot.get("initiative", []) as Array).is_empty():
+		_errors.append("the initiative order did not survive the trip")
 
 
 ## An ambush arrives as one click rather than a dozen trips to the Forge.

@@ -59,6 +59,23 @@ static func _apply_one(state: Dictionary, event: Dictionary) -> Dictionary:
 			"weapon": event["weapon"],
 		}
 
+	# Reinforcements. Recorded rather than dropped straight into the state, so
+	# undoing the arrival of a squad removes it again.
+	if kind == "actor_added" or kind == "actor_removed":
+		var actors: Dictionary = state["actors"]
+		var actor_id := String(event["actor_id"])
+		if kind == "actor_added":
+			actors[actor_id] = (event["actor"] as Dictionary).duplicate(true)
+			return {
+				"kind": "actor_removed",
+				"actor_id": actor_id,
+				"actor": (event["actor"] as Dictionary).duplicate(true),
+			}
+		assert(actors.has(actor_id), "unknown actor: %s" % actor_id)
+		var previous: Dictionary = (actors[actor_id] as Dictionary).duplicate(true)
+		actors.erase(actor_id)
+		return {"kind": "actor_added", "actor_id": actor_id, "actor": previous}
+
 	# -- netrun --------------------------------------------------------------
 	#
 	# A run is not a fight, but it wants the same thing a fight wants: an undo

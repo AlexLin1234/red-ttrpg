@@ -196,6 +196,69 @@ func end_turn() -> void:
 	revision += 1
 
 
+## Bring actors into a fight that is already running.
+##
+## Recorded through the session rather than dropped into the state, so undo
+## takes the reinforcements away again. Anyone arriving after initiative was
+## rolled goes to the back of the order: they came in late.
+func add_actors(actors: Dictionary) -> void:
+	assert(not actors.is_empty(), "nothing to add")
+	var added: Array[Dictionary] = []
+	var arrivals: Array[String] = []
+	for actor_id in actors:
+		var id := String(actor_id)
+		if has_actor(id):
+			continue
+		added.append(
+			{"kind": "actor_added", "actor_id": id, "actor": _normalise_actor(id, actors[actor_id])}
+		)
+		arrivals.append(id)
+	if added.is_empty():
+		return
+
+	session.record({"kind": "reinforce", "actor_ids": arrivals}, added)
+	revision += 1
+	events = added.duplicate(true)
+
+	if round_number > 0:
+		for id in arrivals:
+			var entry := actor(id)
+			var stats: Dictionary = entry.get("stats", {})
+			var ref := int(entry.get("ref", stats.get("REF", 0)))
+			var roll := Dice.roll_check(_rng)
+			initiative.append(
+				{
+					"actor_id": id,
+					"name": String(entry["name"]),
+					"score": ref + int(roll["total"]),
+					"roll": int(roll["total"]),
+					"ref": ref,
+				}
+			)
+
+	card = {
+		"kind": "reinforce",
+		"title": "REINFORCEMENTS",
+		"lines": PackedStringArray(["%d arrived." % arrivals.size()]),
+		"tone": "neutral",
+	}
+
+
+## Drop initiative rows for actors the state no longer has.
+##
+## Undoing past the arrival of a squad removes the actors; the order they were
+## appended to is not part of the reversible state, so it is reconciled here.
+func _prune_initiative() -> void:
+	var kept: Array[Dictionary] = []
+	for entry in initiative:
+		if has_actor(String((entry as Dictionary)["actor_id"])):
+			kept.append(entry)
+	if kept.size() == initiative.size():
+		return
+	initiative = kept
+	turn_index = clampi(turn_index, 0, maxi(0, initiative.size() - 1))
+
+
 func _note_action(actor_id: String, action: String) -> void:
 	if not actions_taken.has(actor_id):
 		actions_taken[actor_id] = []
@@ -529,6 +592,7 @@ func undo() -> void:
 	assert(can_undo(), "nothing to undo")
 	var inverse := session.log[session.log.size() - 1].inverse.duplicate(true)
 	session.undo()
+	_prune_initiative()
 	revision += 1
 	card = {
 		"kind": "undo",
@@ -544,6 +608,7 @@ func redo() -> void:
 	assert(can_redo(), "nothing to redo")
 	var replayed := session.redo_log[session.redo_log.size() - 1].events.duplicate(true)
 	session.redo()
+	_prune_initiative()
 	revision += 1
 	card = {
 		"kind": "redo",
