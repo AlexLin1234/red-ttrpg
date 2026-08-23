@@ -863,8 +863,8 @@ func _build_gear_tab(body: VBoxContainer, character: Dictionary) -> void:
 	var lifestyle_row := UI.hbox(UI.GAP_2)
 	var picker := OptionButton.new()
 	UI.expand(picker, true, false)
-	for index in Lifestyle.CATALOG.size():
-		var entry: Dictionary = Lifestyle.CATALOG[index]
+	for index in Lifestyle.catalog().size():
+		var entry: Dictionary = Lifestyle.catalog()[index]
 		picker.add_item("%s · %deb/month" % [entry["label"], entry["cost"]])
 		picker.set_item_metadata(index, entry["key"])
 		if String(entry["key"]) == String(character["lifestyle"]):

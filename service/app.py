@@ -13,7 +13,27 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-LIFESTYLES = {"kibble": 100, "generic_prepak": 300, "good_prepak": 600, "fresh_food": 1500}
+
+def _lifestyle_table() -> tuple[dict[str, int], int]:
+    """Read the one Lifestyle table both implementations bill from.
+
+    The GDScript app closes the same month as this endpoint does, and the two
+    used to carry separate copies of these numbers. They read one file now, and
+    data/lifestyle_cases.json is checked by both suites, so a change that
+    reaches only one of them fails rather than drifting quietly.
+    """
+
+    path = Path(__file__).resolve().parent.parent / "data" / "lifestyle.json"
+    fallback = {"kibble": 100, "generic_prepak": 300, "good_prepak": 600, "fresh_food": 1500}
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return fallback, 7
+    costs = {str(row["key"]): int(row["cost"]) for row in document.get("catalog", []) if isinstance(row, dict)}
+    return costs or fallback, int(document.get("grace_days", 7))
+
+
+LIFESTYLES, GRACE_DAYS = _lifestyle_table()
 MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 STATE_PATH = Path(os.getenv("REDLINE_STATE", "/data/campaign.json"))
 app = FastAPI(title="Redline campaign API")
@@ -144,10 +164,10 @@ async def month_end(request: MonthEnd) -> dict:
                 character.update(
                     lifestyle_status="unpaid",
                     lifestyle_balance_due=cost,
-                    lifestyle_grace_days=7,
+                    lifestyle_grace_days=GRACE_DAYS,
                     last_lifestyle_charge=0,
                 )
-                warnings.append(f"{character['name']}: payment failed; seven-day grace period started")
+                warnings.append(f"{character['name']}: payment failed; {GRACE_DAYS}-day grace period started")
             results.append(
                 {
                     "character_id": character["id"],

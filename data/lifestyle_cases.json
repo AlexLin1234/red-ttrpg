@@ -1,0 +1,54 @@
+{
+  "_comment": "Conformance cases for the month-end close, run by both implementations: tests/test_lifestyle.gd against Lifestyle.settle, and tests/service/test_month_end.py against the FastAPI endpoint. A rule change that reaches only one of them fails here.",
+  "billed_month": "2045-10",
+  "cases": [
+    {
+      "name": "a character who can cover it pays and is marked paid through",
+      "character": {"id": "spike", "name": "Spike", "lifestyle": "good_prepak", "cash": 2000},
+      "expect": {
+        "cash": 1400,
+        "status": "paid",
+        "deducted": 600,
+        "balance_due": 0,
+        "grace_days": 0,
+        "paid_through": "2045-10"
+      }
+    },
+    {
+      "name": "exactly enough is still enough",
+      "character": {"id": "mira", "name": "Mira", "lifestyle": "kibble", "cash": 100},
+      "expect": {
+        "cash": 0,
+        "status": "paid",
+        "deducted": 100,
+        "balance_due": 0,
+        "grace_days": 0,
+        "paid_through": "2045-10"
+      }
+    },
+    {
+      "name": "one eurobuck short never goes negative, and starts the grace period",
+      "character": {"id": "doc", "name": "Doc", "lifestyle": "fresh_food", "cash": 1499},
+      "expect": {
+        "cash": 1499,
+        "status": "unpaid",
+        "deducted": 0,
+        "balance_due": 1500,
+        "grace_days": 7,
+        "paid_through": null
+      }
+    },
+    {
+      "name": "no cash at all is the same rule, not a special case",
+      "character": {"id": "brick", "name": "Brick", "lifestyle": "generic_prepak", "cash": 0},
+      "expect": {
+        "cash": 0,
+        "status": "unpaid",
+        "deducted": 0,
+        "balance_due": 300,
+        "grace_days": 7,
+        "paid_through": null
+      }
+    }
+  ]
+}
