@@ -203,9 +203,7 @@ def test_a_question_longer_than_the_limit_is_rejected_before_any_request(answeri
     client, library = answering
     core = next(book for book in library.books() if book.filename == "Core Rules.pdf")
 
-    response = client.post(
-        "/ask", json={"question": "a" * 5_000, "book_ids": [core.book_id]}
-    )
+    response = client.post("/ask", json={"question": "a" * 5_000, "book_ids": [core.book_id]})
 
     assert response.status_code == 422
 
@@ -231,9 +229,7 @@ def test_the_library_answers_while_a_book_is_being_indexed(make_pdf, monkeypatch
     app = create_app(TOKEN, library=library)
     with TestClient(app) as client:
         client.headers.update({TOKEN_HEADER: TOKEN})
-        imported = client.post(
-            "/library/import", json={"path": str(make_pdf("Core Rules.pdf", [ARMOR_RULE]))}
-        )
+        imported = client.post("/library/import", json={"path": str(make_pdf("Core Rules.pdf", [ARMOR_RULE]))})
         assert imported.status_code == 200, imported.text
         assert started.wait(timeout=10), "indexing never began"
 
@@ -258,6 +254,4 @@ def test_the_library_answers_while_a_book_is_being_indexed(make_pdf, monkeypatch
 
     assert in_time, "/library did not answer while a book was being indexed"
     assert answered["response"].status_code == 200
-    assert [book["filename"] for book in answered["response"].json()["books"]] == [
-        "Core Rules.pdf"
-    ]
+    assert [book["filename"] for book in answered["response"].json()["books"]] == ["Core Rules.pdf"]

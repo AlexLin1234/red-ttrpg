@@ -143,8 +143,12 @@ def test_passage_text_is_delivered_as_quarantined_reference_material(books, make
 
     answer = assistant.ask("What does the override passage say?", [book])
 
-    blocks = [block for message in client.requests[-1]["messages"]
-              if isinstance(message["content"], list) for block in message["content"]]
+    blocks = [
+        block
+        for message in client.requests[-1]["messages"]
+        if isinstance(message["content"], list)
+        for block in message["content"]
+    ]
     tool_result = next(block["content"] for block in blocks if block["type"] == "tool_result")
     assert prompts.TOOL_RESULT_PREAMBLE in tool_result
     assert '<passage id="c1">' in tool_result
@@ -208,15 +212,14 @@ def test_transport_failures_become_codes_the_setup_tab_can_act_on(books):
         "invalid_key": anthropic.AuthenticationError(
             "invalid x-api-key", response=httpx.Response(401, request=request), body=None
         ),
-        "rate_limited": anthropic.RateLimitError(
-            "slow down", response=httpx.Response(429, request=request), body=None
-        ),
+        "rate_limited": anthropic.RateLimitError("slow down", response=httpx.Response(429, request=request), body=None),
         "offline": anthropic.APIConnectionError(request=request),
         "service_error": anthropic.InternalServerError(
             "boom", response=httpx.Response(500, request=request), body=None
         ),
     }
     for code, exception in cases.items():
+
         class Exploding:
             def create(self, **_kwargs):
                 # The rule below fires on late binding, which cannot happen

@@ -1,4 +1,5 @@
 """Small persistent campaign API for cloud-hosted Redline sessions."""
+
 from __future__ import annotations
 
 import asyncio
@@ -132,24 +133,43 @@ async def month_end(request: MonthEnd) -> dict:
             paid = character["cash"] >= cost
             if paid:
                 character["cash"] -= cost
-                character.update(lifestyle_status="paid", lifestyle_paid_through=billed,
-                                 lifestyle_balance_due=0, lifestyle_grace_days=0,
-                                 last_lifestyle_charge=cost)
+                character.update(
+                    lifestyle_status="paid",
+                    lifestyle_paid_through=billed,
+                    lifestyle_balance_due=0,
+                    lifestyle_grace_days=0,
+                    last_lifestyle_charge=cost,
+                )
             else:
-                character.update(lifestyle_status="unpaid", lifestyle_balance_due=cost,
-                                 lifestyle_grace_days=7, last_lifestyle_charge=0)
+                character.update(
+                    lifestyle_status="unpaid",
+                    lifestyle_balance_due=cost,
+                    lifestyle_grace_days=7,
+                    last_lifestyle_charge=0,
+                )
                 warnings.append(f"{character['name']}: payment failed; seven-day grace period started")
-            results.append({"character_id": character["id"], "name": character["name"],
-                            "deducted": cost if paid else 0, "balance_due": 0 if paid else cost,
-                            "status": "paid" if paid else "unpaid"})
+            results.append(
+                {
+                    "character_id": character["id"],
+                    "name": character["name"],
+                    "deducted": cost if paid else 0,
+                    "balance_due": 0 if paid else cost,
+                    "status": "paid" if paid else "unpaid",
+                }
+            )
         state["closed_months"].append(request.month)
         state["current_month"] = billed
         state["undo"].append(before)
         state["redo"] = []
         save(state)
         await broadcast(state)
-        return {"closed_month": request.month, "new_month": billed, "results": results,
-                "total_deducted": sum(item["deducted"] for item in results), "warnings": warnings}
+        return {
+            "closed_month": request.month,
+            "new_month": billed,
+            "results": results,
+            "total_deducted": sum(item["deducted"] for item in results),
+            "warnings": warnings,
+        }
 
 
 @app.post("/encounter/month-end/undo")

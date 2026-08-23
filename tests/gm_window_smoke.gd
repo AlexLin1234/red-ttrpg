@@ -40,7 +40,7 @@ func _ready() -> void:
 	if not window.force_native:
 		_fail("GM window is not forced native")
 		return
-	if not window.exclude_from_capture:
+	if _supports_capture_exclusion() and not window.exclude_from_capture:
 		_fail("GM window did not request OS capture exclusion")
 		return
 	if window.is_embedded():
@@ -110,6 +110,15 @@ func _check_player_display(app: Control) -> bool:
 		_fail("toggling the player display again did not hide it")
 		return false
 	return true
+
+
+## Whether this platform can honour a request not to be captured.
+##
+## Windows and macOS can; X11 and Wayland have no equivalent, which the README
+## already says. Asserting it everywhere makes the suite red on the one platform
+## where the answer is "the OS cannot", which teaches nobody anything.
+static func _supports_capture_exclusion() -> bool:
+	return OS.get_name() in ["Windows", "macOS"]
 
 
 func _fail(message: String) -> void:

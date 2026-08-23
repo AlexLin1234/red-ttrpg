@@ -67,7 +67,7 @@ func _ready() -> void:
 	else:
 		if not gm_window.force_native:
 			_errors.append("GM Notes / Beats window was not forced native")
-		if not gm_window.exclude_from_capture:
+		if _supports_capture_exclusion() and not gm_window.exclude_from_capture:
 			_errors.append("GM Notes / Beats did not request capture exclusion")
 		if gm_window.is_embedded():
 			_errors.append("GM Notes / Beats was still embedded in the streamed viewport")
@@ -613,6 +613,15 @@ func _drive_shortcuts(app: Control) -> void:
 	await _settle(8)
 	if bool(overlay.get("visible")):
 		_errors.append("closing the shortcut overlay did not hide it")
+
+
+## Whether this platform can honour a request not to be captured.
+##
+## Windows and macOS can; X11 and Wayland have no equivalent, which the README
+## already says. Asserting it everywhere makes the suite red on the one platform
+## where the answer is "the OS cannot", which teaches nobody anything.
+static func _supports_capture_exclusion() -> bool:
+	return OS.get_name() in ["Windows", "macOS"]
 
 
 func _settle(frames: int) -> void:

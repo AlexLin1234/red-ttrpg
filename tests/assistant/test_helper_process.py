@@ -73,9 +73,7 @@ def test_a_request_without_the_token_is_refused_over_the_socket(helper):
     base = f"http://127.0.0.1:{handshake['port']}"
 
     assert httpx.get(f"{base}/library", timeout=10).status_code == 401
-    assert (
-        httpx.get(f"{base}/library", headers={TOKEN_HEADER: TOKEN}, timeout=10).status_code == 200
-    )
+    assert httpx.get(f"{base}/library", headers={TOKEN_HEADER: TOKEN}, timeout=10).status_code == 200
 
 
 def test_the_helper_is_not_reachable_from_the_network_interface(helper):

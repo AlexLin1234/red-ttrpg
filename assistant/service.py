@@ -145,9 +145,7 @@ def create_app(
 
     @application.exception_handler(LibraryError)
     async def library_error(_request: Any, exception: LibraryError) -> JSONResponse:
-        return JSONResponse(
-            status_code=400, content={"detail": {"code": "library", "message": safe_error(exception)}}
-        )
+        return JSONResponse(status_code=400, content={"detail": {"code": "library", "message": safe_error(exception)}})
 
     @application.get("/health")
     def health() -> dict[str, Any]:

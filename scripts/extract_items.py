@@ -12,6 +12,7 @@ by the ItemDB autoload at runtime. This mirrors how `tables.gd` boots on
 The parser reads the printed page number off each page, so it does not depend on
 a fixed cover-page offset.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -30,10 +31,7 @@ FASHION_PAGES = (356,)
 DRUG_PAGES = (357,)
 CYBERWARE_PAGES = (358, 359, 360, 361, 362, 363, 364, 365, 366, 367)
 
-PRICE_TIERS = (
-    "Cheap|Everyday|Costly|Premium|Expensive|Very Expensive|V. Expensive"
-    "|Super Luxury|Luxury"
-)
+PRICE_TIERS = "Cheap|Everyday|Costly|Premium|Expensive|Very Expensive|V. Expensive|Super Luxury|Luxury"
 
 # The resolver only has range bands for these types, and autofire bands for the
 # two below, so every emitted weapon has to land in one of them.
@@ -223,10 +221,27 @@ GEAR_KINDS = (
     (
         "electronics",
         (
-            "agent", "recorder", "braindance", "bug detector", "computer", "cyberdeck",
-            "cell phone", "synthesizer", "guitar", "instrument", "homing tracer",
-            "memory chip", "amplifier", "radar", "radio", "scrambler", "smart glasses",
-            "video camera", "virtuality", "techscanner", "scanner/",
+            "agent",
+            "recorder",
+            "braindance",
+            "bug detector",
+            "computer",
+            "cyberdeck",
+            "cell phone",
+            "synthesizer",
+            "guitar",
+            "instrument",
+            "homing tracer",
+            "memory chip",
+            "amplifier",
+            "radar",
+            "radio",
+            "scrambler",
+            "smart glasses",
+            "video camera",
+            "virtuality",
+            "techscanner",
+            "scanner/",
         ),
     ),
     (
@@ -293,16 +308,21 @@ def parse_simple(text: str, kind: str) -> list[dict]:
 # across the top, with a price in every cell. Reading it as a name/cost list
 # yields junk rows built from the trailing price runs.
 FASHION_SLOTS = (
-    "Bottoms", "Top", "Jacket", "Footwear", "Jewelry",
-    "Mirrorshades", "Glasses", "Contact Lenses", "Hats",
+    "Bottoms",
+    "Top",
+    "Jacket",
+    "Footwear",
+    "Jewelry",
+    "Mirrorshades",
+    "Glasses",
+    "Contact Lenses",
+    "Hats",
 )
 
 
 def parse_fashion(text: str) -> list[dict]:
     cell = rf"[\d,]+eb\s*\((?:{PRICE_TIERS})\)"
-    pattern = re.compile(
-        rf"([A-Z][A-Za-z\- ]{{3,60}}?)\s+((?:{cell}\s*){{{len(FASHION_SLOTS)}}})"
-    )
+    pattern = re.compile(rf"([A-Z][A-Za-z\- ]{{3,60}}?)\s+((?:{cell}\s*){{{len(FASHION_SLOTS)}}})")
     price = re.compile(rf"([\d,]+)eb\s*\((?:{PRICE_TIERS})\)")
     items: list[dict] = []
     seen: set[str] = set()

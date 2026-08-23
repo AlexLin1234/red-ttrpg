@@ -49,9 +49,7 @@ def test_the_key_never_reaches_settings_or_any_file_on_disk(vault, private_home)
 
 def test_error_text_is_scrubbed_of_keys_and_authorization_headers(vault):
     credentials.store(SAMPLE_KEY)
-    failure = RuntimeError(
-        f"401 from api: x-api-key: {SAMPLE_KEY} (Authorization: Bearer {SAMPLE_KEY})"
-    )
+    failure = RuntimeError(f"401 from api: x-api-key: {SAMPLE_KEY} (Authorization: Bearer {SAMPLE_KEY})")
 
     message = redaction.safe_error(failure)
 

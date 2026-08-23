@@ -91,15 +91,10 @@ class ChunkIndex:
         answer instead, which is far worse.
         """
 
-        stored = {
-            str(row["key"]): str(row["value"])
-            for row in connection.execute("SELECT key, value FROM metadata")
-        }
+        stored = {str(row["key"]): str(row["value"]) for row in connection.execute("SELECT key, value FROM metadata")}
         if not stored:
             return
-        matches = stored.get("schema_version") == str(SCHEMA_VERSION) and stored.get(
-            "dimensions"
-        ) == str(DIMENSIONS)
+        matches = stored.get("schema_version") == str(SCHEMA_VERSION) and stored.get("dimensions") == str(DIMENSIONS)
         if matches:
             return
         connection.execute("DELETE FROM chunks_fts")
@@ -133,10 +128,10 @@ class ChunkIndex:
                         "INSERT INTO chunks(book_id, page, ordinal, text) VALUES (?, ?, ?, ?)",
                         (chunk.book_id, int(chunk.page), int(chunk.ordinal), chunk.text),
                     )
-                    chunk_id = int(cursor.lastrowid)
-                    connection.execute(
-                        "INSERT INTO chunks_fts(rowid, text) VALUES (?, ?)", (chunk_id, chunk.text)
-                    )
+                    # sqlite3 types lastrowid as optional; an INSERT that ran
+                    # without raising always has one.
+                    chunk_id = int(cursor.lastrowid or 0)
+                    connection.execute("INSERT INTO chunks_fts(rowid, text) VALUES (?, ?)", (chunk_id, chunk.text))
                     connection.execute(
                         "INSERT INTO vectors(chunk_id, book_id, embedding) VALUES (?, ?, ?)",
                         (chunk_id, chunk.book_id, serialize(embed(chunk.text))),

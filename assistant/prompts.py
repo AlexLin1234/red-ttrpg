@@ -77,8 +77,7 @@ SEARCH_TOOL = {
 UNSUPPORTED_SENTINEL = "UNSUPPORTED"
 
 DISCLOSURE = (
-    "Your books and index stay on this machine. Only the retrieved passages and your "
-    "question were sent to Anthropic."
+    "Your books and index stay on this machine. Only the retrieved passages and your question were sent to Anthropic."
 )
 
 UNSUPPORTED_ANSWER = (

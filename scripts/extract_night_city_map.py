@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Extract the largest raster from a user-owned PDF page without retaining it."""
+
 from __future__ import annotations
 
 import argparse
@@ -22,6 +23,7 @@ def extract(pdf_path: Path, output: Path, page: int | None = None) -> tuple[int,
     raw = document.extract_image(info[0])["image"]
     output.parent.mkdir(parents=True, exist_ok=True)
     from io import BytesIO
+
     with Image.open(BytesIO(raw)) as image:
         if image.width < 1000 or image.height < 700:
             raise ValueError(f"largest image is suspiciously small ({image.width}x{image.height})")
