@@ -223,6 +223,31 @@ static func load_file(path: String) -> Dictionary:
 
 ## The library list needs a card per save, not a whole campaign, so this reads
 ## only the small index entries and skips the location payloads.
+## Just the manifest, without paying for the rest of the container.
+##
+## The index alone answers questions about which version of a save something
+## else was derived from, which is a good deal cheaper than opening a container
+## that may be carrying a megabyte of map behind it.
+static func read_manifest(path: String) -> Dictionary:
+	var reader := ZIPReader.new()
+	if reader.open(path) != OK:
+		return {}
+	var names := reader.get_files()
+	if not names.has(MANIFEST):
+		reader.close()
+		return {}
+	var value: Variant = _decode(reader.read_file(MANIFEST), MANIFEST)
+	reader.close()
+	return value if typeof(value) == TYPE_DICTIONARY else {}
+
+
+## The sha256 the manifest recorded for one entry, or "" when there is none.
+static func entry_digest(manifest: Dictionary, entry := CAMPAIGN) -> String:
+	var entries: Dictionary = manifest.get("entries", {})
+	var entry_row: Dictionary = entries.get(entry, {})
+	return String(entry_row.get("sha256", ""))
+
+
 static func read_summary(path: String) -> Dictionary:
 	var reader := ZIPReader.new()
 	if reader.open(path) != OK:

@@ -42,6 +42,7 @@ var _gm_window_button: Button
 var _gm_window: Window
 var _gm_notes_screen: Control
 var _gm_notes_campaign_path := ""
+var _recovery_dialog: ConfirmationDialog
 var _player_window_button: Button
 var _player_window: Window
 var _player_screen: Control
@@ -266,6 +267,49 @@ func _on_campaign_opened() -> void:
 	_drop_screens()
 	_gm_notes_campaign_path = ""
 	_show("city")
+	_offer_recovery()
+
+
+## A campaign that did not close cleanly leaves an autosave newer than its file.
+##
+## Applying it silently would be worse than losing it: a GM who saved on purpose
+## and then crashed would find themselves quietly reverted. So it is a question,
+## asked once, with the age of what is on offer.
+func _offer_recovery() -> void:
+	var found := Store.recovery()
+	if found.is_empty():
+		return
+	if is_instance_valid(_recovery_dialog):
+		_recovery_dialog.queue_free()
+	_recovery_dialog = ConfirmationDialog.new()
+	_recovery_dialog.title = "Unsaved work found"
+	_recovery_dialog.theme = UI.build_theme()
+	_recovery_dialog.get_ok_button().text = "Recover it"
+	_recovery_dialog.get_cancel_button().text = "Keep the saved version"
+	var box := UI.vbox(UI.GAP_2)
+	box.add_child(UI.display(Autosave.describe(Store.path), 18))
+	var body := UI.body(
+		(
+			"This campaign was left with work that had not been saved. Recovering "
+			+ "loads it as unsaved changes, so the file on disk is untouched until "
+			+ "you save. Keeping the saved version throws the autosave away."
+		),
+		13,
+		UI.MUTED
+	)
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.custom_minimum_size = Vector2(430, 0)
+	box.add_child(body)
+	_recovery_dialog.add_child(UI.margins(box, UI.GAP_4))
+	_recovery_dialog.confirmed.connect(
+		func() -> void:
+			Store.recover()
+			_drop_screens()
+			_show("city")
+	)
+	_recovery_dialog.canceled.connect(Store.discard_recovery)
+	add_child(_recovery_dialog)
+	_recovery_dialog.popup_centered(Vector2i(500, 260))
 
 
 ## Opens private campaign material outside the main app viewport. Streamers can
@@ -386,7 +430,12 @@ func _refresh_header() -> void:
 		_title_label.text = UI._letterspace(
 			("%s / %s" % [Store.campaign["name"], Store.campaign["city"]]).to_upper()
 		)
-		_dirty_label.text = UI._letterspace("Unsaved changes" if Store.dirty else "Saved")
+		var dirty_text := "Saved"
+		if Store.dirty:
+			dirty_text = (
+				"Unsaved · autosaved" if Store.last_autosave > 0 else "Unsaved changes"
+			)
+		_dirty_label.text = UI._letterspace(dirty_text)
 		_dirty_label.add_theme_color_override("font_color", UI.WARN if Store.dirty else UI.MUTED)
 		_save_button.visible = true
 		_gm_window_button.visible = true

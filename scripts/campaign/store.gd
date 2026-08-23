@@ -38,6 +38,11 @@ var active_vehicle_id := ""
 var _month_undo: Array[Dictionary] = []
 var _month_redo: Array[Dictionary] = []
 var _player_view: Dictionary = {}
+var _autosave_seconds := 0.0
+var _recovery: Dictionary = {}
+## Off only for tests and for a GM who wants the disk left alone.
+var autosave_enabled := true
+var last_autosave := 0
 ## Bumped on every edit. Screens are kept alive between visits, and this is how
 ## one of them knows whether what it drew is still what the campaign says.
 var edit_revision := 0
@@ -122,6 +127,12 @@ func open(save_path: String) -> bool:
 	_month_undo.clear()
 	_month_redo.clear()
 	edit_revision += 1
+	_autosave_seconds = 0.0
+	# An autosave newer than the file is the residue of a session that did not
+	# end cleanly. It is offered rather than applied: a GM who saved and then
+	# crashed would not thank an app that silently reverted them.
+	var found := Autosave.summary(path)
+	_recovery = found if bool(found.get("newer", false)) else {}
 	# Never carry one campaign's board onto the table's screen while another one
 	# is being opened.
 	publish_player_view({})
@@ -155,6 +166,7 @@ func close() -> void:
 	active_character_id = ""
 	active_architecture_id = ""
 	active_vehicle_id = ""
+	_recovery = {}
 	_month_undo.clear()
 	_month_redo.clear()
 
@@ -282,9 +294,81 @@ func save() -> bool:
 	manifest = result["manifest"]
 	size_on_disk = int(result["size"])
 	dirty = false
+	# The autosave existed only to cover the gap between edits and this moment.
+	Autosave.discard(path)
+	_autosave_seconds = 0.0
 	set_status("Saved")
 	campaign_saved.emit()
 	return true
+
+
+## Write the working copy beside the save, on a timer, while there is anything
+## to lose.
+##
+## Runs from the autoload's own process loop rather than a Timer node so it is
+## impossible to lose by rebuilding a screen.
+func _process(delta: float) -> void:
+	if not autosave_enabled or not is_open() or not dirty or path == "":
+		return
+	_autosave_seconds += delta
+	if _autosave_seconds < Autosave.INTERVAL_SECONDS:
+		return
+	autosave_now()
+
+
+func autosave_now() -> bool:
+	_autosave_seconds = 0.0
+	if not is_open() or path == "":
+		return false
+	var result := Autosave.write(
+		path,
+		{"manifest": manifest, "campaign": campaign, "roster": roster, "locations": locations},
+	)
+	if not bool(result.get("ok", false)):
+		# A failed autosave is not worth interrupting a session over, but it is
+		# worth saying once rather than failing silently.
+		set_status("Autosave failed: %s" % String(result.get("error", "unknown error")))
+		return false
+	last_autosave = int(Time.get_unix_time_from_system())
+	return true
+
+
+## What the open campaign could be rolled forward to, if anything.
+func recovery() -> Dictionary:
+	return _recovery
+
+
+## Load the autosave in place of what is open, keeping the real save's path so
+## the next deliberate Save writes back to the file the GM thinks they are in.
+func recover() -> bool:
+	var save_path := path
+	var loaded := Autosave.load_file(save_path)
+	if not bool(loaded.get("ok", false)):
+		set_status("Could not recover: %s" % String(loaded.get("error", "unknown error")))
+		return false
+	manifest = loaded["manifest"]
+	campaign = loaded["campaign"]
+	roster = loaded["roster"]
+	locations = loaded["locations"]
+	integrity = loaded["integrity"]
+	path = save_path
+	dirty = true
+	_recovery = {}
+	_normalize_downtime_state()
+	_month_undo.clear()
+	_month_redo.clear()
+	edit_revision += 1
+	publish_player_view({})
+	set_status("Recovered from autosave · unsaved")
+	campaign_opened.emit()
+	return true
+
+
+## Throw the recovery away and keep what was opened.
+func discard_recovery() -> void:
+	Autosave.discard(path)
+	_recovery = {}
+	campaign_changed.emit()
 
 
 func set_status(message: String) -> void:
