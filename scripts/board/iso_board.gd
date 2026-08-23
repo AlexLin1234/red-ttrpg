@@ -503,6 +503,10 @@ func cover_between(from_cell: Dictionary, to_cell: Dictionary) -> Dictionary:
 
 
 func play_shot(from_cell: Dictionary, to_cell: Dictionary, hit: bool) -> void:
+	# A GM projecting the board to the room turns the effects off, and the
+	# resolution card says everything the tracer does anyway.
+	if AppSettings.reduce_motion():
+		return
 	var start := world_of(from_cell) + Vector3(0, 0.85, 0)
 	var end := world_of(to_cell) + Vector3(0, 0.85, 0)
 
@@ -550,6 +554,11 @@ func _fade_and_free(node: Node3D, material: StandardMaterial3D, seconds: float) 
 
 ## An expanding shell plus a ground ring, sized in metres.
 func play_blast(centre: Dictionary, radius_m: float) -> void:
+	if AppSettings.reduce_motion():
+		# The aiming ring stays: it is information about where the blast landed
+		# rather than an animation of it.
+		show_blast_preview(centre, radius_m)
+		return
 	var radius := radius_m / tile_metres()
 	var at := world_of(centre)
 

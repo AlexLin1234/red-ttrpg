@@ -15,6 +15,17 @@ const NetrunScreen := preload("res://scripts/screens/netrun.gd")
 const VehiclesScreen := preload("res://scripts/screens/vehicles.gd")
 const PlayerDisplayScreen := preload("res://scripts/screens/player_display.gd")
 
+## The keys, in one place, so the overlay that lists them cannot drift from
+## what they do.
+const SHORTCUTS: Array[Dictionary] = [
+	{"keys": "1 … 0", "does": "Jump to a screen, in the order of the tabs"},
+	{"keys": "Ctrl + K", "does": "Find anything in the campaign"},
+	{"keys": "Ctrl + S", "does": "Save"},
+	{"keys": "M", "does": "Show or hide the uploaded map, on the City screen"},
+	{"keys": "?  or  F1", "does": "This panel"},
+	{"keys": "Escape", "does": "Close whatever is open over the screen"},
+]
+
 const SCREENS := [
 	{"id": "library", "label": "Library"},
 	{"id": "workshop", "label": "Item Workshop"},
@@ -44,6 +55,7 @@ var _gm_notes_screen: Control
 var _gm_notes_campaign_path := ""
 var _recovery_dialog: ConfirmationDialog
 var _search: SearchPalette
+var _shortcuts: ShortcutsOverlay
 var _player_window_button: Button
 var _player_window: Window
 var _player_screen: Control
@@ -80,6 +92,10 @@ func _ready() -> void:
 	_search = SearchPalette.new()
 	_search.chosen.connect(_go_to)
 	add_child(_search)
+
+	_shortcuts = ShortcutsOverlay.new()
+	add_child(_shortcuts)
+	AppSettings.apply(get_tree())
 
 	Store.seed_library_if_empty()
 	_show("library")
@@ -429,6 +445,12 @@ func _rebuild_gm_window_content() -> void:
 	_gm_notes_campaign_path = Store.path
 
 
+## Show the keys, and the two display preferences that answer the same
+## question. Public so a test can reach it the way the key does.
+func open_shortcuts() -> void:
+	_shortcuts.present(SHORTCUTS)
+
+
 ## Open the campaign-wide search. Public so a shortcut, a button and a test can
 ## all reach it the same way.
 func open_search() -> void:
@@ -501,6 +523,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.is_pressed() or event.is_echo():
 		return
 	var key := event as InputEventKey
+
+	if key.keycode == KEY_QUESTION or key.keycode == KEY_F1:
+		open_shortcuts()
+		get_viewport().set_input_as_handled()
+		return
 
 	if key.ctrl_pressed and key.keycode == KEY_K:
 		open_search()

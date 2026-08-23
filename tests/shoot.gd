@@ -87,6 +87,7 @@ func _ready() -> void:
 	await _drive_chase(app)
 
 	await _drive_search(app)
+	await _drive_shortcuts(app)
 
 	app.call("_show", "forge")
 	await _settle(30)
@@ -594,6 +595,24 @@ func _drive_sessions(app: Control) -> void:
 	if dialog != null:
 		dialog.call("hide")
 	await _settle(8)
+
+
+## The keys, and the two display preferences that answer the same question.
+func _drive_shortcuts(app: Control) -> void:
+	if not app.has_method("open_shortcuts"):
+		_errors.append("the app did not expose the shortcut overlay")
+		return
+	app.call("open_shortcuts")
+	await _settle(12)
+	var overlay: Node = app.get("_shortcuts")
+	if overlay == null or not bool(overlay.get("visible")):
+		_errors.append("the shortcut overlay did not open")
+		return
+	await _shoot("1i-shortcuts")
+	overlay.call("close")
+	await _settle(8)
+	if bool(overlay.get("visible")):
+		_errors.append("closing the shortcut overlay did not hide it")
 
 
 func _settle(frames: int) -> void:
