@@ -30,6 +30,7 @@ var _count_label: Label
 var _map_dialog: FileDialog
 var _month_dialog: ConfirmationDialog
 var _hustle_dialog: ConfirmationDialog
+var _downtime_dialog: DowntimeDialog
 var _hustle_all: CheckBox
 var _hustle_list: VBoxContainer
 var _hustle_checks: Dictionary = {}
@@ -104,6 +105,7 @@ func _ready() -> void:
 	add_child(_month_dialog)
 
 	_build_hustle_dialog()
+	_build_downtime_dialog()
 
 	_build_campaign_dialog()
 	_refresh()
@@ -127,6 +129,18 @@ func _build_hustle_dialog() -> void:
 	_hustle_dialog.add_child(UI.margins(form, UI.GAP_4))
 	_hustle_dialog.confirmed.connect(_confirm_downtime_hustle)
 	add_child(_hustle_dialog)
+
+
+## The other things a week off is for. Its own class, so the clock keeps the
+## button and this screen does not keep the form.
+func _build_downtime_dialog() -> void:
+	_downtime_dialog = DowntimeDialog.new()
+	_downtime_dialog.performed.connect(func(_action: String, _result: Dictionary) -> void: _refresh())
+	add_child(_downtime_dialog)
+
+
+func open_downtime_dialog(action_key := "") -> void:
+	_downtime_dialog.open(action_key)
 
 
 func _build_bar() -> Control:
@@ -661,6 +675,11 @@ func _build_month_close(clock: Dictionary) -> Control:
 	hustle_button.disabled = _closing_month
 	hustle_button.pressed.connect(_open_hustle_dialog)
 	box.add_child(hustle_button)
+
+	var downtime_button := UI.plain_button("Downtime · facedown, recover, build")
+	downtime_button.disabled = _closing_month
+	downtime_button.pressed.connect(open_downtime_dialog)
+	box.add_child(downtime_button)
 
 	var report: Dictionary = Store.campaign.get("last_lifestyle_report", {})
 	if report.is_empty():

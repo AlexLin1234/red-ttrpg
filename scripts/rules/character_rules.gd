@@ -242,6 +242,9 @@ static func selected_skill(character: Dictionary, name: String) -> Dictionary:
 
 static func ensure_character(character: Dictionary) -> void:
 	character["improvement_points"] = maxi(0, int(character.get("improvement_points", 0)))
+	# Reputation is what a Facedown is actually fought with, so every sheet
+	# carries one whether or not the GM has ever set it.
+	character["reputation"] = clampi(int(character.get("reputation", 0)), 0, 10)
 	# Old sheets predate the creation workflow and remain completed rather than
 	# unexpectedly becoming locked behind a point-allocation screen.
 	character["creation_complete"] = bool(character.get("creation_complete", true))

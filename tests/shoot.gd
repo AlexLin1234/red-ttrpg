@@ -163,6 +163,32 @@ func _drive_city(app: Control) -> void:
 	if screen != null and screen.has_method("set_tab"):
 		screen.call("set_tab", "map")
 	await _settle(10)
+	await _drive_downtime(screen)
+
+
+## The other things a week off is for, one of which actually heals somebody.
+func _drive_downtime(screen: Node) -> void:
+	if screen == null or not screen.has_method("open_downtime_dialog"):
+		_errors.append("city screen did not expose the downtime path")
+		return
+	screen.call("open_downtime_dialog", "recover")
+	await _settle(14)
+	await _shoot("1b-downtime")
+
+	var dialog: Node = screen.get("_downtime_dialog")
+	if dialog == null:
+		_errors.append("the downtime dialog was not built")
+		return
+	var patient := Store.active_character()
+	var before := int(patient.get("hp", 0))
+	var result: Dictionary = dialog.call("perform")
+	await _settle(10)
+	if not bool(result.get("ok", false)):
+		_errors.append("downtime failed: %s" % String(result.get("error", "")))
+	elif int(patient.get("hp", 0)) <= before and before < int(patient.get("max_hp", 1)):
+		_errors.append("resting did not restore any HP")
+	dialog.call("hide")
+	await _settle(6)
 
 
 ## An uploaded map goes behind the plates, not instead of them, so this checks a

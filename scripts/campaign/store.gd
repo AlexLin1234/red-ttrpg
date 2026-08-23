@@ -498,6 +498,59 @@ func perform_hustle(character_id: String, rng: Dice.RandomSource) -> Dictionary:
 	return result
 
 
+## Run one downtime action, advance the clock by what it took, and log it.
+##
+## The dispatch lives here rather than in [Downtime] for the same reason the
+## Hustle's does: the rules module does not know about a campaign clock or a
+## session log, and should not learn.
+func perform_downtime(
+	action_key: String, params: Dictionary, rng: Dice.RandomSource
+) -> Dictionary:
+	var character := character_by_id(String(params.get("character_id", "")))
+	if character.is_empty():
+		return {"ok": false, "error": "That character is not in this campaign."}
+
+	var result := {}
+	match action_key:
+		"facedown":
+			var opponent := character_by_id(String(params.get("opponent_id", "")))
+			if opponent.is_empty():
+				return {"ok": false, "error": "A Facedown needs someone to face."}
+			result = Downtime.facedown(character, opponent, rng)
+		"recover":
+			result = Downtime.recover(
+				character,
+				maxi(1, int(params.get("days", 1))),
+				character_by_id(String(params.get("medic_id", ""))),
+				rng,
+			)
+		"therapy":
+			result = Downtime.therapy(character, maxi(1, int(params.get("weeks", 1))), rng)
+		"fabricate":
+			result = Downtime.fabricate(character, params.get("item", {}), rng)
+		"source":
+			result = Downtime.source_gear(character, rng)
+		"reputation":
+			result = Downtime.adjust_reputation(
+				character, int(params.get("delta", 0)), String(params.get("reason", ""))
+			)
+		_:
+			return {"ok": false, "error": "Unknown downtime action: %s" % action_key}
+
+	if not bool(result.get("ok", false)):
+		return result
+
+	(campaign.get("session_log", []) as Array).push_front(
+		{"session": int(campaign.get("sessions", 0)), "text": String(result.get("work", ""))}
+	)
+	var days := int(result.get("days", 0))
+	if days > 0:
+		advance_clock(days * 24 * 60)
+	else:
+		mark_dirty()
+	return result
+
+
 ## Several characters can spend the same free-time week Hustling concurrently.
 ## Every participant rolls and gets paid, but the shared campaign clock advances
 ## only once for the seven-day downtime block.
