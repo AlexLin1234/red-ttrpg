@@ -284,10 +284,7 @@ func redo_month() -> bool:
 func save() -> bool:
 	if not is_open():
 		return false
-	var result := CampaignContainer.save(
-		path,
-		{"manifest": manifest, "campaign": campaign, "roster": roster, "locations": locations},
-	)
+	var result := CampaignContainer.save(path, _bundle())
 	if not bool(result.get("ok", false)):
 		set_status(String(result.get("error", "save failed")))
 		return false
@@ -320,10 +317,7 @@ func autosave_now() -> bool:
 	_autosave_seconds = 0.0
 	if not is_open() or path == "":
 		return false
-	var result := Autosave.write(
-		path,
-		{"manifest": manifest, "campaign": campaign, "roster": roster, "locations": locations},
-	)
+	var result := Autosave.write(path, _bundle())
 	if not bool(result.get("ok", false)):
 		# A failed autosave is not worth interrupting a session over, but it is
 		# worth saying once rather than failing silently.
@@ -586,6 +580,110 @@ func perform_hustle(character_id: String, rng: Dice.RandomSource) -> Dictionary:
 	)
 	mark_dirty()
 	return result
+
+
+# -- sessions and restore points ------------------------------------------------
+
+
+func _bundle() -> Dictionary:
+	return {"manifest": manifest, "campaign": campaign, "roster": roster, "locations": locations}
+
+
+## Add a line to the session log by hand.
+##
+## Everything else writes to the log as a side effect of doing something. This
+## is for what happened at the table, which the app has no way to know about.
+func log_line(text: String) -> bool:
+	var trimmed := text.strip_edges()
+	if trimmed == "" or not is_open():
+		return false
+	(campaign.get("session_log", []) as Array).push_front(
+		{"session": int(campaign.get("sessions", 0)), "text": trimmed}
+	)
+	mark_dirty()
+	return true
+
+
+## Take a named copy of the campaign as it stands.
+func create_restore_point(label: String) -> Dictionary:
+	if not is_open():
+		return {"ok": false, "error": "no campaign is open"}
+	var entry := RestorePoints.create(path, _bundle(), label)
+	if not bool(entry.get("ok", false)):
+		set_status(String(entry.get("error", "could not take a restore point")))
+		return entry
+	mark_dirty()
+	set_status("Restore point taken")
+	return entry
+
+
+## Put the campaign back to one of them.
+##
+## Loaded as unsaved changes, exactly as a recovery is: the file on disk is what
+## the GM last chose to write, and going back is a decision they should confirm
+## with a save rather than have made for them.
+func restore_to(id: String) -> bool:
+	if not is_open():
+		return false
+	var loaded := RestorePoints.load_point(path, id)
+	if not bool(loaded.get("ok", false)):
+		set_status("Could not restore: %s" % String(loaded.get("error", "unknown error")))
+		return false
+
+	var live := RestorePoints.entries(campaign).duplicate(true)
+	var restored: Dictionary = loaded["campaign"]
+	RestorePoints.merge_lists(restored, live)
+	campaign = restored
+	roster = loaded["roster"]
+	locations = loaded["locations"]
+	integrity = loaded["integrity"]
+	dirty = true
+	edit_revision += 1
+	active_location_id = String(locations[0]["id"]) if not locations.is_empty() else ""
+	var characters_list: Array = roster.get("characters", [])
+	active_character_id = (
+		String((characters_list[0] as Dictionary)["id"]) if not characters_list.is_empty() else ""
+	)
+	_normalize_downtime_state()
+	_month_undo.clear()
+	_month_redo.clear()
+	publish_player_view({})
+	set_status("Restored · unsaved")
+	campaign_opened.emit()
+	return true
+
+
+func remove_restore_point(id: String) -> bool:
+	if not is_open() or not RestorePoints.remove(path, campaign, id):
+		return false
+	mark_dirty()
+	return true
+
+
+func restore_points() -> Array:
+	return RestorePoints.entries(campaign)
+
+
+## Start a session: count it, log it, and take the restore point a GM will want
+## when the evening goes somewhere they did not plan for.
+func start_session() -> int:
+	if not is_open():
+		return 0
+	var number := int(campaign.get("sessions", 0)) + 1
+	campaign["sessions"] = number
+	create_restore_point("Start of session %d" % number)
+	log_line("Session %d started." % number)
+	set_status("Session %d" % number)
+	return number
+
+
+func end_session(summary := "") -> int:
+	if not is_open():
+		return 0
+	var number := int(campaign.get("sessions", 0))
+	log_line(summary if summary.strip_edges() != "" else "Session %d ended." % number)
+	create_restore_point("End of session %d" % number)
+	return number
 
 
 ## Roll a squad onto the roster and hand the sheets back.

@@ -12,6 +12,7 @@ var _list_box: VBoxContainer
 var _hero_holder: Control
 var _count_label: Label
 var _new_dialog: ConfirmationDialog
+var _snapshots_dialog: SnapshotsDialog
 var _new_name: LineEdit
 var _new_city: LineEdit
 var _new_gm: LineEdit
@@ -24,6 +25,10 @@ func _ready() -> void:
 
 	grid.add_child(_build_list())
 	_build_new_campaign_dialog()
+
+	_snapshots_dialog = SnapshotsDialog.new()
+	_snapshots_dialog.changed.connect(_refresh)
+	add_child(_snapshots_dialog)
 
 	_hero_holder = Control.new()
 	UI.expand(_hero_holder)
@@ -87,7 +92,12 @@ func _refresh() -> void:
 	_count_label.text = UI._letterspace(
 		"%d %s" % [_rows.size(), "save" if _rows.size() == 1 else "saves"]
 	)
-	if _selected == "" and not _rows.is_empty():
+	# The open campaign is the one the GM is working on, so it is the one the
+	# hero panel and its buttons should be about. Without this the panel could
+	# describe one save while the session controls acted on another.
+	if Store.is_open():
+		_selected = Store.path
+	elif _selected == "" and not _rows.is_empty():
 		_selected = String((_rows[0] as Dictionary)["path"])
 
 	for child in _list_box.get_children():
@@ -207,7 +217,7 @@ func _rebuild_hero() -> void:
 
 	column.add_child(UI.hatch(Vector2(0, 104), "Campaign key art — 962 × 228 drop zone"))
 	column.add_child(UI.rule_line())
-	column.add_child(_build_hero_head(row, loaded))
+	column.add_child(_build_hero_head(row))
 	column.add_child(UI.rule_line())
 
 	var body := UI.hbox(0)
@@ -223,7 +233,7 @@ func _rebuild_hero() -> void:
 	body.add_child(_build_save_facts(row, loaded))
 
 
-func _build_hero_head(row: Dictionary, loaded: Dictionary) -> Control:
+func _build_hero_head(row: Dictionary) -> Control:
 	var head := UI.hbox(UI.GAP_4)
 
 	var text := UI.vbox(2)
@@ -240,13 +250,87 @@ func _build_hero_head(row: Dictionary, loaded: Dictionary) -> Control:
 	var continue_button := UI.primary_button("▶ Continue")
 	continue_button.pressed.connect(func() -> void: Store.open(String(row["path"])))
 	buttons.add_child(continue_button)
+	var open_here := Store.is_open() and Store.path == String(row["path"])
 	var snapshots := UI.plain_button("Snapshots")
-	var restore_points: Array = (loaded.get("campaign", {}) as Dictionary).get("restore_points", [])
-	snapshots.disabled = restore_points.is_empty()
+	# A restore point is taken from the campaign in memory, so it needs the
+	# campaign in memory. Reading the list off a closed save and offering to go
+	# back to one would mean opening it first anyway.
+	snapshots.disabled = not open_here
+	snapshots.tooltip_text = (
+		"Take, read and go back to restore points"
+		if open_here
+		else "Continue this campaign first"
+	)
+	snapshots.pressed.connect(open_snapshots)
 	buttons.add_child(snapshots)
 	head.add_child(buttons)
 
-	return UI.margins(head, UI.GAP_4)
+	var column := UI.vbox(UI.GAP_2)
+	column.add_child(UI.margins(head, UI.GAP_4))
+	if open_here:
+		column.add_child(_build_session_controls())
+	return column
+
+
+## Framing the evening: what session it is, and a line about what happened.
+##
+## Starting one counts it, logs it, and takes the restore point a GM wants when
+## the evening goes somewhere they did not plan for.
+func _build_session_controls() -> Control:
+	var box := UI.vbox(UI.GAP_2)
+	# The panel above describes the file; these buttons act on what is in
+	# memory. When they have drifted apart, say so rather than letting the two
+	# session numbers argue with each other.
+	var in_memory := int(Store.campaign.get("sessions", 0))
+	if Store.dirty:
+		box.add_child(
+			UI.micro("Session %d in progress · not yet saved" % in_memory, UI.WARN)
+		)
+	var row := UI.hbox(UI.GAP_2)
+	var start := UI.plain_button("Start session %d" % (int(Store.campaign.get("sessions", 0)) + 1))
+	start.pressed.connect(
+		func() -> void:
+			Store.start_session()
+			_refresh()
+	)
+	UI.expand(start, true, false)
+	row.add_child(start)
+	var finish := UI.plain_button("End session")
+	finish.disabled = int(Store.campaign.get("sessions", 0)) <= 0
+	finish.pressed.connect(
+		func() -> void:
+			Store.end_session()
+			_refresh()
+	)
+	UI.expand(finish, true, false)
+	row.add_child(finish)
+	box.add_child(row)
+
+	var entry := UI.hbox(UI.GAP_2)
+	var field := LineEdit.new()
+	field.placeholder_text = "What just happened at the table…"
+	UI.expand(field, true, false)
+	field.text_submitted.connect(
+		func(text: String) -> void:
+			if Store.log_line(text):
+				field.text = ""
+				_refresh()
+	)
+	entry.add_child(field)
+	var add := UI.plain_button("Log it")
+	add.pressed.connect(
+		func() -> void:
+			if Store.log_line(field.text):
+				field.text = ""
+				_refresh()
+	)
+	entry.add_child(add)
+	box.add_child(entry)
+	return UI.margins(box, UI.GAP_4)
+
+
+func open_snapshots() -> void:
+	_snapshots_dialog.open()
 
 
 func _build_party_and_log(loaded: Dictionary) -> Control:
@@ -366,10 +450,12 @@ func _build_save_facts(row: Dictionary, loaded: Dictionary) -> Control:
 		card.add_theme_stylebox_override("panel", style)
 		var text := UI.vbox(1)
 		card.add_child(UI.margins(text, UI.GAP_2))
-		text.add_child(UI.display(String(point["label"]), 12))
+		# A label the GM typed can be any length, and this rail is beside the
+		# panel that carries the party: it elides rather than widening.
+		text.add_child(UI.elide(UI.display(String(point["label"]), 12)))
 		var created := String(point["created_at"])
 		var clock := created.substr(11, 5) if created.length() >= 16 else ""
-		text.add_child(UI.micro("Session %d · %s" % [int(point["session"]), clock]))
+		text.add_child(UI.elide(UI.micro("Session %d · %s" % [int(point["session"]), clock])))
 		column.add_child(card)
 	if restore_points.is_empty():
 		column.add_child(UI.micro("None recorded."))

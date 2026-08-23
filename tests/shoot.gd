@@ -40,6 +40,7 @@ func _ready() -> void:
 	if target != "" and not Store.open(target):
 		_errors.append("could not open Blackwall Sunrise")
 	await _settle(20)
+	await _drive_sessions(app)
 
 	app.call("_show", "city")
 	await _settle(30)
@@ -555,6 +556,44 @@ func _drive_search(app: Control) -> void:
 	var target: Dictionary = first["target"]
 	if target.has("character_id") and Store.active_character_id != String(target["character_id"]):
 		_errors.append("the search landed on the wrong sheet")
+
+
+## Framing the evening, and the copy taken on the way in.
+func _drive_sessions(app: Control) -> void:
+	app.call("_show", "library")
+	await _settle(20)
+	var screen: Node = app.get("_screen")
+	if screen == null or not screen.has_method("open_snapshots"):
+		_errors.append("library screen did not expose the snapshots path")
+		return
+
+	var before: int = Store.restore_points().size()
+	var session := Store.start_session()
+	await _settle(12)
+	if session <= 0:
+		_errors.append("starting a session did not count one")
+	if Store.restore_points().size() != before + 1:
+		_errors.append("starting a session did not take a restore point")
+	if not Store.log_line("The client lied about the courier."):
+		_errors.append("a hand-written log line was refused")
+	screen.call("_refresh")
+	await _settle(12)
+	await _shoot("1a-session")
+
+	screen.call("open_snapshots")
+	await _settle(14)
+	await _shoot("1a-snapshots")
+
+	var newest: Dictionary = Store.restore_points()[0]
+	if not Store.restore_to(String(newest["id"])):
+		_errors.append("restoring the newest point failed")
+	await _settle(14)
+	if Store.restore_points().size() < before + 1:
+		_errors.append("restoring threw away the list of restore points")
+	var dialog: Node = screen.get("_snapshots_dialog")
+	if dialog != null:
+		dialog.call("hide")
+	await _settle(8)
 
 
 func _settle(frames: int) -> void:
