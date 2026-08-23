@@ -85,6 +85,8 @@ func _ready() -> void:
 	await _settle(30)
 	await _drive_chase(app)
 
+	await _drive_search(app)
+
 	app.call("_show", "forge")
 	await _settle(30)
 	await _shoot("1d-forge")
@@ -520,6 +522,39 @@ func _drive_chase(app: Control) -> void:
 			palette_has_vehicle = true
 	if not palette_has_vehicle:
 		_errors.append("a garaged vehicle did not reach the cover palette")
+
+
+## One field over the whole campaign, and the trip it takes you on.
+func _drive_search(app: Control) -> void:
+	if not app.has_method("open_search"):
+		_errors.append("the app did not expose the campaign search")
+		return
+	app.call("open_search")
+	await _settle(10)
+	var palette: Node = app.get("_search")
+	if palette == null or not bool(palette.get("visible")):
+		_errors.append("the search palette did not open")
+		return
+	var rows: Array = palette.call("search", "tallow")
+	await _settle(10)
+	if rows.is_empty():
+		_errors.append("searching for a character in the demo campaign found nothing")
+		return
+	await _shoot("1i-search")
+
+	palette.call("accept")
+	await _settle(14)
+	if bool(palette.get("visible")):
+		_errors.append("taking a result did not close the palette")
+	var first: Dictionary = rows[0]
+	var landed := String(app.get("_current"))
+	if landed != String(first["screen"]):
+		_errors.append(
+			"the result said %s and the app went to %s" % [String(first["screen"]), landed]
+		)
+	var target: Dictionary = first["target"]
+	if target.has("character_id") and Store.active_character_id != String(target["character_id"]):
+		_errors.append("the search landed on the wrong sheet")
 
 
 func _settle(frames: int) -> void:

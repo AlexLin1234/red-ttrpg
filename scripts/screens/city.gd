@@ -504,6 +504,30 @@ func select_poi(poi_id: String) -> void:
 	_on_poi_picked(poi_id)
 
 
+## Land on whatever the campaign-wide search found here.
+##
+## Search hands over what the row is rather than what to click, so a zone, a
+## place and a beat each arrive at the tab that actually shows them.
+func focus_target(target: Dictionary) -> void:
+	if target.has("poi_id") and String(target["poi_id"]) != "":
+		set_tab("places")
+		select_poi(String(target["poi_id"]))
+		return
+	if target.has("area_id") and String(target["area_id"]) != "":
+		_pinned_id = String(target["area_id"])
+		_focus_id = _pinned_id
+		_focus_kind = "area"
+		_selected_poi = ""
+		_focus_poi = ""
+		set_tab("map")
+		_map.set_focus(_pinned_id)
+		_refresh_rail()
+		return
+	if target.has("beat_id"):
+		# Beats live in the private window, which is where the GM is sent.
+		Store.set_status("Beats open in the GM Window")
+
+
 ## Same effect as dragging a place and dropping it at [param point].
 func relocate_poi(poi_id: String, point: Vector2) -> void:
 	_on_poi_moved(poi_id, point, true)

@@ -43,6 +43,7 @@ var _gm_window: Window
 var _gm_notes_screen: Control
 var _gm_notes_campaign_path := ""
 var _recovery_dialog: ConfirmationDialog
+var _search: SearchPalette
 var _player_window_button: Button
 var _player_window: Window
 var _player_screen: Control
@@ -75,6 +76,10 @@ func _ready() -> void:
 	Store.status_changed.connect(_on_status)
 	Store.open_location_requested.connect(func(_id: String) -> void: _show("location"))
 	Store.player_view_changed.connect(_on_player_view)
+
+	_search = SearchPalette.new()
+	_search.chosen.connect(_go_to)
+	add_child(_search)
 
 	Store.seed_library_if_empty()
 	_show("library")
@@ -137,7 +142,11 @@ func _build_header() -> Control:
 	_player_window_button.pressed.connect(toggle_player_display)
 	row.add_child(_player_window_button)
 
-	_status_label = UI.micro("", UI.GOOD)
+	# A downtime report or a Hustle result can be a whole sentence, and the bar
+	# has ten tabs on it. It elides rather than pushing the Save button off the
+	# edge of the window.
+	_status_label = UI.elide(UI.micro("", UI.GOOD))
+	_status_label.custom_minimum_size.x = 180
 	_status_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(_status_label)
 
@@ -420,6 +429,36 @@ func _rebuild_gm_window_content() -> void:
 	_gm_notes_campaign_path = Store.path
 
 
+## Open the campaign-wide search. Public so a shortcut, a button and a test can
+## all reach it the same way.
+func open_search() -> void:
+	if not Store.is_open():
+		return
+	_search.open()
+
+
+## Go wherever a search result lives, and select it once there.
+##
+## The palette hands back what the row is rather than a screen to show, so the
+## selection and the navigation stay together: finding a character and landing
+## on someone else's sheet would be worse than not finding them.
+func _go_to(row: Dictionary) -> void:
+	var target: Dictionary = row.get("target", {})
+	if target.has("character_id"):
+		Store.active_character_id = String(target["character_id"])
+	if target.has("location_id"):
+		Store.active_location_id = String(target["location_id"])
+	if target.has("architecture_id"):
+		Store.active_architecture_id = String(target["architecture_id"])
+	if target.has("vehicle_id"):
+		Store.active_vehicle_id = String(target["vehicle_id"])
+	_show(String(row.get("screen", "library")))
+	if target.has("area_id") or target.has("poi_id") or target.has("beat_id"):
+		var screen := _screens.get("city") as Control
+		if is_instance_valid(screen) and screen.has_method("focus_target"):
+			screen.call("focus_target", target)
+
+
 func _on_status(message: String) -> void:
 	_status_label.text = UI._letterspace(message.to_upper())
 	_status_label.visible = message != ""
@@ -462,6 +501,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.is_pressed() or event.is_echo():
 		return
 	var key := event as InputEventKey
+
+	if key.ctrl_pressed and key.keycode == KEY_K:
+		open_search()
+		get_viewport().set_input_as_handled()
+		return
 
 	if key.ctrl_pressed and key.keycode == KEY_S:
 		if Store.is_open():
