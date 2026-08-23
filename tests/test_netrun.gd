@@ -59,6 +59,7 @@ static func run(h: Harness) -> void:
 	_ice(h)
 	_budget(h)
 	_endings(h)
+	_damage_belongs_to_the_runner(h)
 	_generation(h)
 
 
@@ -228,6 +229,18 @@ static func _endings(h: Harness) -> void:
 	leaving.undo()
 	h.equal(leaving.run_state(), "running", "back on the ladder")
 	h.equal(leaving.runner()["hp"], 30, "and unhurt")
+
+
+## Damage taken on the ladder belongs to the person in the chair.
+static func _damage_belongs_to_the_runner(h: Harness) -> void:
+	h.it("reports the netrunner's HP as the character's, not the screen's")
+	var session := _session([1, 1, 2, 2, 2], _black_architecture(), _runner({"hp": 30}))
+	session.perform("move")
+	session.perform("zap")
+	var runner := session.snapshot()["runner"] as Dictionary
+	h.equal(int(runner["hp"]), 24, "the ICE reached the netrunner")
+	h.equal(String(runner["character_id"]), "mira", "and the run knows whose sheet that is")
+	h.equal(int(runner["max_hp"]), 30, "with the maximum it came in with")
 
 
 static func _generation(h: Harness) -> void:

@@ -652,16 +652,22 @@ func _refresh_editor() -> void:
 		_editor_box.add_child(dv)
 
 	if _run != null:
-		var commit := UI.plain_button("Save run to architecture")
-		commit.tooltip_text = "Write derezzed programs and opened doors back onto the saved ladder"
+		var commit := UI.plain_button("Save run and damage")
+		commit.tooltip_text = (
+			"Write derezzed programs and opened doors onto the ladder, "
+			+ "and what the ICE did onto the netrunner"
+		)
 		commit.pressed.connect(commit_run)
 		_editor_box.add_child(commit)
 
 
-## Persist what the run did to the architecture.
+## Persist what the run did — to the architecture, and to the netrunner.
 ##
 ## A run is a scratch copy, like an encounter: the GM often walks one twice
-## before it counts, so writing back is a button rather than a side effect.
+## before it counts, so writing back is a button rather than a side effect. But
+## it has to write back everything the run changed. Black ICE damages the person
+## in the chair, and a Netrunner who was flatlined on the ladder should not walk
+## away from the screen at full HP.
 func commit_run() -> void:
 	if _run == null:
 		return
@@ -669,6 +675,7 @@ func commit_run() -> void:
 	if architecture.is_empty():
 		return
 	var written := 0
+	_commit_runner()
 	for entry in architecture.get("floors", []):
 		var floor_entry: Dictionary = entry
 		var live := _run.floor_by_id(String(floor_entry["id"]))
@@ -685,6 +692,24 @@ func commit_run() -> void:
 	Store.set_status("%d floors updated" % written)
 	_message = "Saved the run onto %s." % String(architecture["name"])
 	_refresh_card()
+
+
+## Write the damage the run did onto the netrunner's sheet.
+##
+## The same fields the Location screen commits, for the same reason: HP is the
+## character's, not the screen's, and wound state is read back off it rather
+## than carried, so the sheet cannot end up saying "unhurt" at three HP.
+func _commit_runner() -> void:
+	var runner: Dictionary = _snapshot.get("runner", {})
+	var character := Store.character_by_id(String(runner.get("character_id", "")))
+	if character.is_empty():
+		return
+	var hp := int(runner["hp"])
+	var max_hp := maxi(1, int(character.get("max_hp", runner["max_hp"])))
+	character["hp"] = mini(hp, max_hp)
+	character["wound_state"] = Mortality.state_for(int(character["hp"]), max_hp)
+	if int(character["hp"]) <= 0:
+		character["death_save_due"] = true
 
 
 # -- refresh ----------------------------------------------------------------------

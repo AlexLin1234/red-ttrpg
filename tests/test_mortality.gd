@@ -103,6 +103,26 @@ static func _states(h: Harness) -> void:
 	h.equal(Mortality.action_penalty({"wound_state": "mortally_wounded"}), -4, "mortally")
 	h.equal(Mortality.action_penalty({"wound_state": "dead"}), 0, "dead")
 
+	h.it("keeps a sheet's wound state honest about its own HP")
+	# Every path that writes HP writes the state with it, so the two cannot
+	# normally disagree. The sheet is what three screens read, so it is
+	# reconciled rather than trusted.
+	var stale := {"name": "Stale", "hp": 5, "max_hp": 40, "wound_state": "unhurt"}
+	CharacterRules.ensure_character(stale)
+	h.equal(stale["wound_state"], "seriously_wounded", "a stale state is corrected")
+
+	var healed := {"name": "Healed", "hp": 40, "max_hp": 40, "wound_state": "mortally_wounded"}
+	CharacterRules.ensure_character(healed)
+	h.equal(healed["wound_state"], "unhurt", "and so is one left behind by healing")
+
+	var corpse := {"name": "Corpse", "hp": 40, "max_hp": 40, "wound_state": "dead"}
+	CharacterRules.ensure_character(corpse)
+	h.equal(corpse["wound_state"], "dead", "death is not derivable from a number")
+
+	var sheetless := {"name": "Nobody"}
+	CharacterRules.ensure_character(sheetless)
+	h.equal(sheetless.has("wound_state"), false, "and a sheet with no HP is left alone")
+
 	h.it("loads an actor already at zero as mortally wounded and owing a save")
 	var session := _encounter()
 	var downed := _actor(session, "downed")

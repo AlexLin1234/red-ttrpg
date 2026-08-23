@@ -212,6 +212,13 @@ func _rebuild_hero() -> void:
 	# The hero panel shows party state and the log, so it needs the whole
 	# campaign — but only for the one save the GM is looking at.
 	var loaded := CampaignContainer.load_file(String(row["path"]))
+	# For the campaign that is actually open, the party comes from memory rather
+	# than from the file. The file is what was last written; a card claiming a
+	# character is at 42 of 45 while every other screen has them at 11 is worse
+	# than no card at all.
+	if Store.is_open() and Store.path == String(row["path"]):
+		loaded["roster"] = Store.roster
+		loaded["campaign"] = Store.campaign
 	var column := UI.vbox(0)
 	shell.add_child(column)
 

@@ -245,6 +245,7 @@ static func ensure_character(character: Dictionary) -> void:
 	# Reputation is what a Facedown is actually fought with, so every sheet
 	# carries one whether or not the GM has ever set it.
 	character["reputation"] = clampi(int(character.get("reputation", 0)), 0, 10)
+	_reconcile_wound_state(character)
 	# Old sheets predate the creation workflow and remain completed rather than
 	# unexpectedly becoming locked behind a point-allocation screen.
 	character["creation_complete"] = bool(character.get("creation_complete", true))
@@ -281,6 +282,27 @@ static func ensure_character(character: Dictionary) -> void:
 			entry["stat"] = String(definition["stat"])
 			entry["x2"] = bool(definition.get("x2", false))
 		entry["level"] = clampi(int(entry.get("level", 0)), 0, 10)
+
+
+## Keep a sheet's wound state honest about its own HP.
+##
+## Every path that writes HP writes the state with it, so the two cannot
+## normally disagree — but "normally" is the sort of guarantee that quietly
+## stops being true. A sheet is the source of truth for a character's condition
+## and three screens read it, so it is reconciled here rather than trusted.
+##
+## Death is the exception, and the only one: it is not derivable from a number.
+## A character is dead because a Death Save said so, and healing a corpse does
+## not undo that.
+static func _reconcile_wound_state(character: Dictionary) -> void:
+	if not character.has("hp") or not character.has("max_hp"):
+		return
+	var stored := String(character.get("wound_state", ""))
+	if stored == Mortality.DEAD:
+		return
+	character["wound_state"] = Mortality.state_for(
+		int(character["hp"]), maxi(1, int(character["max_hp"]))
+	)
 
 
 static func new_character_skills() -> Array:

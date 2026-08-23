@@ -249,21 +249,42 @@ func _build_sheet_head(character: Dictionary) -> Control:
 	vitals.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	head.add_child(vitals)
 
+	# The sheet used to show max HP over the threshold at which the character
+	# becomes Seriously Wounded, which meant the one screen that should say a
+	# character is hurt never did. It shows what they have left, and what that
+	# state costs them, with the threshold underneath.
+	var hp := int(character["hp"])
+	var max_hp := int(character["max_hp"])
+	var wound_state := String(
+		character.get("wound_state", Mortality.state_for(hp, max_hp))
+	)
 	var hp_box := UI.vbox(1)
 	hp_box.alignment = BoxContainer.ALIGNMENT_END
-	var hp_label := UI.micro("HP / seriously wounded")
+	var hp_label := UI.micro("HP")
 	hp_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	hp_box.add_child(hp_label)
-	var hp_value := UI.display(
-		"%d / %d"
-		% [
-			int(character["max_hp"]),
-			CampaignSchema.serious_wound_threshold(int(character["max_hp"])),
-		],
-		30,
-	)
+	var hp_tone := UI.TEXT_DISPLAY
+	if wound_state == Mortality.SERIOUSLY_WOUNDED:
+		hp_tone = UI.WARN
+	elif wound_state == Mortality.MORTALLY_WOUNDED or wound_state == Mortality.DEAD:
+		hp_tone = UI.ALERT_BRIGHT
+	var hp_value := UI.display("%d / %d" % [hp, max_hp], 30, hp_tone)
 	hp_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	hp_box.add_child(hp_value)
+	var penalty := Mortality.action_penalty({"wound_state": wound_state})
+	var condition := Mortality.label(wound_state)
+	if penalty != 0:
+		condition += " · %+d to all actions" % penalty
+	var condition_label := UI.micro(
+		condition, hp_tone if wound_state != Mortality.UNHURT else UI.MUTED
+	)
+	condition_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	hp_box.add_child(condition_label)
+	var threshold_label := UI.micro(
+		"Seriously wounded at %d" % CampaignSchema.serious_wound_threshold(max_hp)
+	)
+	threshold_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	hp_box.add_child(threshold_label)
 	vitals.add_child(hp_box)
 
 	var humanity := int(character["humanity"])
