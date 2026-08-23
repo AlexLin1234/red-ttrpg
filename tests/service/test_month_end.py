@@ -82,9 +82,7 @@ def test_the_service_bills_the_same_way_the_app_does(client, tmp_path):
 
 
 def test_the_table_the_service_bills_from_is_the_shared_one():
-    document = json.loads(
-        (CASES_PATH.parent / "lifestyle.json").read_text(encoding="utf-8")
-    )
+    document = json.loads((CASES_PATH.parent / "lifestyle.json").read_text(encoding="utf-8"))
     costs = {str(row["key"]): int(row["cost"]) for row in document["catalog"]}
     assert service.LIFESTYLES == costs
     assert service.GRACE_DAYS == int(document["grace_days"])
