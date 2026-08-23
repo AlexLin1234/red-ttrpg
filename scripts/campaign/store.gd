@@ -34,6 +34,7 @@ var status := ""
 var active_location_id := ""
 var active_character_id := ""
 var active_architecture_id := ""
+var active_vehicle_id := ""
 var _month_undo: Array[Dictionary] = []
 var _month_redo: Array[Dictionary] = []
 var _player_view: Dictionary = {}
@@ -148,6 +149,7 @@ func close() -> void:
 	active_location_id = ""
 	active_character_id = ""
 	active_architecture_id = ""
+	active_vehicle_id = ""
 	_month_undo.clear()
 	_month_redo.clear()
 
@@ -555,8 +557,40 @@ func perform_hustles(character_ids: Array, rng: Dice.RandomSource) -> Dictionary
 	}
 
 
+## The blocks the Location screen can place, plus every car in the garage.
+##
+## A vehicle parked on a board is cover with a wreck value, so it belongs in the
+## same palette rather than in a system of its own: line of sight, ablation and
+## the cover prompt all then work on it unchanged.
 func cover_palette() -> Array:
-	return campaign.get("cover_palette", [])
+	var palette: Array = (campaign.get("cover_palette", []) as Array).duplicate(true)
+	for entry in vehicles():
+		palette.append(Vehicles.as_cover(entry))
+	return palette
+
+
+func vehicles() -> Array:
+	CampaignSchema.ensure_vehicles(campaign)
+	return campaign["vehicles"]
+
+
+func vehicle_by_id(id: String) -> Dictionary:
+	return CampaignSchema.vehicle_by_id(campaign, id)
+
+
+func add_vehicle(vehicle: Dictionary) -> void:
+	vehicles().append(vehicle)
+	active_vehicle_id = String(vehicle["id"])
+	mark_dirty()
+
+
+func remove_vehicle(id: String) -> bool:
+	if not CampaignSchema.remove_vehicle(campaign, id):
+		return false
+	if active_vehicle_id == id:
+		active_vehicle_id = ""
+	mark_dirty()
+	return true
 
 
 func cover_by_id(id: String) -> Dictionary:

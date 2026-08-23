@@ -12,6 +12,7 @@ const MarketScreen := preload("res://scripts/screens/market.gd")
 const ItemWorkshopScreen := preload("res://scripts/screens/item_workshop.gd")
 const AssistantScreen := preload("res://scripts/screens/assistant.gd")
 const NetrunScreen := preload("res://scripts/screens/netrun.gd")
+const VehiclesScreen := preload("res://scripts/screens/vehicles.gd")
 const PlayerDisplayScreen := preload("res://scripts/screens/player_display.gd")
 
 const SCREENS := [
@@ -20,6 +21,7 @@ const SCREENS := [
 	{"id": "city", "label": "City"},
 	{"id": "location", "label": "Location"},
 	{"id": "netrun", "label": "Netrun"},
+	{"id": "vehicles", "label": "Garage"},
 	{"id": "forge", "label": "Forge"},
 	{"id": "market", "label": "Market"},
 	{"id": "night_market", "label": "Night Market"},
@@ -99,6 +101,9 @@ func _build_header() -> Control:
 	# the window and clip the Save button off the right-hand edge.
 	_title_label = UI.elide(UI.micro("GM Console · Build 0.5.0"))
 	_title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	# Enough to read a few words of the campaign name once the nav strip has
+	# taken its share, and no more: this is the half of the bar that gives way.
+	_title_label.custom_minimum_size.x = 116
 	UI.expand(_title_label, true, false)
 	row.add_child(_title_label)
 
@@ -167,6 +172,8 @@ func _show(screen_id: String) -> void:
 			_screen = LocationScreen.new()
 		"netrun":
 			_screen = NetrunScreen.new()
+		"vehicles":
+			_screen = VehiclesScreen.new()
 		"forge":
 			_screen = ForgeScreen.new()
 		"market":

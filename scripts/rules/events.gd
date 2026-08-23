@@ -156,6 +156,38 @@ static func _apply_one(state: Dictionary, event: Dictionary) -> Dictionary:
 		runner["alerted"] = kind == "alert_raised"
 		return {"kind": "alert_raised" if previous else "alert_cleared"}
 
+	# -- the chase -----------------------------------------------------------
+	#
+	# The two cars are actors, so they take damage through the kinds above. Only
+	# the road between them needs its own.
+	if kind == "chase_gap_opened" or kind == "chase_gap_closed":
+		var chase: Dictionary = state["chase"]
+		var amount := int(event["amount"])
+		var previous := int(chase.get("gap", 0))
+		# No clamping here: the caller already decided how far the gap actually
+		# moved, and an event that quietly trimmed it would not invert.
+		chase["gap"] = previous + (amount if kind == "chase_gap_opened" else -amount)
+		return {
+			"kind": "chase_gap_closed" if kind == "chase_gap_opened" else "chase_gap_opened",
+			"amount": amount,
+		}
+
+	if kind == "chase_outcome_set":
+		var chase: Dictionary = state["chase"]
+		var previous := String(chase.get("outcome", ""))
+		chase["outcome"] = String(event["outcome"])
+		return {"kind": "chase_outcome_set", "outcome": previous}
+
+	if kind == "chase_round_advanced" or kind == "chase_round_reversed":
+		var chase: Dictionary = state["chase"]
+		var previous := int(chase.get("round", 1))
+		chase["round"] = maxi(1, previous + (1 if kind == "chase_round_advanced" else -1))
+		return {
+			"kind": (
+				"chase_round_reversed" if kind == "chase_round_advanced" else "chase_round_advanced"
+			)
+		}
+
 	if kind == "runner_jacked_out" or kind == "runner_jacked_in":
 		var runner := _runner(state)
 		var previous := bool(runner.get("jacked_out", false))

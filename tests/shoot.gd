@@ -81,6 +81,10 @@ func _ready() -> void:
 	await _settle(30)
 	await _drive_netrun(app)
 
+	app.call("_show", "vehicles")
+	await _settle(30)
+	await _drive_chase(app)
+
 	app.call("_show", "forge")
 	await _settle(30)
 	await _shoot("1d-forge")
@@ -395,6 +399,45 @@ func _drive_netrun(app: Control) -> void:
 		_errors.append(
 			"three NET Actions should have been spent, %d left of 6" % int(runner["actions_left"])
 		)
+
+
+## Two cars, one road: add them, start the chase, and run an exchange.
+func _drive_chase(app: Control) -> void:
+	var screen: Node = app.get("_screen")
+	if screen == null or not screen.has_method("start_chase"):
+		_errors.append("garage screen did not expose the chase path")
+		return
+
+	screen.call("add_vehicle", "muscle")
+	screen.call("add_vehicle", "bike")
+	await _settle(12)
+	if Store.vehicles().size() < 2:
+		_errors.append("adding vehicles did not put them in the campaign")
+		return
+	await _shoot("1h-garage")
+
+	screen.call("start_chase")
+	await _settle(12)
+	screen.call("exchange", "push", "shortcut")
+	await _settle(12)
+	await _shoot("1h-chase")
+
+	var snapshot: Dictionary = screen.get("_snapshot")
+	if snapshot.is_empty():
+		_errors.append("the chase produced no snapshot")
+		return
+	if int(snapshot["round"]) != 2:
+		_errors.append("the exchange did not advance the round")
+	# A vehicle placed on a board is cover, so the garage has to reach the
+	# Location screen's palette as well as this one.
+	var palette_has_vehicle := false
+	for cover in Store.cover_palette():
+		if String((cover as Dictionary)["material"]) == "Vehicle Hulk" and String(
+			(cover as Dictionary)["id"]
+		).begins_with("vehicle-"):
+			palette_has_vehicle = true
+	if not palette_has_vehicle:
+		_errors.append("a garaged vehicle did not reach the cover palette")
 
 
 func _settle(frames: int) -> void:
