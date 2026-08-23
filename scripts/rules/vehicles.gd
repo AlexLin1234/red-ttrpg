@@ -225,8 +225,11 @@ static func as_cover(vehicle: Dictionary) -> Dictionary:
 	var size: Array = vehicle.get("size_m", [4.2, 1.5, 1.8])
 	return {
 		"id": "vehicle-%s" % String(vehicle.get("id", "cover")),
-		"label": String(vehicle.get("name", "Vehicle")),
+		# "name", not "label": this has to be the same shape as every other entry
+		# in the cover palette or the Location screen's props tab draws a blank.
+		"name": String(vehicle.get("name", "Vehicle")),
 		"material": "Vehicle Hulk",
+		"destructible": true,
 		"width": float(size[0]),
 		"depth": float(size[1]),
 		"height": float(size[2]),

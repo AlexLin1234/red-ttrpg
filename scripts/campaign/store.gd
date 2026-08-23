@@ -498,6 +498,41 @@ func perform_hustle(character_id: String, rng: Dice.RandomSource) -> Dictionary:
 	return result
 
 
+## Roll a squad onto the roster and hand the sheets back.
+##
+## The board still has to place them; this only makes them exist, which is the
+## part the GM was previously doing one mook at a time in the Forge.
+func spawn_squad(squad_key: String, count: int, rng: Dice.RandomSource) -> Array[Dictionary]:
+	var members := EncounterTables.roll_squad(squad_key, count, rng)
+	for member in members:
+		add_character(member)
+	if not members.is_empty():
+		(campaign.get("session_log", []) as Array).push_front(
+			{
+				"session": int(campaign.get("sessions", 0)),
+				"text": "%d %s rolled onto the roster"
+				% [members.size(), String(EncounterTables.squad(squad_key)["label"])],
+			}
+		)
+		mark_dirty()
+	return members
+
+
+## Roll what is happening on this corner, and keep it where the GM can read it.
+func roll_street_encounter(rng: Dice.RandomSource) -> Dictionary:
+	var rolled := EncounterTables.roll_street(rng)
+	campaign["last_street_encounter"] = rolled
+	(campaign.get("session_log", []) as Array).push_front(
+		{"session": int(campaign.get("sessions", 0)), "text": String(rolled["text"])}
+	)
+	mark_dirty()
+	return rolled
+
+
+func last_street_encounter() -> Dictionary:
+	return campaign.get("last_street_encounter", {})
+
+
 ## Run one downtime action, advance the clock by what it took, and log it.
 ##
 ## The dispatch lives here rather than in [Downtime] for the same reason the

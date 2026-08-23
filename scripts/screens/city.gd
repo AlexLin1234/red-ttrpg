@@ -131,6 +131,29 @@ func _build_hustle_dialog() -> void:
 	add_child(_hustle_dialog)
 
 
+## Something happening on this corner, for when the party stops somewhere the
+## GM had not prepared. Rolled, logged, and left on screen to read off.
+func _build_street_encounter() -> Control:
+	var box := UI.vbox(UI.GAP_1)
+	var button := UI.plain_button("Roll a street encounter")
+	button.pressed.connect(roll_street_encounter)
+	box.add_child(button)
+	var last := Store.last_street_encounter()
+	if last.is_empty():
+		return box
+	var text := UI.body(String(last["text"]), 11, UI.MUTED)
+	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(text)
+	return box
+
+
+func roll_street_encounter() -> Dictionary:
+	var rolled := Store.roll_street_encounter(Dice.SeededRandom.new(Time.get_ticks_usec()))
+	Store.set_status("Street encounter rolled")
+	_refresh_rail()
+	return rolled
+
+
 ## The other things a week off is for. Its own class, so the clock keeps the
 ## button and this screen does not keep the form.
 func _build_downtime_dialog() -> void:
@@ -680,6 +703,8 @@ func _build_month_close(clock: Dictionary) -> Control:
 	downtime_button.disabled = _closing_month
 	downtime_button.pressed.connect(open_downtime_dialog)
 	box.add_child(downtime_button)
+
+	box.add_child(_build_street_encounter())
 
 	var report: Dictionary = Store.campaign.get("last_lifestyle_report", {})
 	if report.is_empty():

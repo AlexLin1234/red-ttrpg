@@ -19,13 +19,6 @@ const MATERIAL_COLORS := {
 	"Vehicle Hulk": Color("63343a"),
 }
 
-const MOOK_FIRST: PackedStringArray = [
-	"Wire", "Chrome", "Sixer", "Rat", "Coil", "Dregs", "Static", "Hatch"
-]
-const MOOK_LAST: PackedStringArray = [
-	"Vasquez", "Okoro", "Petrov", "Ng", "Hale", "Duarte", "Sable", "Kovac"
-]
-
 var _tab := "stats"
 var _roster_box: VBoxContainer
 var _sheet_box: VBoxContainer
@@ -1393,48 +1386,15 @@ func _blank_character() -> Dictionary:
 	return character
 
 
+## One rolled mook, from the same tables the board's squad spawner uses.
+##
+## The Forge rolls one at a time because that is what a named NPC needs; the
+## Location screen rolls a whole archetype at once. Both come off
+## [EncounterTables] so the two cannot drift apart.
 func _roll_mook() -> Dictionary:
-	var stats := CampaignSchema.empty_stats()
-	for key in CampaignSchema.STAT_KEYS:
-		stats[key] = randi_range(3, 6)
-	var max_hp := randi_range(20, 32)
-	var sp := randi_range(4, 11)
-	var armor := CampaignSchema.empty_armor()
-	for location in Resolver.HIT_LOCATIONS:
-		armor[location] = {"sp": sp, "ablated": false}
-
-	return {
-		"id": "mook-%d" % Time.get_ticks_usec(),
-		"name": "%s %s" % [MOOK_FIRST[randi() % MOOK_FIRST.size()], MOOK_LAST[randi() % MOOK_LAST.size()]],
-		"role": "Mook",
-		"kind": "mook",
-		"side": "hostile",
-		"tags": ["MOOK", "ROLLED"],
-		"stats": stats,
-		"skills":
-		[
-			{"name": "Handgun", "stat": "REF", "level": randi_range(2, 5)},
-			{"name": "Evasion", "stat": "DEX", "level": randi_range(1, 3)},
-		],
-		"gear": [{"name": "Service Sidearm", "kind": "weapon", "detail": "2d6"}],
-		"armor": armor,
-		"hp": max_hp,
-		"max_hp": max_hp,
-		"humanity": 30,
-		"max_humanity": 40,
-		"weapons":
-		[
-			{
-				"name": "Service Sidearm",
-				"ammo": 12,
-				"magazine": 12,
-				"weapon_type": "pistol",
-				"damage_dice": 2,
-				"rof": 2,
-				"autofire_rating": -1,
-			}
-		],
-	}
+	return EncounterTables.roll_mook(
+		EncounterTables.squad("boostergang"), Dice.SeededRandom.new(Time.get_ticks_usec())
+	)
 
 
 ## A live isometric preview of the cover being built.

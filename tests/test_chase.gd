@@ -62,6 +62,7 @@ static func _garage(h: Harness) -> void:
 	h.it("presents a parked vehicle as a cover block")
 	var cover := Vehicles.as_cover(bike)
 	h.equal(cover["material"], "Vehicle Hulk", "material")
+	h.equal(cover["name"], "Street Bike", "the palette reads names, not labels")
 	h.equal(cover["hp"], 25, "the block wrecks at the vehicle's SDP")
 	h.equal(cover["sp"], 5, "and stops what its plating stops")
 

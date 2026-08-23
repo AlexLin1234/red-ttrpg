@@ -330,6 +330,30 @@ func _drive_combat(app: Control) -> void:
 	await _shoot("1c-resolution")
 	await _drive_condition(screen)
 	await _drive_player_display(app, screen)
+	await _drive_spawn(screen)
+
+
+## An ambush arrives as one click rather than a dozen trips to the Forge.
+func _drive_spawn(screen: Node) -> void:
+	if not screen.has_method("spawn_squad"):
+		_errors.append("location screen did not expose the squad spawner")
+		return
+	var before: int = (screen.call("unit_ids") as PackedStringArray).size()
+	var placed: Array = screen.call("spawn_squad", "corp_security", 3)
+	await _settle(14)
+	if placed.size() != 3:
+		_errors.append("spawning three placed %d" % placed.size())
+	var after: int = (screen.call("unit_ids") as PackedStringArray).size()
+	if after != before + placed.size():
+		_errors.append("the squad did not reach the board (%d -> %d)" % [before, after])
+	var cells := {}
+	for unit in Store.active_location().get("units", []):
+		var entry: Dictionary = unit
+		var key := "%d,%d,%d" % [int(entry["x"]), int(entry["z"]), int(entry.get("layer", 0))]
+		if cells.has(key):
+			_errors.append("two units were spawned onto the same cell")
+		cells[key] = true
+	await _shoot("1c-squad")
 
 
 ## The condition rail: whoever came out of that exchange worst, and the buttons

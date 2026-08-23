@@ -179,8 +179,100 @@ func _rebuild_palette() -> void:
 					{"id": String(entry["id"]), "label": String(entry["name"]), "sub": String(entry["role"])}
 				)
 
+	if _palette_tab == "units":
+		_palette_box.add_child(_build_squad_spawner())
+		_palette_box.add_child(UI.rule_line())
+
 	for entry in entries:
 		_palette_box.add_child(_build_palette_chip(entry))
+
+
+## Roll a whole squad onto the deck at once.
+##
+## The Forge could already roll one mook, and then the GM placed it, and then
+## rolled the next one. An ambush is not one mook.
+func _build_squad_spawner() -> Control:
+	var box := UI.vbox(UI.GAP_1)
+	box.add_child(UI.micro("Spawn a squad"))
+	var picker := OptionButton.new()
+	picker.clip_text = true
+	for entry in EncounterTables.SQUADS:
+		var profile: Dictionary = entry
+		picker.add_item(String(profile["label"]))
+		picker.set_item_metadata(picker.item_count - 1, String(profile["key"]))
+	box.add_child(picker)
+
+	var row := UI.hbox(UI.GAP_2)
+	var count := SpinBox.new()
+	count.min_value = 0
+	count.max_value = 12
+	count.prefix = "N "
+	count.custom_minimum_size = Vector2(74, 0)
+	count.tooltip_text = "0 rolls the archetype's own size"
+	row.add_child(count)
+	var spawn := UI.primary_button("Spawn")
+	UI.expand(spawn, true, false)
+	spawn.pressed.connect(
+		func() -> void:
+			spawn_squad(String(picker.get_item_metadata(picker.selected)), int(count.value))
+	)
+	row.add_child(spawn)
+	box.add_child(row)
+	return box
+
+
+## Roll a squad and stand it on the nearest free tiles.
+##
+## Public so the screenshot runner drives the GM's own path.
+func spawn_squad(squad_key: String, count := 0) -> Array:
+	var location := Store.active_location()
+	if location.is_empty():
+		return []
+	var members := Store.spawn_squad(
+		squad_key, count, Dice.SeededRandom.new(Time.get_ticks_usec())
+	)
+	var placed: Array = []
+	for member in members:
+		var cell := _free_cell()
+		if cell.is_empty():
+			break
+		var unit := {
+			"id": "unit-%d-%d" % [Time.get_ticks_usec(), placed.size()],
+			"character_id": String(member["id"]),
+			"x": int(cell["x"]),
+			"z": int(cell["z"]),
+			"layer": int(cell.get("layer", 0)),
+		}
+		(location["units"] as Array).append(unit)
+		placed.append(unit)
+
+	Store.mark_dirty()
+	_build_encounter(location)
+	_board.set_location(location, Store.cover_palette())
+	_sync_units()
+	_message = "%d %s on the deck." % [
+		placed.size(), String(EncounterTables.squad(squad_key)["label"])
+	]
+	_refresh()
+	return placed
+
+
+## The first tile nobody is standing on.
+##
+## Squads land wherever there is room rather than in a formation: the GM drags
+## them where they want them, which is what the Move tool has always been for.
+func _free_cell() -> Dictionary:
+	var location := Store.active_location()
+	var taken := {}
+	for unit in location.get("units", []):
+		var entry: Dictionary = unit
+		taken["%d,%d,%d" % [int(entry["x"]), int(entry["z"]), int(entry.get("layer", 0))]] = true
+	for tile in location.get("tiles", []):
+		var entry: Dictionary = tile
+		var key := "%d,%d,%d" % [int(entry["x"]), int(entry["z"]), int(entry.get("layer", 0))]
+		if not taken.has(key):
+			return {"x": int(entry["x"]), "z": int(entry["z"]), "layer": int(entry.get("layer", 0))}
+	return {}
 
 
 func _build_palette_chip(entry: Dictionary) -> Control:
