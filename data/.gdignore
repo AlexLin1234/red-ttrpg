@@ -1,3 +1,0 @@
-# Private runtime data is read explicitly by Redline. Godot must not import it.
-# In particular, extracted table column names may contain newlines or question
-# marks which are invalid in the generated `.translation` cache file names.

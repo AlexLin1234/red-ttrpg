@@ -1,0 +1,9 @@
+# Private runtime data is read explicitly by Redline. Godot must not import it.
+# A GM's extracted map is theirs, and an importer would leave a .import file
+# beside it naming a file that is deliberately not in Git.
+#
+# This ignore covers the maps folder rather than the whole of data/, which is
+# where it used to sit. Godot's exporter can only include files its filesystem
+# knows about, so ignoring all of data/ kept every shipped table — the item
+# catalog, the Lifestyle table — out of every exported build. The JSON beside
+# this folder has no importer to go wrong.

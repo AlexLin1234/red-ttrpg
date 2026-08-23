@@ -166,10 +166,14 @@ requirements.txt`. The City screen loads the resulting RGB-compatible PNG at
 runtime, preserves its aspect ratio, and toggles it with **M** or **Map [M]**.
 When absent, the built-in map remains usable.
 
-The committed `data/.gdignore` prevents Godot from trying to import private
-runtime tables as translation catalogs. If the project was previously opened
-with extracted tables present, close Godot and remove the `.godot/` directory
-once to clear the old failed import records; Godot will rebuild that cache.
+The committed `data/maps/.gdignore` keeps Godot from importing a GM's extracted
+map, which would leave a `.import` file beside it naming a file that is
+deliberately not in Git. It covers that folder rather than all of `data/`,
+because Godot's exporter can only include files its filesystem knows about:
+ignoring the whole folder kept every shipped table out of every exported build.
+If the project was previously opened with extracted tables present, close Godot
+and remove the `.godot/` directory once to clear the old failed import records;
+Godot will rebuild that cache.
 The City screen loads that RGB-compatible PNG at runtime, preserves its aspect
 ratio, and toggles it with **M** or **Map [M]**. When absent, the built-in map
 remains usable. For cloud use, `docker compose up --build` provides persistent
