@@ -750,6 +750,9 @@ func _build_rail() -> Control:
 	column.add_child(_selected_box)
 
 	column.add_child(UI.rule_line())
+	column.add_child(UI.margins(_build_player_display_controls(), UI.GAP_3))
+
+	column.add_child(UI.rule_line())
 	var actions := UI.vbox(UI.GAP_2)
 	var top := UI.hbox(UI.GAP_2)
 	var roll := UI.plain_button("Roll initiative")
@@ -789,6 +792,37 @@ func _build_rail() -> Control:
 	return shell
 
 
+## What the second screen is allowed to add to what it already shows.
+##
+## Both default off: the table gets positions and a name, not the arithmetic
+## behind a DV or an enemy's exact HP.
+func _build_player_display_controls() -> Control:
+	var box := UI.vbox(UI.GAP_2)
+	var head := UI.hbox()
+	var title := UI.micro("Player display")
+	UI.expand(title, true, false)
+	head.add_child(title)
+	head.add_child(UI.micro("Second screen"))
+	box.add_child(head)
+
+	var options := PlayerView.options_for(Store.active_location())
+	var row := UI.hbox(1)
+	for entry in [
+		{"key": "show_enemy_hp", "label": "Enemy HP"},
+		{"key": "show_math", "label": "Dice math"},
+	]:
+		var option: Dictionary = entry
+		var key := String(option["key"])
+		var button := UI.tab_button(String(option["label"]), bool(options[key]))
+		UI.expand(button, true, false)
+		button.pressed.connect(
+			func() -> void: set_player_display_option(key, button.button_pressed)
+		)
+		row.add_child(button)
+	box.add_child(row)
+	return box
+
+
 func _sync_units() -> void:
 	if _board == null:
 		return
@@ -826,6 +860,62 @@ func _refresh() -> void:
 	_refresh_card()
 	if _board != null:
 		_board.set_selection(_selected_unit)
+	_publish_player_view()
+
+
+## Hand the table's window the filtered view of what just happened.
+##
+## Published on every refresh rather than on a timer, so the TV is never a beat
+## behind the console. Leaving this screen does not blank it: the GM stepping
+## over to the Market mid-fight should not clear the board the table is reading.
+func _publish_player_view() -> void:
+	var location := Store.active_location()
+	if location.is_empty():
+		Store.publish_player_view({})
+		return
+	var characters := {}
+	for character in Store.characters():
+		characters[String((character as Dictionary)["id"])] = character
+	Store.publish_player_view(
+		PlayerView.compose(
+			_snapshot,
+			location,
+			characters,
+			Store.cover_palette(),
+			PlayerView.options_for(location),
+		)
+	)
+
+
+func _unit_entry(unit_id: String) -> Dictionary:
+	for unit in Store.active_location().get("units", []):
+		if String((unit as Dictionary)["id"]) == unit_id:
+			return unit
+	return {}
+
+
+## Take a unit off the table's screen, or put it back.
+##
+## The ambush waiting in the stairwell is on the GM's board from the moment it
+## is placed; the table meets it when it steps out.
+func set_unit_hidden(unit_id: String, hidden: bool) -> void:
+	var entry := _unit_entry(unit_id)
+	if entry.is_empty():
+		return
+	entry[PlayerView.HIDDEN_KEY] = hidden
+	Store.mark_dirty()
+	_refresh()
+
+
+func set_player_display_option(key: String, value: bool) -> void:
+	var location := Store.active_location()
+	if location.is_empty():
+		return
+	if not location.has("player_display"):
+		location["player_display"] = {}
+	(location["player_display"] as Dictionary)[key] = value
+	Store.mark_dirty()
+	_refresh()
 
 
 func _refresh_header() -> void:
@@ -942,6 +1032,16 @@ func _refresh_selected() -> void:
 	head.add_child(title)
 	head.add_child(UI.micro(String(actor["name"])))
 	_selected_box.add_child(UI.margins(head, UI.GAP_2))
+
+	var hidden := bool(_unit_entry(_selected_unit).get(PlayerView.HIDDEN_KEY, false))
+	var reveal := UI.tab_button("Hidden from players", hidden)
+	reveal.tooltip_text = (
+		"On the GM board only — not drawn on the player display, and not listed in its turn order"
+	)
+	reveal.pressed.connect(
+		func() -> void: set_unit_hidden(_selected_unit, reveal.button_pressed)
+	)
+	_selected_box.add_child(UI.margins(reveal, UI.GAP_2))
 
 	var stats: Dictionary = actor.get("stats", {})
 	var grid := GridContainer.new()

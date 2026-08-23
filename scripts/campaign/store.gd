@@ -16,6 +16,10 @@ signal campaign_saved
 signal status_changed(message: String)
 ## Raised when a map pin asks for its board to be opened.
 signal open_location_requested(location_id: String)
+## Raised when the screen driving the table has new material for the
+## player-facing window. The payload travels with the signal rather than being
+## fetched, so nothing that listens can read more than it was sent.
+signal player_view_changed(payload: Dictionary)
 
 var path := ""
 var manifest: Dictionary = {}
@@ -31,6 +35,7 @@ var active_location_id := ""
 var active_character_id := ""
 var _month_undo: Array[Dictionary] = []
 var _month_redo: Array[Dictionary] = []
+var _player_view: Dictionary = {}
 
 
 func is_open() -> bool:
@@ -111,11 +116,28 @@ func open(save_path: String) -> bool:
 	# from, so neither stack survives a change of campaign.
 	_month_undo.clear()
 	_month_redo.clear()
+	# Never carry one campaign's board onto the table's screen while another one
+	# is being opened.
+	publish_player_view({})
 	campaign_opened.emit()
 	return true
 
 
+## Hand the player window something new to draw.
+##
+## Anything but a screen actively running the table should be publishing {},
+## which blanks the display rather than leaving the last fight on the TV.
+func publish_player_view(payload: Dictionary) -> void:
+	_player_view = payload
+	player_view_changed.emit(payload)
+
+
+func player_view() -> Dictionary:
+	return _player_view
+
+
 func close() -> void:
+	publish_player_view({})
 	path = ""
 	manifest = {}
 	campaign = {}

@@ -294,6 +294,57 @@ func _drive_combat(app: Control) -> void:
 		_errors.append("no cover was found in the line of fire — expected the parkade pillars")
 
 	await _shoot("1c-resolution")
+	await _drive_condition(screen)
+	await _drive_player_display(app, screen)
+
+
+## The condition rail: whoever came out of that exchange worst, and the buttons
+## the GM reaches for when they are on the floor.
+func _drive_condition(screen: Node) -> void:
+	var snapshot: Dictionary = screen.get("_snapshot")
+	var worst := ""
+	var worst_ratio := INF
+	for actor in snapshot.get("actors", []):
+		var entry: Dictionary = actor
+		var ratio := float(entry["hp"]) / maxf(1.0, float(entry["max_hp"]))
+		if ratio < worst_ratio:
+			worst_ratio = ratio
+			worst = String(entry["id"])
+	if worst == "":
+		_errors.append("no actors to read a condition off")
+		return
+	screen.call("select_unit", worst)
+	await _settle(10)
+	await _shoot("1c-condition")
+
+
+## The table's own screen, captured from the window itself rather than the main
+## viewport — which is the whole point of it being a separate window.
+func _drive_player_display(app: Control, screen: Node) -> void:
+	# Something on the board the players are not meant to know about yet.
+	var ids: PackedStringArray = screen.call("unit_ids")
+	if not ids.is_empty():
+		screen.call("set_unit_hidden", ids[ids.size() - 1], true)
+	await _settle(6)
+
+	app.call("toggle_player_display")
+	await _settle(30)
+	var window: Window = app.get("_player_window")
+	if window == null:
+		_errors.append("the player display did not open")
+		return
+	if window.exclude_from_capture:
+		_errors.append("the player display asked to be excluded from capture")
+	var payload: Dictionary = Store.player_view()
+	if payload.is_empty():
+		_errors.append("the location screen published nothing to the player display")
+	elif int(payload.get("units", []).size()) >= ids.size():
+		_errors.append("the hidden unit still reached the player display")
+	await _shoot_window("1c-player-display", window)
+	window.hide()
+	if not ids.is_empty():
+		screen.call("set_unit_hidden", ids[ids.size() - 1], false)
+	await _settle(6)
 
 
 func _settle(frames: int) -> void:
@@ -303,7 +354,17 @@ func _settle(frames: int) -> void:
 
 
 func _shoot(shot_name: String) -> void:
-	var image := get_viewport().get_texture().get_image()
+	await _save_shot(shot_name, get_viewport())
+
+
+## A separate native window is its own Viewport, so it is captured from itself
+## rather than from the main one, which does not contain it.
+func _shoot_window(shot_name: String, window: Window) -> void:
+	await _save_shot(shot_name, window)
+
+
+func _save_shot(shot_name: String, viewport: Viewport) -> void:
+	var image := viewport.get_texture().get_image()
 	var path := "%s/%s.png" % [OUT_DIR, shot_name]
 	if image.save_png(path) != OK:
 		_errors.append("could not write %s" % path)
