@@ -112,6 +112,9 @@ jobs:
           name: screens
           path: .shots/
           if-no-files-found: warn
+          # .shots is a dot-directory, and v4 skips hidden files by default —
+          # without this the step uploads nothing and only warns about it.
+          include-hidden-files: true
 
   ratchets:
     name: Ratchets (advisory)
