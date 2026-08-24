@@ -3,22 +3,31 @@
 export_presets.cfg
 *.translation
 
-# Book-derived data stays local.
+# Book-derived data stays local. No rulebook, in any container format, is ever
+# published from this repository.
 *.pdf
+*.epub
+*.mobi
+*.azw
+*.azw3
+*.cbz
+*.cbr
 !docs/mockups/*.pdf
-# Private source and extracted map assets (keep the mount point in Git).
-data/maps/*.png
-data/maps/*.jpg
-data/maps/*.jpeg
-data/maps/*.pdf
-!data/maps/.gitkeep
+
+# data/ exists only to hold private, book-derived runtime data: extracted text,
+# page scans, table CSVs, the rules index and the rulebook item catalog. Exclude
+# the whole tree by default, so a new extraction artifact is never published by
+# accident, and re-include just the two mount points Git has to carry. Add a
+# negation here only for a file that is genuinely ours to ship.
+data/*
 !data/.gdignore
-# Extracted rulebook text, tables and page scans.
-data/chunks.jsonl
-data/rules.db
-data/tables/
-# Item catalog extracted from a user-owned rulebook by scripts/extract_items.py.
-data/items_local.json
+!data/maps/
+data/maps/*
+!data/maps/.gitkeep
+
+# catalog/ ships our own homebrew placeholders and is tracked. A rulebook-derived
+# catalog written beside them is not ours to publish.
+catalog/items_local.json
 
 # Build output
 build/
@@ -35,6 +44,7 @@ assistant/books/
 assistant/index/
 assistant/history/
 assistant/library.json
+assistant/settings.json
 
 tmp/
 .gstack/

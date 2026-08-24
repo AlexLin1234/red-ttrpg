@@ -8,7 +8,7 @@ static func _character(cash := 6000) -> Dictionary:
 
 
 static func _catalog() -> Array:
-	var document: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/items.json"))
+	var document: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://catalog/items.json"))
 	return document["items"]
 
 
