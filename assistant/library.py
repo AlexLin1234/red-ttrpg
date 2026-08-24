@@ -41,6 +41,13 @@ STATUS_FAILED = "failed"
 STATUS_UNAVAILABLE = "unavailable"
 
 
+def _page_count_of(details: dict[str, object]) -> int:
+    """Narrow the page count out of :func:`extract.inspect`'s open-typed result."""
+
+    value = details.get("page_count", 0)
+    return int(value) if isinstance(value, int) else 0
+
+
 class LibraryError(RuntimeError):
     """A problem the Game Master can act on, phrased for the Library tab."""
 
@@ -213,9 +220,7 @@ class RulebookLibrary:
         if size <= 0:
             raise LibraryError("That file is empty.")
         if size > MAX_PDF_BYTES:
-            raise LibraryError(
-                f"That PDF is larger than the {MAX_PDF_BYTES // (1024 * 1024)} MB import limit."
-            )
+            raise LibraryError(f"That PDF is larger than the {MAX_PDF_BYTES // (1024 * 1024)} MB import limit.")
         try:
             details = extract.inspect(source)
         except UnsupportedPDF as exc:
@@ -243,7 +248,7 @@ class RulebookLibrary:
             label=(label.strip() or source.name)[:MAX_LABEL_LENGTH],
             stored_name=stored_name,
             bytes=size,
-            page_count=int(details["page_count"]),
+            page_count=_page_count_of(details),
             imported_at=_now(),
             status=STATUS_PENDING,
         )
@@ -275,9 +280,7 @@ class RulebookLibrary:
                 try:
                     stored.unlink()
                 except OSError as exc:
-                    raise LibraryError(
-                        f"The book file could not be deleted: {safe_error(exc)}"
-                    ) from exc
+                    raise LibraryError(f"The book file could not be deleted: {safe_error(exc)}") from exc
             del self._books[book_id]
             self._save()
 
@@ -318,9 +321,7 @@ class RulebookLibrary:
                 on_progress(book)
 
         try:
-            count = self.index.replace_book(
-                book_id, extract.chunk_document(source, book_id), on_progress=progress
-            )
+            count = self.index.replace_book(book_id, extract.chunk_document(source, book_id), on_progress=progress)
         except UnsupportedPDF as exc:
             raise self._indexing_failed(book, str(exc)) from exc
         except Exception as exc:

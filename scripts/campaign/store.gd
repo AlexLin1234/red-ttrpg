@@ -16,6 +16,10 @@ signal campaign_saved
 signal status_changed(message: String)
 ## Raised when a map pin asks for its board to be opened.
 signal open_location_requested(location_id: String)
+## Raised when the screen driving the table has new material for the
+## player-facing window. The payload travels with the signal rather than being
+## fetched, so nothing that listens can read more than it was sent.
+signal player_view_changed(payload: Dictionary)
 
 var path := ""
 var manifest: Dictionary = {}
@@ -29,8 +33,19 @@ var status := ""
 
 var active_location_id := ""
 var active_character_id := ""
+var active_architecture_id := ""
+var active_vehicle_id := ""
 var _month_undo: Array[Dictionary] = []
 var _month_redo: Array[Dictionary] = []
+var _player_view: Dictionary = {}
+var _autosave_seconds := 0.0
+var _recovery: Dictionary = {}
+## Off only for tests and for a GM who wants the disk left alone.
+var autosave_enabled := true
+var last_autosave := 0
+## Bumped on every edit. Screens are kept alive between visits, and this is how
+## one of them knows whether what it drew is still what the campaign says.
+var edit_revision := 0
 
 
 func is_open() -> bool:
@@ -111,11 +126,36 @@ func open(save_path: String) -> bool:
 	# from, so neither stack survives a change of campaign.
 	_month_undo.clear()
 	_month_redo.clear()
+	edit_revision += 1
+	_autosave_seconds = 0.0
+	# An autosave newer than the file is the residue of a session that did not
+	# end cleanly. It is offered rather than applied: a GM who saved and then
+	# crashed would not thank an app that silently reverted them.
+	var found := Autosave.summary(path)
+	_recovery = found if bool(found.get("newer", false)) else {}
+	# Never carry one campaign's board onto the table's screen while another one
+	# is being opened.
+	publish_player_view({})
 	campaign_opened.emit()
 	return true
 
 
+## Hand the player window something new to draw.
+##
+## Anything but a screen actively running the table should be publishing {},
+## which blanks the display rather than leaving the last fight on the TV.
+func publish_player_view(payload: Dictionary) -> void:
+	_player_view = payload
+	player_view_changed.emit(payload)
+
+
+func player_view() -> Dictionary:
+	return _player_view
+
+
 func close() -> void:
+	edit_revision += 1
+	publish_player_view({})
 	path = ""
 	manifest = {}
 	campaign = {}
@@ -124,12 +164,16 @@ func close() -> void:
 	dirty = false
 	active_location_id = ""
 	active_character_id = ""
+	active_architecture_id = ""
+	active_vehicle_id = ""
+	_recovery = {}
 	_month_undo.clear()
 	_month_redo.clear()
 
 
 func mark_dirty() -> void:
 	dirty = true
+	edit_revision += 1
 	campaign_changed.emit()
 
 
@@ -240,19 +284,85 @@ func redo_month() -> bool:
 func save() -> bool:
 	if not is_open():
 		return false
-	var result := CampaignContainer.save(
-		path,
-		{"manifest": manifest, "campaign": campaign, "roster": roster, "locations": locations},
-	)
+	var result := CampaignContainer.save(path, _bundle())
 	if not bool(result.get("ok", false)):
 		set_status(String(result.get("error", "save failed")))
 		return false
 	manifest = result["manifest"]
 	size_on_disk = int(result["size"])
 	dirty = false
+	# The autosave existed only to cover the gap between edits and this moment.
+	Autosave.discard(path)
+	_autosave_seconds = 0.0
 	set_status("Saved")
 	campaign_saved.emit()
 	return true
+
+
+## Write the working copy beside the save, on a timer, while there is anything
+## to lose.
+##
+## Runs from the autoload's own process loop rather than a Timer node so it is
+## impossible to lose by rebuilding a screen.
+func _process(delta: float) -> void:
+	if not autosave_enabled or not is_open() or not dirty or path == "":
+		return
+	_autosave_seconds += delta
+	if _autosave_seconds < Autosave.INTERVAL_SECONDS:
+		return
+	autosave_now()
+
+
+func autosave_now() -> bool:
+	_autosave_seconds = 0.0
+	if not is_open() or path == "":
+		return false
+	var result := Autosave.write(path, _bundle())
+	if not bool(result.get("ok", false)):
+		# A failed autosave is not worth interrupting a session over, but it is
+		# worth saying once rather than failing silently.
+		set_status("Autosave failed: %s" % String(result.get("error", "unknown error")))
+		return false
+	last_autosave = int(Time.get_unix_time_from_system())
+	return true
+
+
+## What the open campaign could be rolled forward to, if anything.
+func recovery() -> Dictionary:
+	return _recovery
+
+
+## Load the autosave in place of what is open, keeping the real save's path so
+## the next deliberate Save writes back to the file the GM thinks they are in.
+func recover() -> bool:
+	var save_path := path
+	var loaded := Autosave.load_file(save_path)
+	if not bool(loaded.get("ok", false)):
+		set_status("Could not recover: %s" % String(loaded.get("error", "unknown error")))
+		return false
+	manifest = loaded["manifest"]
+	campaign = loaded["campaign"]
+	roster = loaded["roster"]
+	locations = loaded["locations"]
+	integrity = loaded["integrity"]
+	path = save_path
+	dirty = true
+	_recovery = {}
+	_normalize_downtime_state()
+	_month_undo.clear()
+	_month_redo.clear()
+	edit_revision += 1
+	publish_player_view({})
+	set_status("Recovered from autosave · unsaved")
+	campaign_opened.emit()
+	return true
+
+
+## Throw the recovery away and keep what was opened.
+func discard_recovery() -> void:
+	Autosave.discard(path)
+	_recovery = {}
+	campaign_changed.emit()
 
 
 func set_status(message: String) -> void:
@@ -472,6 +582,198 @@ func perform_hustle(character_id: String, rng: Dice.RandomSource) -> Dictionary:
 	return result
 
 
+# -- sessions and restore points ------------------------------------------------
+
+
+func _bundle() -> Dictionary:
+	return {"manifest": manifest, "campaign": campaign, "roster": roster, "locations": locations}
+
+
+## Add a line to the session log by hand.
+##
+## Everything else writes to the log as a side effect of doing something. This
+## is for what happened at the table, which the app has no way to know about.
+func log_line(text: String) -> bool:
+	var trimmed := text.strip_edges()
+	if trimmed == "" or not is_open():
+		return false
+	(campaign.get("session_log", []) as Array).push_front(
+		{"session": int(campaign.get("sessions", 0)), "text": trimmed}
+	)
+	mark_dirty()
+	return true
+
+
+## Take a named copy of the campaign as it stands.
+func create_restore_point(label: String) -> Dictionary:
+	if not is_open():
+		return {"ok": false, "error": "no campaign is open"}
+	var entry := RestorePoints.create(path, _bundle(), label)
+	if not bool(entry.get("ok", false)):
+		set_status(String(entry.get("error", "could not take a restore point")))
+		return entry
+	mark_dirty()
+	set_status("Restore point taken")
+	return entry
+
+
+## Put the campaign back to one of them.
+##
+## Loaded as unsaved changes, exactly as a recovery is: the file on disk is what
+## the GM last chose to write, and going back is a decision they should confirm
+## with a save rather than have made for them.
+func restore_to(id: String) -> bool:
+	if not is_open():
+		return false
+	var loaded := RestorePoints.load_point(path, id)
+	if not bool(loaded.get("ok", false)):
+		set_status("Could not restore: %s" % String(loaded.get("error", "unknown error")))
+		return false
+
+	var live := RestorePoints.entries(campaign).duplicate(true)
+	var restored: Dictionary = loaded["campaign"]
+	RestorePoints.merge_lists(restored, live)
+	campaign = restored
+	roster = loaded["roster"]
+	locations = loaded["locations"]
+	integrity = loaded["integrity"]
+	dirty = true
+	edit_revision += 1
+	active_location_id = String(locations[0]["id"]) if not locations.is_empty() else ""
+	var characters_list: Array = roster.get("characters", [])
+	active_character_id = (
+		String((characters_list[0] as Dictionary)["id"]) if not characters_list.is_empty() else ""
+	)
+	_normalize_downtime_state()
+	_month_undo.clear()
+	_month_redo.clear()
+	publish_player_view({})
+	set_status("Restored · unsaved")
+	campaign_opened.emit()
+	return true
+
+
+func remove_restore_point(id: String) -> bool:
+	if not is_open() or not RestorePoints.remove(path, campaign, id):
+		return false
+	mark_dirty()
+	return true
+
+
+func restore_points() -> Array:
+	return RestorePoints.entries(campaign)
+
+
+## Start a session: count it, log it, and take the restore point a GM will want
+## when the evening goes somewhere they did not plan for.
+func start_session() -> int:
+	if not is_open():
+		return 0
+	var number := int(campaign.get("sessions", 0)) + 1
+	campaign["sessions"] = number
+	create_restore_point("Start of session %d" % number)
+	log_line("Session %d started." % number)
+	set_status("Session %d" % number)
+	return number
+
+
+func end_session(summary := "") -> int:
+	if not is_open():
+		return 0
+	var number := int(campaign.get("sessions", 0))
+	log_line(summary if summary.strip_edges() != "" else "Session %d ended." % number)
+	create_restore_point("End of session %d" % number)
+	return number
+
+
+## Roll a squad onto the roster and hand the sheets back.
+##
+## The board still has to place them; this only makes them exist, which is the
+## part the GM was previously doing one mook at a time in the Forge.
+func spawn_squad(squad_key: String, count: int, rng: Dice.RandomSource) -> Array[Dictionary]:
+	var members := EncounterTables.roll_squad(squad_key, count, rng)
+	for member in members:
+		add_character(member)
+	if not members.is_empty():
+		(campaign.get("session_log", []) as Array).push_front(
+			{
+				"session": int(campaign.get("sessions", 0)),
+				"text": "%d %s rolled onto the roster"
+				% [members.size(), String(EncounterTables.squad(squad_key)["label"])],
+			}
+		)
+		mark_dirty()
+	return members
+
+
+## Roll what is happening on this corner, and keep it where the GM can read it.
+func roll_street_encounter(rng: Dice.RandomSource) -> Dictionary:
+	var rolled := EncounterTables.roll_street(rng)
+	campaign["last_street_encounter"] = rolled
+	(campaign.get("session_log", []) as Array).push_front(
+		{"session": int(campaign.get("sessions", 0)), "text": String(rolled["text"])}
+	)
+	mark_dirty()
+	return rolled
+
+
+func last_street_encounter() -> Dictionary:
+	return campaign.get("last_street_encounter", {})
+
+
+## Run one downtime action, advance the clock by what it took, and log it.
+##
+## The dispatch lives here rather than in [Downtime] for the same reason the
+## Hustle's does: the rules module does not know about a campaign clock or a
+## session log, and should not learn.
+func perform_downtime(
+	action_key: String, params: Dictionary, rng: Dice.RandomSource
+) -> Dictionary:
+	var character := character_by_id(String(params.get("character_id", "")))
+	if character.is_empty():
+		return {"ok": false, "error": "That character is not in this campaign."}
+
+	var result := {}
+	match action_key:
+		"facedown":
+			var opponent := character_by_id(String(params.get("opponent_id", "")))
+			if opponent.is_empty():
+				return {"ok": false, "error": "A Facedown needs someone to face."}
+			result = Downtime.facedown(character, opponent, rng)
+		"recover":
+			result = Downtime.recover(
+				character,
+				maxi(1, int(params.get("days", 1))),
+				character_by_id(String(params.get("medic_id", ""))),
+				rng,
+			)
+		"therapy":
+			result = Downtime.therapy(character, maxi(1, int(params.get("weeks", 1))), rng)
+		"fabricate":
+			result = Downtime.fabricate(character, params.get("item", {}), rng)
+		"source":
+			result = Downtime.source_gear(character, rng)
+		"reputation":
+			result = Downtime.adjust_reputation(
+				character, int(params.get("delta", 0)), String(params.get("reason", ""))
+			)
+		_:
+			return {"ok": false, "error": "Unknown downtime action: %s" % action_key}
+
+	if not bool(result.get("ok", false)):
+		return result
+
+	(campaign.get("session_log", []) as Array).push_front(
+		{"session": int(campaign.get("sessions", 0)), "text": String(result.get("work", ""))}
+	)
+	var days := int(result.get("days", 0))
+	if days > 0:
+		advance_clock(days * 24 * 60)
+	else:
+		mark_dirty()
+	return result
+
+
 ## Several characters can spend the same free-time week Hustling concurrently.
 ## Every participant rolls and gets paid, but the shared campaign clock advances
 ## only once for the seven-day downtime block.
@@ -531,8 +833,40 @@ func perform_hustles(character_ids: Array, rng: Dice.RandomSource) -> Dictionary
 	}
 
 
+## The blocks the Location screen can place, plus every car in the garage.
+##
+## A vehicle parked on a board is cover with a wreck value, so it belongs in the
+## same palette rather than in a system of its own: line of sight, ablation and
+## the cover prompt all then work on it unchanged.
 func cover_palette() -> Array:
-	return campaign.get("cover_palette", [])
+	var palette: Array = (campaign.get("cover_palette", []) as Array).duplicate(true)
+	for entry in vehicles():
+		palette.append(Vehicles.as_cover(entry))
+	return palette
+
+
+func vehicles() -> Array:
+	CampaignSchema.ensure_vehicles(campaign)
+	return campaign["vehicles"]
+
+
+func vehicle_by_id(id: String) -> Dictionary:
+	return CampaignSchema.vehicle_by_id(campaign, id)
+
+
+func add_vehicle(vehicle: Dictionary) -> void:
+	vehicles().append(vehicle)
+	active_vehicle_id = String(vehicle["id"])
+	mark_dirty()
+
+
+func remove_vehicle(id: String) -> bool:
+	if not CampaignSchema.remove_vehicle(campaign, id):
+		return false
+	if active_vehicle_id == id:
+		active_vehicle_id = ""
+	mark_dirty()
+	return true
 
 
 func cover_by_id(id: String) -> Dictionary:
@@ -564,6 +898,38 @@ func add_cover(cover: Dictionary) -> void:
 
 func _ensure_areas() -> void:
 	CampaignSchema.migrate_areas(campaign)
+
+
+func architectures() -> Array:
+	CampaignSchema.ensure_architectures(campaign)
+	return campaign["architectures"]
+
+
+func architecture_by_id(id: String) -> Dictionary:
+	return CampaignSchema.architecture_by_id(campaign, id)
+
+
+func add_architecture(architecture: Dictionary) -> void:
+	architectures().append(architecture)
+	active_architecture_id = String(architecture["id"])
+	mark_dirty()
+
+
+func remove_architecture(id: String) -> bool:
+	if not CampaignSchema.remove_architecture(campaign, id):
+		return false
+	if active_architecture_id == id:
+		active_architecture_id = ""
+	mark_dirty()
+	return true
+
+
+func active_architecture() -> Dictionary:
+	var found := architecture_by_id(active_architecture_id)
+	if not found.is_empty():
+		return found
+	var all := architectures()
+	return all[0] if not all.is_empty() else {}
 
 
 func areas() -> Array:

@@ -1,7 +1,10 @@
 # Godot
 .godot/
-export_presets.cfg
 *.translation
+# export_presets.cfg is normally ignored, because it usually carries machine
+# paths and signing configuration. This one carries neither: it exists so a
+# release is the same command with the same contents on every machine, and so
+# the data/*.json the app reads at runtime actually reach an exported build.
 
 # Book-derived data stays local. No rulebook, in any container format, is ever
 # published from this repository.

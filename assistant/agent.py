@@ -115,10 +115,7 @@ def strip_markers(text: str) -> str:
 def format_passages(passages: list[RetrievedPassage]) -> str:
     if not passages:
         return prompts.NO_RESULTS
-    blocks = [
-        prompts.PASSAGE_TEMPLATE.format(marker=passage.marker, text=passage.text)
-        for passage in passages
-    ]
+    blocks = [prompts.PASSAGE_TEMPLATE.format(marker=passage.marker, text=passage.text) for passage in passages]
     return "\n".join([prompts.TOOL_RESULT_PREAMBLE, *blocks])
 
 
@@ -151,9 +148,7 @@ class RulesAssistant:
             raise AnswerError(
                 "helper_incomplete", "This Redline installation is missing the Anthropic client."
             ) from exc
-        self._client = anthropic.Anthropic(
-            api_key=self._api_key, timeout=REQUEST_TIMEOUT_SECONDS, max_retries=2
-        )
+        self._client = anthropic.Anthropic(api_key=self._api_key, timeout=REQUEST_TIMEOUT_SECONDS, max_retries=2)
         return self._client
 
     def verify_key(self) -> str:
@@ -197,9 +192,7 @@ class RulesAssistant:
             messages.append({"role": "assistant", "content": blocks})
             tool_uses = [block for block in blocks if block.get("type") == "tool_use"]
             if not tool_uses:
-                text = "\n".join(
-                    str(block.get("text", "")) for block in blocks if block.get("type") == "text"
-                ).strip()
+                text = "\n".join(str(block.get("text", "")) for block in blocks if block.get("type") == "text").strip()
                 return self._finish(text, registry, searches)
             results = []
             for call in tool_uses:
@@ -213,9 +206,7 @@ class RulesAssistant:
                 )
             messages.append({"role": "user", "content": results})
 
-        raise AnswerError(
-            "search_loop", "The assistant kept searching without answering. Try a narrower question."
-        )
+        raise AnswerError("search_loop", "The assistant kept searching without answering. Try a narrower question.")
 
     # -- internals ----------------------------------------------------------
 

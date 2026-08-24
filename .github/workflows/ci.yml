@@ -41,6 +41,15 @@ jobs:
       - name: Lint
         run: pip install ruff && ruff check .
 
+      # Both of these were advisory ratchets until the tree reached clean
+      # against them. Formatting and types are the two a reviewer should never
+      # have to think about, so they block now.
+      - name: Format
+        run: ruff format --check .
+
+      - name: Types
+        run: pip install mypy && mypy --ignore-missing-imports assistant service scripts/audit_export.py
+
       # Runs pytest over tests/assistant and tests/service, then the audit that
       # checks no rulebook text or credential reached a release artifact.
       - name: Test
@@ -86,6 +95,27 @@ jobs:
       - name: Test
         run: ./run-tests.sh
 
+      # The rules suite proves the rules hold; this proves the screens that use
+      # them draw, and that the paths a GM clicks still work end to end. Godot
+      # cannot render under --headless, hence the framebuffer.
+      - name: Install a framebuffer
+        run: sudo apt-get install -y --no-install-recommends xvfb
+
+      - name: Screens
+        run: ./run-screens.sh
+
+      # Worth keeping when a screen changes shape: the diff is easier to read as
+      # a picture than as a description of one.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screens
+          path: .shots/
+          if-no-files-found: warn
+          # .shots is a dot-directory, and v4 skips hidden files by default —
+          # without this the step uploads nothing and only warns about it.
+          include-hidden-files: true
+
   ratchets:
     name: Ratchets (advisory)
     runs-on: ubuntu-latest
@@ -97,13 +127,17 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install the tools
-        run: pip install ruff mypy "gdtoolkit==4.*" -r assistant/requirements.txt
+        run: pip install "gdtoolkit==4.*"
 
-      # Writes what each tool would change into the run summary and always
+      # Writes what the tool would change into the run summary and always
       # succeeds. A red X here would read as "this PR is broken" when it means
       # "the codebase has not adopted this yet", so drift is reported rather
-      # than enforced. When one of these reaches clean, move it into the
-      # blocking jobs above and delete it from here.
+      # than enforced. When one reaches clean, move it into the blocking jobs
+      # above and delete it from here — which is what happened to ruff format
+      # and mypy, both of which now block.
+      #
+      # gdformat is the one left: it would reformat seventy files, which is a
+      # commit of its own rather than a line in somebody else's pull request.
       - name: Report drift
         run: |
           report() {
@@ -131,9 +165,5 @@ jobs:
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
-          report "Python formatting (ruff format)" \
-            ruff format --check .
-          report "Python types (mypy)" \
-            mypy --ignore-missing-imports assistant service scripts/audit_export.py
           report "GDScript formatting (gdformat)" \
             bash -c "gdformat --check \$(git ls-files '*.gd')"

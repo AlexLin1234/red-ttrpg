@@ -55,6 +55,13 @@ def read(campaign_id: str) -> list[dict[str, object]]:
     return entries if isinstance(entries, list) else []
 
 
+def _citations_of(answer: dict[str, object]) -> list[dict[str, object]]:
+    citations = answer.get("citations", [])
+    if not isinstance(citations, list):
+        return []
+    return [entry for entry in citations if isinstance(entry, dict)]
+
+
 def append(campaign_id: str, question: str, answer: dict[str, object]) -> None:
     paths.history_dir().mkdir(parents=True, exist_ok=True)
     entry = Entry(
@@ -62,7 +69,9 @@ def append(campaign_id: str, question: str, answer: dict[str, object]) -> None:
         question=question,
         status=str(answer.get("status", "")),
         answer=str(answer.get("answer", "")),
-        citations=list(answer.get("citations", [])),
+        # answer is a dict[str, object] off the agent, so the value has to be
+        # narrowed before it can be copied into a list.
+        citations=_citations_of(answer),
     )
     entries = [entry.as_dict(), *read(campaign_id)][:MAX_ENTRIES]
     location = _file_for(campaign_id)

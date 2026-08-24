@@ -19,13 +19,6 @@ const MATERIAL_COLORS := {
 	"Vehicle Hulk": Color("63343a"),
 }
 
-const MOOK_FIRST: PackedStringArray = [
-	"Wire", "Chrome", "Sixer", "Rat", "Coil", "Dregs", "Static", "Hatch"
-]
-const MOOK_LAST: PackedStringArray = [
-	"Vasquez", "Okoro", "Petrov", "Ng", "Hale", "Duarte", "Sable", "Kovac"
-]
-
 var _tab := "stats"
 var _roster_box: VBoxContainer
 var _sheet_box: VBoxContainer
@@ -256,21 +249,42 @@ func _build_sheet_head(character: Dictionary) -> Control:
 	vitals.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	head.add_child(vitals)
 
+	# The sheet used to show max HP over the threshold at which the character
+	# becomes Seriously Wounded, which meant the one screen that should say a
+	# character is hurt never did. It shows what they have left, and what that
+	# state costs them, with the threshold underneath.
+	var hp := int(character["hp"])
+	var max_hp := int(character["max_hp"])
+	var wound_state := String(
+		character.get("wound_state", Mortality.state_for(hp, max_hp))
+	)
 	var hp_box := UI.vbox(1)
 	hp_box.alignment = BoxContainer.ALIGNMENT_END
-	var hp_label := UI.micro("HP / seriously wounded")
+	var hp_label := UI.micro("HP")
 	hp_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	hp_box.add_child(hp_label)
-	var hp_value := UI.display(
-		"%d / %d"
-		% [
-			int(character["max_hp"]),
-			CampaignSchema.serious_wound_threshold(int(character["max_hp"])),
-		],
-		30,
-	)
+	var hp_tone := UI.TEXT_DISPLAY
+	if wound_state == Mortality.SERIOUSLY_WOUNDED:
+		hp_tone = UI.WARN
+	elif wound_state == Mortality.MORTALLY_WOUNDED or wound_state == Mortality.DEAD:
+		hp_tone = UI.ALERT_BRIGHT
+	var hp_value := UI.display("%d / %d" % [hp, max_hp], 30, hp_tone)
 	hp_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	hp_box.add_child(hp_value)
+	var penalty := Mortality.action_penalty({"wound_state": wound_state})
+	var condition := Mortality.label(wound_state)
+	if penalty != 0:
+		condition += " · %+d to all actions" % penalty
+	var condition_label := UI.micro(
+		condition, hp_tone if wound_state != Mortality.UNHURT else UI.MUTED
+	)
+	condition_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	hp_box.add_child(condition_label)
+	var threshold_label := UI.micro(
+		"Seriously wounded at %d" % CampaignSchema.serious_wound_threshold(max_hp)
+	)
+	threshold_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	hp_box.add_child(threshold_label)
 	vitals.add_child(hp_box)
 
 	var humanity := int(character["humanity"])
@@ -870,8 +884,8 @@ func _build_gear_tab(body: VBoxContainer, character: Dictionary) -> void:
 	var lifestyle_row := UI.hbox(UI.GAP_2)
 	var picker := OptionButton.new()
 	UI.expand(picker, true, false)
-	for index in Lifestyle.CATALOG.size():
-		var entry: Dictionary = Lifestyle.CATALOG[index]
+	for index in Lifestyle.catalog().size():
+		var entry: Dictionary = Lifestyle.catalog()[index]
 		picker.add_item("%s · %deb/month" % [entry["label"], entry["cost"]])
 		picker.set_item_metadata(index, entry["key"])
 		if String(entry["key"]) == String(character["lifestyle"]):
@@ -1393,48 +1407,15 @@ func _blank_character() -> Dictionary:
 	return character
 
 
+## One rolled mook, from the same tables the board's squad spawner uses.
+##
+## The Forge rolls one at a time because that is what a named NPC needs; the
+## Location screen rolls a whole archetype at once. Both come off
+## [EncounterTables] so the two cannot drift apart.
 func _roll_mook() -> Dictionary:
-	var stats := CampaignSchema.empty_stats()
-	for key in CampaignSchema.STAT_KEYS:
-		stats[key] = randi_range(3, 6)
-	var max_hp := randi_range(20, 32)
-	var sp := randi_range(4, 11)
-	var armor := CampaignSchema.empty_armor()
-	for location in Resolver.HIT_LOCATIONS:
-		armor[location] = {"sp": sp, "ablated": false}
-
-	return {
-		"id": "mook-%d" % Time.get_ticks_usec(),
-		"name": "%s %s" % [MOOK_FIRST[randi() % MOOK_FIRST.size()], MOOK_LAST[randi() % MOOK_LAST.size()]],
-		"role": "Mook",
-		"kind": "mook",
-		"side": "hostile",
-		"tags": ["MOOK", "ROLLED"],
-		"stats": stats,
-		"skills":
-		[
-			{"name": "Handgun", "stat": "REF", "level": randi_range(2, 5)},
-			{"name": "Evasion", "stat": "DEX", "level": randi_range(1, 3)},
-		],
-		"gear": [{"name": "Service Sidearm", "kind": "weapon", "detail": "2d6"}],
-		"armor": armor,
-		"hp": max_hp,
-		"max_hp": max_hp,
-		"humanity": 30,
-		"max_humanity": 40,
-		"weapons":
-		[
-			{
-				"name": "Service Sidearm",
-				"ammo": 12,
-				"magazine": 12,
-				"weapon_type": "pistol",
-				"damage_dice": 2,
-				"rof": 2,
-				"autofire_rating": -1,
-			}
-		],
-	}
+	return EncounterTables.roll_mook(
+		EncounterTables.squad("boostergang"), Dice.SeededRandom.new(Time.get_ticks_usec())
+	)
 
 
 ## A live isometric preview of the cover being built.

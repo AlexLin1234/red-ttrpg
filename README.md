@@ -2,7 +2,8 @@
 
 A standalone desktop GM console for Cyberpunk RED, built as a single Godot 4.7
 project. Its workspaces cover the campaign library, City map, campaign notes and
-beats, isometric combat locations, character Forge, and markets.
+beats, isometric combat locations, NET architectures, a garage and chases,
+character Forge, and markets.
 
 No server, sidecar, API, or network connection is required. Rules, campaign
 editing, Lifestyle month closing, and undo/redo all run in GDScript. Campaigns
@@ -10,7 +11,10 @@ are portable `.red` files stored on disk.
 
 An optional FastAPI service and container are included for a persistent cloud
 session. `POST /encounter/month-end` performs the same in-game month close as
-one atomic operation and `/ws` broadcasts the resulting campaign state.
+one atomic operation and `/ws` broadcasts the resulting campaign state. It bills
+from the same `catalog/lifestyle.json` the app does, and both suites are held to the
+same cases in `catalog/lifestyle_cases.json`, so the two implementations of one rule
+cannot drift quietly.
 
 ![The campaign library](docs/mockups/1a-library.png)
 
@@ -76,6 +80,19 @@ planned/active/complete/skipped status, write scene notes, link beats into
 possible paths, and drag cards around the canvas. Notes, links, and positions are
 saved inside the portable campaign.
 
+**Player Display** — a second native OS window for the table's own screen, meant
+for the monitor or television they are looking at. Unlike the GM Window it asks
+for no capture exclusion: it is meant to be seen.
+
+What reaches it is decided by one pure filter and nothing else, so a screen that
+is handed a payload can only draw the payload. By default the table gets
+positions, names and turn order. It does not get an enemy's exact HP — only a
+word for it, and a bar rounded to quarters so the bar cannot be read back as a
+number — and it does not get the arithmetic behind a DV, which says what the
+cover was worth and what the target's armor is. Two toggles in the Location rail
+hand over either. A unit marked hidden is dropped from the payload rather than
+flagged inside it, and it leaves the turn order with the board.
+
 **Location** — provides an isometric encounter board with tile, prop, and unit
 placement, initiative, combat resolution, cover raycasts, and exact event-based
 undo. During setup, tokens can be dragged directly around the board and the
@@ -103,6 +120,22 @@ clicked.
 character who reloads shoots on their next turn, not this one. Clearing a jam
 costs the same.
 
+**Netrun** — the ladder a Netrunner runs down. Architectures are campaign data:
+roll one at a difficulty and edit its floors, or build one floor at a time.
+Passwords, Files, Control Nodes and ICE, with the runner's position, a budget of
+NET Actions per turn set by their Interface rank, the trace, and exact undo — a
+derezzed program comes back at the REZ it had, and the action that killed it
+comes back with it. The ICE is homebrew placeholder, exactly as the combat
+tables are.
+
+**Garage** — vehicles, and the chase they exist for. A vehicle is modelled as an
+actor, SDP where a person has HP and SP where a person has armor, so a car takes
+fire through the same rules a Solo does. The gap is the whole state of a chase:
+open it far enough and the quarry is gone, close it past alongside and they are
+run down. Each side commits a manoeuvre before either rolls, and a manoeuvre buys
+its edge by risking something. A garaged vehicle also joins the Location screen's
+cover palette, because a car parked on a board is cover with a wreck value.
+
 **Forge** — edits PCs, NPCs, and mook templates. Players can choose any of the
 ten Roles, configure Role Ability ranks and specialty/allocation points, and
 build a sheet from the complete Skill catalog. Role Ability and Skill Checks
@@ -124,6 +157,19 @@ An affordable month close deducts the cost and records the paid-through month.
 An unaffordable payment never makes cash negative; it records the balance and a
 seven-day grace period instead.
 
+**Downtime** — beside the Hustle, the other things a week off is for: a Facedown
+opposing COOL and Reputation, resting up with or without a medic attending,
+buying Humanity back a week at a time, building something in a workshop, and
+leaning on a Fixer for what the street has. Each advances the campaign clock by
+whatever it actually took.
+
+**Wounds and Death Saves** — a character at zero HP is on a clock. Wound state
+is read off HP and costs its penalty on every Action, attack and defence alike;
+the Death Save ladder gets harder every time it is rolled; and there are three
+ways off it — stabilise, heal, treat the injury. All of it undoes exactly, and
+a separate button writes the results back onto the sheets, since an encounter is
+a scratch copy that is often replayed before it counts.
+
 **Market / Night Market** — top-level screens that buy from the application-wide
 item database onto the selected character. Market exposes the entire database;
 an Operator Rank 5+ Fixer can organize a Night Market whose rolled stock is saved
@@ -143,6 +189,37 @@ page it came from, or an explicit "the active books did not establish that". It
 searches only the books the open campaign has made active, and it never rolls,
 never does combat arithmetic, and never answers from what the model happens to
 remember about Cyberpunk RED. See **Rules assistant** below.
+
+## Finding things, and not losing them
+
+**Search** — `Ctrl+K` opens one field over the whole campaign: characters,
+zones, places, job hooks, beats, the session log, boards, architectures,
+vehicles and the item catalog. Every result carries where it lives, so taking
+one navigates and selects together.
+
+**Autosave** — a complete `.red` is written beside the save while there is
+anything to lose, under a suffix that keeps it out of the library listing.
+Saving discards it. Opening a campaign that did not close cleanly offers the
+unsaved work rather than applying it, and says how old it is; recovering loads
+it as unsaved changes and leaves the file on disk alone until you save.
+
+**Restore points** — named copies of the campaign, kept in a folder beside it,
+taken by hand or by starting a session. Restoring loads as unsaved changes, and
+the list of restore points survives the trip.
+
+**Sessions** — starting one counts it, logs it, and takes a restore point.
+Ending one does the same on the way out. The session log also takes a line by
+hand, for what happened at the table.
+
+**Keys and display** — `?` lists every shortcut, from the same table the app
+binds them from, and carries the two display preferences that answer the same
+question: interface size, for a console read across a room rather than at a
+desk, and reduce motion. Both are per-user application data rather than campaign
+state.
+
+Screens are kept alive between visits rather than rebuilt, so a fight in
+progress survives a trip to the Market — along with scroll position, selection,
+and the City's pan and zoom.
 
 ## Rules and owned content
 
@@ -170,8 +247,23 @@ Open `project.godot` in Godot 4.7, or run:
 godot --path .                # run the app
 ./run-tests.sh                # headless logic suite
 ./run-assistant-tests.sh      # assistant helper suite and the release audit
+./run-screens.sh              # every screen, and both native windows (needs Xvfb)
 ./run-shots.sh                # render every screen to .shots/ (needs Xvfb)
 ```
+
+`run-tests.sh` proves the rules hold; `run-screens.sh` proves the screens that
+use them draw, and that the paths a GM clicks — rolling initiative, taking a
+shot, opening a run, starting a chase, searching the campaign — still work end
+to end. Both run in CI on every push.
+
+Desktop builds come from the committed `export_presets.cfg`:
+
+```bash
+godot --headless --path . --export-release Linux    # or Windows, or macOS
+```
+
+The release workflow does the same on a tag, builds the assistant helper beside
+it, and runs the export audit over the result.
 
 Both scripts accept `GODOT=/path/to/godot`. The test script performs the import
 pass required to register global GDScript classes and then runs the headless
@@ -210,14 +302,17 @@ and the API health check. Set `SOURCEBOOK_PDF` to the host PDF path.
 project.godot        one Godot project with the Store autoload
 scenes/              app and screenshot-runner scenes
 scripts/
-  app.gd             shell, screen routing, shortcuts
-  rules/             dice, resolver, events, tables, Lifestyle billing
-  campaign/          .red container, schema, store, fixtures
-  encounter/         initiative, rounds, turns
-  city/              zone data, the Night City seed, map images
+  app.gd             shell, screen routing, shortcuts, both native windows
+  rules/             dice, resolver, events, tables, Lifestyle billing,
+                     mortality, netrun, vehicles, downtime, encounter tables
+  campaign/          .red container, schema, store, fixtures, autosave,
+                     restore points, search
+  encounter/         initiative, rounds, turns, netrun runs, chases,
+                     the player-facing filter
+  city/              zone data, the Night City seed, map images, the map view
   board/             the isometric board
-  screens/           library, item workshop, city, location, forge, markets,
-                     assistant
+  screens/           library, item workshop, city, location, netrun, garage,
+                     forge, markets, assistant, player display
   assistant/         the client that runs and calls the local helper
   ui/theme.gd        palette, fonts, widget factories
 assistant/           the local rulebook helper: extraction, index, vault, agent
@@ -225,6 +320,7 @@ tests/               headless runner and suites
 tests/assistant/     the helper's own suite, run by pytest
 docs/mockups/        visual design references
 catalog/items.json   homebrew placeholder item catalog (shipped, packed into builds)
+catalog/lifestyle.json  the Lifestyle table both the app and the service bill from
 data/items_local.json  rulebook-derived catalog, git-ignored, replaces the above
 ```
 
@@ -329,8 +425,9 @@ A `.red` file is a zip containing:
 
 ```text
 manifest.json          version, timestamps, SHA-256 and size per entry
-campaign.json          identity, clock, map/zones, GM notes and beat flow
-roster.json            characters, cash and Lifestyle state
+campaign.json          identity, clock, map/zones, GM notes and beat flow,
+                       NET architectures, the garage, restore points
+roster.json            characters, cash, Lifestyle state, wounds and Reputation
 locations/<id>.json    board layouts
 assets/map.png          optional normalized GM-uploaded map
 ```

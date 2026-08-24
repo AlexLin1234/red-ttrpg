@@ -123,8 +123,12 @@ static func _normalise_actor(actor_id: String, entry: Dictionary) -> Dictionary:
 	actor["hp"] = hp
 	actor["armor"] = armor
 	actor["cover_hp"] = cover_hp
-	actor["wound_state"] = String(actor.get("wound_state", "unhurt"))
-	actor["death_save_due"] = bool(actor.get("death_save_due", false))
+	# Wound state is read off the HP an actor arrives with rather than assumed to
+	# be "unhurt": a character who walked into the room at 3 HP is already
+	# Seriously Wounded, and one at zero already owes a Death Save.
+	actor["wound_state"] = String(actor.get("wound_state", Mortality.state_for(hp, max_hp)))
+	actor["death_save_due"] = bool(actor.get("death_save_due", hp <= 0))
+	actor["death_save_penalty"] = maxi(0, int(actor.get("death_save_penalty", 0)))
 	actor["critical_injuries"] = actor.get("critical_injuries", [])
 	actor["weapons"] = weapons
 	var cell: Dictionary = actor.get("position", {})
@@ -268,6 +272,68 @@ func end_turn() -> void:
 		round_number += 1
 
 
+## Bring actors into a fight that is already running.
+##
+## Recorded through the session rather than dropped into the state, so undo
+## takes the reinforcements away again. Anyone arriving after initiative was
+## rolled goes to the back of the order: they came in late.
+func add_actors(actors: Dictionary) -> void:
+	assert(not actors.is_empty(), "nothing to add")
+	var added: Array[Dictionary] = []
+	var arrivals: Array[String] = []
+	for actor_id in actors:
+		var id := String(actor_id)
+		if has_actor(id):
+			continue
+		added.append(
+			{"kind": "actor_added", "actor_id": id, "actor": _normalise_actor(id, actors[actor_id])}
+		)
+		arrivals.append(id)
+	if added.is_empty():
+		return
+
+	_record({"kind": "reinforce", "actor_ids": arrivals}, added)
+	events = added.duplicate(true)
+
+	if round_number > 0:
+		for id in arrivals:
+			var entry := actor(id)
+			var stats: Dictionary = entry.get("stats", {})
+			var ref := int(entry.get("ref", stats.get("REF", 0)))
+			var roll := Dice.roll_check(_rng)
+			initiative.append(
+				{
+					"actor_id": id,
+					"name": String(entry["name"]),
+					"score": ref + int(roll["total"]),
+					"roll": int(roll["total"]),
+					"ref": ref,
+				}
+			)
+
+	card = {
+		"kind": "reinforce",
+		"title": "REINFORCEMENTS",
+		"lines": PackedStringArray(["%d arrived." % arrivals.size()]),
+		"tone": "neutral",
+	}
+
+
+## Drop initiative rows for actors the state no longer has.
+##
+## Undoing past the arrival of a squad removes the actors; the order they were
+## appended to is not part of the reversible state, so it is reconciled here.
+func _prune_initiative() -> void:
+	var kept: Array[Dictionary] = []
+	for entry in initiative:
+		if has_actor(String((entry as Dictionary)["actor_id"])):
+			kept.append(entry)
+	if kept.size() == initiative.size():
+		return
+	initiative = kept
+	turn_index = clampi(turn_index, 0, maxi(0, initiative.size() - 1))
+
+
 func _note_action(actor_id: String, action: String) -> void:
 	if not actions_taken.has(actor_id):
 		actions_taken[actor_id] = []
@@ -349,6 +415,12 @@ func check_action(actor_id: String, kind: String, options := {}) -> Dictionary:
 
 	var entry := actor(actor_id)
 	var who := String(entry["name"])
+	if Mortality.is_dead(entry):
+		return _blocked(
+			"actor_dead",
+			"%s is dead." % who,
+			"A failed Death Save is not undone by healing. Undo the save itself to take it back.",
+		)
 	if int(entry["hp"]) <= 0:
 		return _blocked(
 			"actor_down",
@@ -719,10 +791,12 @@ func attack(command: Dictionary) -> Dictionary:
 	var weapon_state := _weapon_state(attacker_id, weapon_name)
 
 	var defender_evasion_base := -1
+	var defender_wound_penalty := 0
 	if contested:
 		var defender := actor(target_id)
 		assert(defender.has("evasion_base"), "%s has no evasion_base" % target_id)
 		defender_evasion_base = int(defender["evasion_base"])
+		defender_wound_penalty = Mortality.action_penalty(defender)
 
 	var target_actor := actor(target_id)
 	var effective_cover_hp := int(target_actor["cover_hp"])
@@ -765,6 +839,8 @@ func attack(command: Dictionary) -> Dictionary:
 		defender_evasion_base,
 		modifiers,
 	)
+	request.wound_penalty = Mortality.action_penalty(attacker)
+	request.defender_wound_penalty = defender_wound_penalty
 	var attack_result := Resolver.resolve_attack(request, tables, _rng)
 
 	var applied: Array[Dictionary] = []
@@ -861,6 +937,152 @@ func clear_jam(actor_id: String, weapon_name: String, override := false) -> Dict
 	return _ok()
 
 
+# -- mortality -----------------------------------------------------------------
+
+
+## The finished total of one actor's skill check, ready to compare with a DV.
+##
+## The encounter carries skill totals rather than sheets, so the medic's roll is
+## made here and only the number goes to [Mortality].
+func roll_skill(actor_id: String, skill_name: String, modifier := 0) -> Dictionary:
+	var skills: Dictionary = actor(actor_id).get("skills", {})
+	var base := int(skills.get(skill_name, 0))
+	var check := Dice.roll_check(_rng)
+	var penalty := Mortality.action_penalty(actor(actor_id))
+	return {
+		"skill": skill_name,
+		"base": base,
+		"modifier": modifier,
+		"wound_penalty": penalty,
+		"rolls": check["rolls"],
+		"total": base + modifier + penalty + int(check["total"]),
+	}
+
+
+## Roll the Death Save [param actor_id] owes, which either buys them another turn
+## of dying or kills them.
+func death_save(actor_id: String) -> void:
+	var entry := actor(actor_id)
+	assert(Mortality.owes_death_save(entry), "%s does not owe a Death Save" % actor_id)
+	var outcome := Mortality.death_save(actor_id, entry, _rng)
+	var save_events: Array[Dictionary] = outcome["events"]
+	_record({"kind": "death_save", "actor_id": actor_id}, save_events)
+	card = {
+		"kind": "death_save",
+		"title": "SURVIVED" if bool(outcome["survived"]) else "DEAD",
+		"attacker": String(entry["name"]),
+		"lines": outcome["card_lines"],
+		"tone": "neutral" if bool(outcome["survived"]) else "hit",
+	}
+	events = save_events.duplicate(true)
+	result = {}
+	_note_action(actor_id, "Death Save")
+
+
+## Stop [param patient_id] dying. [param medic_id] makes the check; pass it as
+## the same actor to have a character stabilise themselves.
+func stabilize(patient_id: String, medic_id: String, skill_name := "First Aid", dv := -1) -> void:
+	var patient := actor(patient_id)
+	var rolled := roll_skill(medic_id, skill_name)
+	var outcome := Mortality.stabilize(patient_id, patient, int(rolled["total"]), dv)
+	var stabilize_events: Array[Dictionary] = outcome["events"]
+	_record(
+		{
+			"kind": "stabilize",
+			"actor_id": medic_id,
+			"target_id": patient_id,
+			"skill": skill_name,
+			"dv": int(outcome["dv"]),
+		},
+		stabilize_events,
+	)
+	var lines := PackedStringArray([_check_line(rolled)])
+	lines.append_array(outcome["card_lines"])
+	card = {
+		"kind": "stabilize",
+		"title": "STABILIZED" if bool(outcome["success"]) else "STILL DYING",
+		"attacker": String(actor(medic_id)["name"]),
+		"target": String(patient["name"]),
+		"lines": lines,
+		"tone": "neutral" if bool(outcome["success"]) else "miss",
+	}
+	events = stabilize_events.duplicate(true)
+	result = {}
+	if medic_id != patient_id:
+		_note_action(medic_id, "Stabilize")
+
+
+## Put HP back on an actor, from a medic, a drug, or the GM's own hand.
+func heal(actor_id: String, amount: int, note := "Treatment") -> void:
+	var entry := actor(actor_id)
+	var outcome := Mortality.heal(actor_id, entry, amount)
+	var heal_events: Array[Dictionary] = outcome["events"]
+	_record(
+		{"kind": "heal", "actor_id": actor_id, "amount": amount, "note": note}, heal_events
+	)
+	card = {
+		"kind": "heal",
+		"title": "HEALED" if int(outcome["healed"]) > 0 else "NO EFFECT",
+		"attacker": String(entry["name"]),
+		"lines": outcome["card_lines"],
+		"tone": "neutral",
+	}
+	events = heal_events.duplicate(true)
+	result = {}
+
+
+## Try to take one Critical Injury off [param patient_id]'s sheet.
+func treat_injury(
+	patient_id: String, medic_id: String, injury: String, skill_name := "First Aid", dv := -1
+) -> void:
+	var patient := actor(patient_id)
+	var rolled := roll_skill(medic_id, skill_name)
+	var outcome := Mortality.treat_injury(
+		patient_id, patient, injury, int(rolled["total"]), dv
+	)
+	var treat_events: Array[Dictionary] = outcome["events"]
+	_record(
+		{
+			"kind": "treat_injury",
+			"actor_id": medic_id,
+			"target_id": patient_id,
+			"injury": injury,
+			"skill": skill_name,
+			"dv": int(outcome["dv"]),
+		},
+		treat_events,
+	)
+	var lines := PackedStringArray([_check_line(rolled)])
+	lines.append_array(outcome["card_lines"])
+	card = {
+		"kind": "treat_injury",
+		"title": "TREATED" if bool(outcome["success"]) else "NO CHANGE",
+		"attacker": String(actor(medic_id)["name"]),
+		"target": String(patient["name"]),
+		"lines": lines,
+		"tone": "neutral",
+	}
+	events = treat_events.duplicate(true)
+	result = {}
+	if medic_id != patient_id:
+		_note_action(medic_id, "Treat injury")
+
+
+static func _check_line(rolled: Dictionary) -> String:
+	var pieces := PackedStringArray()
+	for value in rolled.get("rolls", PackedInt32Array()):
+		pieces.append(str(value))
+	var line := (
+		"%s: base %d + d10 [%s]"
+		% [String(rolled["skill"]), int(rolled["base"]), ", ".join(pieces)]
+	)
+	if int(rolled["modifier"]) != 0:
+		line += " %+d mod" % int(rolled["modifier"])
+	if int(rolled["wound_penalty"]) != 0:
+		line += " %+d wounds" % int(rolled["wound_penalty"])
+	return line + " = %d" % int(rolled["total"])
+
+
 func can_undo() -> bool:
 	return session.can_undo()
 
@@ -922,6 +1144,7 @@ func undo() -> void:
 	session.undo()
 	_turn_redo.append(_turn_state())
 	_restore_turn_state(_turn_undo.pop_back())
+	_prune_initiative()
 	revision += 1
 	warning = {}
 	card = {
@@ -941,6 +1164,7 @@ func redo() -> void:
 	session.redo()
 	_turn_undo.append(_turn_state())
 	_restore_turn_state(_turn_redo.pop_back())
+	_prune_initiative()
 	revision += 1
 	warning = {}
 	card = {
@@ -1050,6 +1274,8 @@ func _actor_view(actor_id: String, entry: Dictionary) -> Dictionary:
 		"cover_hp": int(entry["cover_hp"]),
 		"wound_state": String(entry["wound_state"]),
 		"death_save_due": bool(entry["death_save_due"]),
+		"death_save_penalty": int(entry["death_save_penalty"]),
+		"action_penalty": Mortality.action_penalty(entry),
 		"critical_injuries": (entry["critical_injuries"] as Array).duplicate(),
 		"attack_base": int(entry.get("attack_base", 0)),
 		"evasion_base": int(entry.get("evasion_base", 0)),

@@ -117,7 +117,8 @@ static func run(h: Harness) -> void:
 	var fresh := _encounter().snapshot()
 	var goon := _actor(fresh, "goon")
 	h.equal(goon["name"], "Booster", "name")
-	h.equal(goon["wound_state"], "unhurt", "wound state")
+	# Read off the HP it was loaded with, 30 of 40, rather than assumed unhurt.
+	h.equal(goon["wound_state"], "lightly_wounded", "wound state")
 	h.equal(goon["death_save_due"], false, "death save")
 	h.equal(goon["critical_injuries"], [], "injuries")
 	var solo := _actor(fresh, "solo")
@@ -168,8 +169,32 @@ static func run(h: Harness) -> void:
 	)
 	var hurt := _actor(downed, "goon")
 	h.equal(hurt["hp"], -2, "hp")
-	h.equal(hurt["wound_state"], "seriously_wounded", "wound state")
+	# The hit crosses the serious threshold and carries on past zero, so the
+	# state it settles on is the worse of the two the shot passed through.
+	h.equal(hurt["wound_state"], "mortally_wounded", "wound state")
 	h.equal(hurt["death_save_due"], true, "death save")
+
+	h.it("takes reinforcements without restarting the fight")
+	var reinforced := _encounter([5, 5, 9])
+	reinforced.roll_initiative()
+	reinforced.end_turn()
+	var round_before := reinforced.round_number
+	var order_before := reinforced.initiative.size()
+	reinforced.add_actors({"backup": _goon()})
+	h.equal(reinforced.round_number, round_before, "the round did not restart")
+	h.equal(reinforced.initiative.size(), order_before + 1, "and the arrival is in the order")
+	h.equal(reinforced.has_actor("backup"), true, "the actor exists")
+	h.equal(reinforced.can_undo(), true, "the arrival is on the undo stack")
+
+	h.it("undoes an arrival, order and all")
+	reinforced.undo()
+	h.equal(reinforced.has_actor("backup"), false, "the actor is gone")
+	h.equal(reinforced.initiative.size(), order_before, "and so is its initiative row")
+
+	h.it("ignores an actor it already has")
+	var twice := _encounter()
+	twice.add_actors({"goon": _goon()})
+	h.equal(twice.can_undo(), false, "nothing was recorded")
 
 	h.it("lets cover absorb the hit instead of the target")
 	var shielded_session := _encounter(

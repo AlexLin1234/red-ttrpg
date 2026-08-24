@@ -5,25 +5,75 @@ extends RefCounted
 ##
 ## The table values are derived from the sourcebook's Lifestyle table (p. 377).
 ## Campaign state stores only the selected key and payment status.
+##
+## The numbers live in `catalog/lifestyle.json` rather than here, because the
+## optional FastAPI service closes the same month and used to carry its own copy
+## of them. One file, two readers, and `catalog/lifestyle_cases.json` checked by
+## both suites, so the two cannot drift quietly. The constants below are the
+## fallback for a build whose data folder did not ship.
 
-const CATALOG: Array[Dictionary] = [
+const TABLE_PATH := "res://catalog/lifestyle.json"
+
+const FALLBACK_CATALOG: Array[Dictionary] = [
 	{"key": "kibble", "label": "Kibble", "cost": 100},
 	{"key": "generic_prepak", "label": "Generic Prepak", "cost": 300},
 	{"key": "good_prepak", "label": "Good Prepak", "cost": 600},
 	{"key": "fresh_food", "label": "Fresh Food", "cost": 1500},
 ]
+const FALLBACK_GRACE_DAYS := 7
+
+static var _table: Dictionary = {}
+
+
+static func _read_table() -> Dictionary:
+	if not _table.is_empty():
+		return _table
+	_table = {"catalog": FALLBACK_CATALOG.duplicate(true), "grace_days": FALLBACK_GRACE_DAYS}
+	if not FileAccess.file_exists(TABLE_PATH):
+		return _table
+	var file := FileAccess.open(TABLE_PATH, FileAccess.READ)
+	if file == null:
+		return _table
+	var parsed: Variant = JSON.parse_string(file.get_as_text())
+	file.close()
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return _table
+	var document: Dictionary = parsed
+	var rows: Array = document.get("catalog", [])
+	if not rows.is_empty():
+		var catalog: Array[Dictionary] = []
+		for row in rows:
+			catalog.append(
+				{
+					"key": String((row as Dictionary)["key"]),
+					"label": String((row as Dictionary)["label"]),
+					"cost": int((row as Dictionary)["cost"]),
+				}
+			)
+		_table["catalog"] = catalog
+	_table["grace_days"] = int(document.get("grace_days", FALLBACK_GRACE_DAYS))
+	return _table
+
+
+static func catalog() -> Array:
+	return _read_table()["catalog"]
+
+
+static func grace_days() -> int:
+	return int(_read_table()["grace_days"])
 
 
 static func profile(key: String) -> Dictionary:
-	for entry in CATALOG:
-		if String(entry["key"]) == key:
+	var rows := catalog()
+	for entry in rows:
+		if String((entry as Dictionary)["key"]) == key:
 			return entry
-	return CATALOG[0]
+	return rows[0]
 
 
 static func is_valid_id(key: String) -> bool:
-	for entry in CATALOG:
-		if String(entry["key"]) == key:
+	for entry in catalog():
+		if String((entry as Dictionary)["key"]) == key:
 			return true
 	return false
 
@@ -121,12 +171,12 @@ static func settle(characters: Array, billed_month: String) -> Dictionary:
 		else:
 			character["lifestyle_status"] = "unpaid"
 			character["lifestyle_balance_due"] = cost
-			character["lifestyle_grace_days"] = 7
+			character["lifestyle_grace_days"] = grace_days()
 			character["last_lifestyle_charge"] = 0
 			report["unpaid"] = int(report["unpaid"]) + 1
 			(report["lines"] as Array).append(
-				"%s owes %deb for %s — 7-day grace"
-				% [character["name"], cost, selected["label"]]
+				"%s owes %deb for %s — %d-day grace"
+				% [character["name"], cost, selected["label"], grace_days()]
 			)
 		(report.get_or_add("results", []) as Array).append({
 			"character_id": String(character.get("id", "")),

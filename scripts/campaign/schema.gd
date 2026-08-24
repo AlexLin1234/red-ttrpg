@@ -200,6 +200,56 @@ static func adopt_map_zones(campaign: Dictionary) -> int:
 	return adopted
 
 
+## A campaign saved before the garage existed simply has no vehicles. There is
+## nothing to migrate, only a list to start.
+static func ensure_vehicles(campaign: Dictionary) -> void:
+	if not campaign.has("vehicles") or not campaign["vehicles"] is Array:
+		campaign["vehicles"] = []
+
+
+static func vehicle_by_id(campaign: Dictionary, id: String) -> Dictionary:
+	ensure_vehicles(campaign)
+	for entry in campaign["vehicles"]:
+		if String((entry as Dictionary)["id"]) == id:
+			return entry
+	return {}
+
+
+static func remove_vehicle(campaign: Dictionary, id: String) -> bool:
+	ensure_vehicles(campaign)
+	var vehicles: Array = campaign["vehicles"]
+	for index in vehicles.size():
+		if String((vehicles[index] as Dictionary)["id"]) == id:
+			vehicles.remove_at(index)
+			return true
+	return false
+
+
+## A campaign saved before the Netrun screen existed simply has no
+## architectures. There is nothing to migrate, only a list to start.
+static func ensure_architectures(campaign: Dictionary) -> void:
+	if not campaign.has("architectures") or not campaign["architectures"] is Array:
+		campaign["architectures"] = []
+
+
+static func architecture_by_id(campaign: Dictionary, id: String) -> Dictionary:
+	ensure_architectures(campaign)
+	for entry in campaign["architectures"]:
+		if String((entry as Dictionary)["id"]) == id:
+			return entry
+	return {}
+
+
+static func remove_architecture(campaign: Dictionary, id: String) -> bool:
+	ensure_architectures(campaign)
+	var architectures: Array = campaign["architectures"]
+	for index in architectures.size():
+		if String((architectures[index] as Dictionary)["id"]) == id:
+			architectures.remove_at(index)
+			return true
+	return false
+
+
 static func area_by_id(campaign: Dictionary, id: String) -> Dictionary:
 	for area in campaign.get("areas", []):
 		if String((area as Dictionary)["id"]) == id:

@@ -38,8 +38,20 @@ SECRET_PATTERNS = (
     re.compile(rb"(?i)anthropic[_-]?api[_-]?key\s*[:=]\s*[\"']?[A-Za-z0-9_\-]{12,}"),
 )
 SCANNABLE_SUFFIXES = {
-    ".cfg", ".gd", ".godot", ".ini", ".json", ".md", ".py", ".sh", ".toml", ".tres",
-    ".tscn", ".txt", ".yaml", ".yml",
+    ".cfg",
+    ".gd",
+    ".godot",
+    ".ini",
+    ".json",
+    ".md",
+    ".py",
+    ".sh",
+    ".toml",
+    ".tres",
+    ".tscn",
+    ".txt",
+    ".yaml",
+    ".yml",
 }
 MAX_SCAN_BYTES = 2 * 1024 * 1024
 
