@@ -154,6 +154,26 @@ static func run(h: Harness) -> void:
 		deep_session.undo()
 	h.equal(deep_session.state, deep_initial, "state after 100 undos")
 
+	h.it("moves an actor and puts them back exactly")
+	var board := {"actors": {"solo": {"position": {"x": 2, "z": 3, "layer": 0}}}}
+	var walked := Events.apply(
+		board, [{"kind": "actor_moved", "actor_id": "solo", "to": {"x": 7, "z": 1, "layer": 1}}]
+	)
+	h.equal(
+		walked["state"]["actors"]["solo"]["position"], {"x": 7, "z": 1, "layer": 1}, "position"
+	)
+	h.equal(
+		Events.apply(walked["state"], walked["inverse"])["state"], board, "state after the inverse"
+	)
+
+	h.it("clears a position the actor never had")
+	var placeless := {"actors": {"solo": {}}}
+	var placed := Events.apply(
+		placeless, [{"kind": "actor_moved", "actor_id": "solo", "to": {"x": 1, "z": 1, "layer": 0}}]
+	)
+	h.equal(placed["inverse"][0]["to"], null, "the inverse carries no destination")
+	h.equal(Events.apply(placed["state"], placed["inverse"])["state"], placeless, "state restored")
+
 	h.it("reports when there is nothing to undo")
 	var empty := Events.Session.new({"actors": {}})
 	h.equal(empty.can_undo(), false, "can undo")

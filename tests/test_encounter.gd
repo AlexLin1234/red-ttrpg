@@ -50,6 +50,15 @@ static func _solo() -> Dictionary:
 	}
 
 
+## The solo with stats on the sheet: REF to win initiative outright and MOVE 6,
+## so one Move Action reaches 12 m.
+static func _runner(ammo := 8) -> Dictionary:
+	var solo := _solo()
+	solo["stats"] = {"MOVE": 6, "REF": 7}
+	(solo["weapons"]["Heavy Pistol"] as Dictionary)["ammo"] = ammo
+	return solo
+
+
 static func _goon() -> Dictionary:
 	return {
 		"name": "Booster",
@@ -76,6 +85,22 @@ static func _strike(session: Encounter, overrides := {}) -> Dictionary:
 	command.merge(overrides, true)
 	session.attack(command)
 	return session.snapshot()
+
+
+static func _shot() -> Dictionary:
+	return {
+		"attacker_id": "solo",
+		"target_id": "goon",
+		"weapon": "Heavy Pistol",
+		"distance_m": 5.0,
+	}
+
+
+## Roll initiative with the solo ahead of the goon on REF, and no dice left over.
+static func _in_combat(rolls: Array[int] = [5, 5], solo := {}) -> Encounter:
+	var session := _encounter(rolls, 13, {"solo": _runner() if solo.is_empty() else solo, "goon": _goon()})
+	session.roll_initiative()
+	return session
 
 
 static func _actor(snapshot: Dictionary, id: String) -> Dictionary:
@@ -244,7 +269,148 @@ static func run(h: Harness) -> void:
 	h.equal(order_session.round_number, 2, "round advanced")
 
 	h.it("records the actions an actor has spent this turn")
-	var action_session := _encounter([5, 5, 8, 4, 4, 4])
-	action_session.roll_initiative()
+	var action_session := _in_combat([5, 5, 8, 4, 4, 4])
 	_strike(action_session)
 	h.equal(action_session.snapshot()["actions_taken"]["solo"], ["Attack"], "actions")
+	h.equal(_actor(action_session.snapshot(), "solo")["spent"]["action"], "Attack", "spent Action")
+	h.equal(_actor(action_session.snapshot(), "solo")["spent"]["move"], "", "Move Action untouched")
+
+	h.it("refuses an attack out of turn and names whose turn it is")
+	var out_of_turn := _in_combat()
+	out_of_turn.end_turn()
+	var refused := out_of_turn.attack(_shot())
+	h.equal(refused["ok"], false, "refused")
+	h.equal(refused["code"], "not_your_turn", "code")
+	h.contains(String(refused["reason"]), "Booster", "reason names who is up")
+	h.equal(refused["override"], true, "the table may waive turn order")
+	h.equal(out_of_turn.snapshot()["card"]["title"], "CANNOT", "card title")
+	h.equal(_actor(out_of_turn.snapshot(), "solo")["weapons"][0]["ammo"], 8, "no ammo spent")
+	h.equal(out_of_turn.can_undo(), true, "the refusal did not enter the log")
+	h.equal(out_of_turn.snapshot()["warning"]["code"], "not_your_turn", "warning on the snapshot")
+
+	h.it("resolves anyway once the GM waives the turn order")
+	var waived := _in_combat([5, 5, 8, 4, 4, 4])
+	waived.end_turn()
+	var command := _shot()
+	command["override"] = true
+	var forced := waived.attack(command)
+	h.equal(forced["ok"], true, "resolved")
+	h.equal(_actor(waived.snapshot(), "goon")["hp"], 25, "damage applied")
+	h.equal(waived.snapshot()["warning"], {}, "warning cleared")
+
+	h.it("keeps an empty magazine impossible however the GM rules")
+	var dry := _in_combat([5, 5], _runner(0))
+	var empty_command := _shot()
+	empty_command["override"] = true
+	var blocked := dry.attack(empty_command)
+	h.equal(blocked["ok"], false, "still refused")
+	h.equal(blocked["code"], "no_ammo", "code")
+	h.equal(blocked["override"], false, "not a ruling the table can waive")
+	h.contains(String(blocked["hint"]), "Action", "hint names what a reload costs")
+
+	h.it("spends the whole Action on a reload, so that turn cannot also shoot")
+	var reloading := _in_combat([5, 5], _runner(2))
+	h.equal(reloading.reload("solo", "Heavy Pistol")["ok"], true, "reload allowed")
+	h.equal(_actor(reloading.snapshot(), "solo")["weapons"][0]["ammo"], 8, "magazine filled")
+	var after_reload := reloading.attack(_shot())
+	h.equal(after_reload["ok"], false, "the shot is refused")
+	h.equal(after_reload["code"], "action_spent", "code")
+	h.contains(String(after_reload["reason"]), "Reload", "reason names the reload")
+	h.equal(reloading.check_action("solo", "move", {})["ok"], true, "the Move Action survives")
+	reloading.end_turn()
+	reloading.end_turn()
+	h.equal(reloading.round_number, 2, "round advanced")
+	var next_turn := reloading.check_action("solo", "attack", {"weapon": "Heavy Pistol"})
+	h.equal(next_turn["ok"], true, "the reloaded weapon fires next turn")
+
+	h.it("refuses a reload the weapon does not need")
+	var full := _in_combat()
+	var pointless := full.reload("solo", "Heavy Pistol")
+	h.equal(pointless["code"], "magazine_full", "code")
+	h.contains(String(pointless["reason"]), "8 of 8", "reason names the count")
+
+	h.it("records a move as a Move Action and walks it back on undo")
+	var walk := _in_combat()
+	h.equal(walk.move("solo", {"x": 3, "z": 4, "layer": 0}, {"distance_m": 10.0})["ok"], true, "moved")
+	h.equal(walk.position("solo"), {"x": 3, "z": 4, "layer": 0}, "position")
+	h.equal(walk.snapshot()["actions_taken"]["solo"], ["Move"], "spent the Move Action")
+	h.equal(walk.check_action("solo", "attack", {"weapon": "Heavy Pistol"})["ok"], true, "Action left")
+	h.equal(walk.move("solo", {"x": 5, "z": 5, "layer": 0}, {"distance_m": 4.0})["code"], "move_spent", "second move")
+	h.contains(String(walk.snapshot()["undo_label"]), "move to (3, 4)", "undo label")
+	walk.undo()
+	h.equal(walk.position("solo"), {"x": 0, "z": 0, "layer": 0}, "position after undo")
+	h.equal((walk.snapshot()["actions_taken"] as Dictionary).has("solo"), false, "Move Action handed back")
+	walk.redo()
+	h.equal(walk.position("solo"), {"x": 3, "z": 4, "layer": 0}, "position after redo")
+	h.equal(walk.snapshot()["actions_taken"]["solo"], ["Move"], "spent again after redo")
+
+	h.it("refuses a move past MOVE x 2 and offers it as a ruling")
+	var overrun := _in_combat()
+	var too_far := overrun.move("solo", {"x": 20, "z": 0, "layer": 0}, {"distance_m": 30.0})
+	h.equal(too_far["code"], "out_of_reach", "code")
+	h.equal(too_far["override"], true, "waivable")
+	h.contains(String(too_far["reason"]), "12.0 m", "reason names the allowance")
+	h.equal(overrun.position("solo"), {"x": 0, "z": 0, "layer": 0}, "the token did not move")
+	var run := overrun.move(
+		"solo", {"x": 20, "z": 0, "layer": 0}, {"distance_m": 30.0, "override": true}
+	)
+	h.equal(run["ok"], true, "the GM can waive the distance")
+	h.equal(overrun.position("solo"), {"x": 20, "z": 0, "layer": 0}, "position after the ruling")
+
+	h.it("hands the Action back when the attack that spent it is undone")
+	var refund := _in_combat([5, 5, 8, 4, 4, 4])
+	_strike(refund)
+	h.equal(refund.snapshot()["actions_taken"]["solo"], ["Attack"], "spent")
+	refund.undo()
+	h.equal((refund.snapshot()["actions_taken"] as Dictionary).has("solo"), false, "handed back")
+	h.equal(refund.check_action("solo", "attack", {"weapon": "Heavy Pistol"})["ok"], true, "available again")
+
+	h.it("undoes the end of a turn and the initiative roll itself")
+	var rewind := _in_combat()
+	rewind.end_turn()
+	h.equal(rewind.current_turn()["actor_id"], "goon", "the goon is up")
+	rewind.undo()
+	h.equal(rewind.current_turn()["actor_id"], "solo", "back to the solo")
+	h.equal(rewind.round_number, 1, "still round 1")
+	rewind.undo()
+	h.equal(rewind.round_number, 0, "back to setup")
+	h.equal(rewind.initiative, [], "the order is cleared")
+	h.equal(rewind.can_undo(), false, "nothing left to undo")
+
+	h.it("refuses a jammed weapon and charges an Action to clear it")
+	var jammed_solo := _runner()
+	(jammed_solo["weapons"]["Heavy Pistol"] as Dictionary)["jammed"] = true
+	var jam := _in_combat([5, 5], jammed_solo)
+	var stuck := jam.attack(_shot())
+	h.equal(stuck["code"], "weapon_jammed", "code")
+	h.equal(stuck["override"], false, "not waivable")
+	h.equal(jam.clear_jam("solo", "Heavy Pistol")["ok"], true, "cleared")
+	h.equal(jam.snapshot()["actions_taken"]["solo"], ["Clear Jam"], "clearing costs the Action")
+	h.equal(jam.attack(_shot())["code"], "action_spent", "no shot left this turn")
+	h.equal(jam.clear_jam("solo", "Heavy Pistol")["code"], "action_spent", "and no second clear")
+
+	h.it("publishes every action's availability with the snapshot")
+	var advertised := _in_combat([5, 5], _runner(0))
+	var view := _actor(advertised.snapshot(), "solo")
+	h.equal(view["available"]["attack"]["ok"], false, "attack unavailable")
+	h.equal(view["available"]["attack"]["code"], "no_ammo", "attack code")
+	h.equal(view["available"]["autofire"]["code"], "no_autofire", "autofire code")
+	h.equal(view["available"]["reload"]["ok"], true, "reload available")
+	h.equal(view["available"]["clear_jam"]["code"], "not_jammed", "jam code")
+	h.equal(view["available"]["move"]["ok"], true, "move available")
+	h.equal(view["move_allowance"], 12.0, "move allowance")
+	h.equal(view["position"], {"x": 0, "z": 0, "layer": 0}, "position")
+	h.equal(advertised.snapshot()["warning"], {}, "no warning yet")
+
+	h.it("refuses to act with a downed unit")
+	var downed_solo := _runner()
+	downed_solo["hp"] = 0
+	var corpse := _in_combat([5, 5], downed_solo)
+	var lifeless := corpse.attack(_shot())
+	h.equal(lifeless["code"], "actor_down", "code")
+	h.equal(corpse.check_action("solo", "move", {})["code"], "actor_down", "move too")
+
+	h.it("leaves setup unpoliced, because there is no turn to spend yet")
+	var setup := _encounter([8, 4, 4, 4], 13, {"solo": _runner(), "goon": _goon()})
+	h.equal(setup.check_action("solo", "attack", {"weapon": "Heavy Pistol"})["ok"], true, "attack")
+	h.equal(setup.move("solo", {"x": 9, "z": 9, "layer": 0}, {"distance_m": 99.0})["ok"], true, "move")
