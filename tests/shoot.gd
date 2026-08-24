@@ -603,16 +603,25 @@ func _drive_sessions(app: Control) -> void:
 	await _settle(14)
 	await _shoot("1a-snapshots")
 
+	var dialog: Node = screen.get("_snapshots_dialog")
+	if dialog != null:
+		dialog.call("hide")
+	await _settle(8)
+
 	var newest: Dictionary = Store.restore_points()[0]
 	if not Store.restore_to(String(newest["id"])):
 		_errors.append("restoring the newest point failed")
 	await _settle(14)
 	if Store.restore_points().size() < before + 1:
 		_errors.append("restoring threw away the list of restore points")
-	var dialog: Node = screen.get("_snapshots_dialog")
-	if dialog != null:
-		dialog.call("hide")
-	await _settle(8)
+
+	# Restoring rewinds the campaign, so every cached screen is dropped and the
+	# one captured above is freed. Asking it anything from here is a use after
+	# free; what is worth asserting is that the app still has a screen to show.
+	app.call("_show", "library")
+	await _settle(12)
+	if app.get("_screen") == null:
+		_errors.append("the library screen did not come back after a restore")
 
 
 ## The keys, and the two display preferences that answer the same question.
