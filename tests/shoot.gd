@@ -343,6 +343,13 @@ func _drive_combat(app: Control) -> void:
 		_errors.append("no cover was found in the line of fire — expected the parkade pillars")
 
 	await _shoot("1c-resolution")
+
+	# Shooting again on the same turn is refused: the banner is the whole point
+	# of the refusal, so render it rather than trusting it was built.
+	screen.call("begin_attack", ids[3] if ids.size() > 3 else ids[1], "single")
+	await _settle(8)
+	await _shoot("1c-blocked")
+
 	await _drive_condition(screen)
 	await _drive_player_display(app, screen)
 	await _drive_spawn(screen)
@@ -633,12 +640,6 @@ func _drive_shortcuts(app: Control) -> void:
 ## where the answer is "the OS cannot", which teaches nobody anything.
 static func _supports_capture_exclusion() -> bool:
 	return OS.get_name() in ["Windows", "macOS"]
-
-	# Shooting again on the same turn is refused: the banner is the whole point
-	# of the refusal, so render it rather than trusting it was built.
-	screen.call("begin_attack", ids[3] if ids.size() > 3 else ids[1], "single")
-	await _settle(8)
-	await _shoot("1c-blocked")
 
 
 func _settle(frames: int) -> void:
