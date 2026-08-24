@@ -6,13 +6,13 @@ extends RefCounted
 ## The table values are derived from the sourcebook's Lifestyle table (p. 377).
 ## Campaign state stores only the selected key and payment status.
 ##
-## The numbers live in `data/lifestyle.json` rather than here, because the
+## The numbers live in `catalog/lifestyle.json` rather than here, because the
 ## optional FastAPI service closes the same month and used to carry its own copy
-## of them. One file, two readers, and `data/lifestyle_cases.json` checked by
+## of them. One file, two readers, and `catalog/lifestyle_cases.json` checked by
 ## both suites, so the two cannot drift quietly. The constants below are the
 ## fallback for a build whose data folder did not ship.
 
-const TABLE_PATH := "res://data/lifestyle.json"
+const TABLE_PATH := "res://catalog/lifestyle.json"
 
 const FALLBACK_CATALOG: Array[Dictionary] = [
 	{"key": "kibble", "label": "Kibble", "cost": 100},

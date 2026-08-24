@@ -19,11 +19,11 @@ def _lifestyle_table() -> tuple[dict[str, int], int]:
 
     The GDScript app closes the same month as this endpoint does, and the two
     used to carry separate copies of these numbers. They read one file now, and
-    data/lifestyle_cases.json is checked by both suites, so a change that
+    catalog/lifestyle_cases.json is checked by both suites, so a change that
     reaches only one of them fails rather than drifting quietly.
     """
 
-    path = Path(__file__).resolve().parent.parent / "data" / "lifestyle.json"
+    path = Path(__file__).resolve().parent.parent / "catalog" / "lifestyle.json"
     fallback = {"kibble": 100, "generic_prepak": 300, "good_prepak": 600, "fresh_food": 1500}
     try:
         document = json.loads(path.read_text(encoding="utf-8"))

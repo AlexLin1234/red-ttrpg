@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Extract the item catalog from a user-owned Cyberpunk RED PDF.
 
-Redline ships no book data. `data/items.json` holds homebrew placeholders so the
+Redline ships no book data. `catalog/items.json` holds homebrew placeholders so the
 app boots with a usable catalog; a GM who owns the book runs this script to build
 `data/items_local.json`, which is git-ignored and layered over the placeholders
 by the ItemDB autoload at runtime. This mirrors how `tables.gd` boots on

@@ -1,19 +1,29 @@
 extends Node
 
-## Application-wide item database. Built-ins live in res://data and workshop
+## Application-wide item database. Built-ins live in res://catalog and workshop
 ## variants live in user://; neither is embedded in a campaign save.
 ##
 ## No book data ships with Redline. [constant BUILTIN_PATH] holds homebrew
 ## placeholders so the app boots with a usable catalog, exactly as [Tables] boots
 ## on [TablesDefault]. A GM who owns the rulebook runs
-## `scripts/extract_items.py` to build [constant LOCAL_PATH], which is
-## git-ignored and, when present, replaces the placeholders wholesale rather than
-## sitting alongside them as near-duplicates.
+## `scripts/extract_items.py` to build a local catalog which, when present,
+## replaces the placeholders wholesale rather than sitting alongside them as
+## near-duplicates.
+##
+## The placeholders live outside res://data on purpose: data/ carries a .gdignore
+## so Godot never imports the extracted tables, and an ignored directory is
+## skipped by the export scan too, so anything under it is absent from a build.
+##
+## [constant LOCAL_PATHS] is searched in order. The res:// entry serves a source
+## checkout; the user:// entry serves an exported build, where res:// is the PCK
+## and book-derived data is deliberately never packed.
 
 signal catalog_changed
 
-const BUILTIN_PATH := "res://data/items.json"
-const LOCAL_PATH := "res://data/items_local.json"
+const BUILTIN_PATH := "res://catalog/items.json"
+const LOCAL_PATHS: PackedStringArray = [
+	"res://data/items_local.json", "user://items_local.json"
+]
 const CUSTOM_PATH := "user://item_variants.json"
 
 ## Weapon types the shipped range tables can resolve. An entry outside this list
@@ -37,7 +47,7 @@ func _ready() -> void:
 
 func reload() -> void:
 	_builtins = _read_items(BUILTIN_PATH)
-	_local = _read_items(LOCAL_PATH)
+	_local = _read_local()
 	_custom = _read_items(CUSTOM_PATH)
 	catalog_changed.emit()
 
@@ -163,6 +173,16 @@ static func validate_item(entry: Variant) -> PackedStringArray:
 					problems.append("%s: unknown body part %s" % [label, part])
 
 	return problems
+
+
+## First catalog found along [constant LOCAL_PATHS] wins; the paths are
+## alternative homes for one file, not layers to merge.
+func _read_local() -> Array[Dictionary]:
+	for path in LOCAL_PATHS:
+		var found := _read_items(path)
+		if not found.is_empty():
+			return found
+	return []
 
 
 func _read_items(path: String) -> Array[Dictionary]:

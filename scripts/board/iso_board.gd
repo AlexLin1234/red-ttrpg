@@ -34,6 +34,7 @@ var _unit_nodes: Dictionary = {}
 var _selection: MeshInstance3D
 var _hover: MeshInstance3D
 var _blast_ring: MeshInstance3D
+var _move_ring: MeshInstance3D
 var _zoom := 26.0
 
 
@@ -404,12 +405,29 @@ func set_selection(unit_id: String) -> void:
 	_selection.position = node.position + Vector3(0, 0.05, 0)
 
 
-func set_hover_cell(cell: Dictionary) -> void:
+## [param blocked] paints the plate alert red instead of accent, so a cell the
+## selected unit cannot reach reads as out of bounds before it is clicked.
+func set_hover_cell(cell: Dictionary, blocked := false) -> void:
 	if cell.is_empty():
 		_hover.visible = false
 		return
 	_hover.visible = true
+	_hover.material_override = _unshaded(UI.ALERT if blocked else UI.ACCENT, 0.16)
 	_hover.position = world_of(cell) + Vector3(0, 0.08, 0)
+
+
+## A ring showing how far one Move Action reaches from [param centre]. An empty
+## centre or a radius of zero clears it.
+func show_move_range(centre: Dictionary, radius_m: float) -> void:
+	if is_instance_valid(_move_ring):
+		_move_ring.queue_free()
+		_move_ring = null
+	if centre.is_empty() or radius_m <= 0.0:
+		return
+	var radius := radius_m / tile_metres()
+	_move_ring = _make_ring(radius * 0.97, radius, UI.ACCENT_FILL)
+	_move_ring.position = world_of(centre) + Vector3(0, 0.08, 0)
+	_overlay.add_child(_move_ring)
 
 
 func set_zoom_delta(delta: float) -> void:

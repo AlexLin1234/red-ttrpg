@@ -9,7 +9,7 @@ extends RefCounted
 
 const Harness := preload("res://tests/harness.gd")
 
-const CASES_PATH := "res://data/lifestyle_cases.json"
+const CASES_PATH := "res://catalog/lifestyle_cases.json"
 
 
 static func run(h: Harness) -> void:

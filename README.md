@@ -12,8 +12,8 @@ are portable `.red` files stored on disk.
 An optional FastAPI service and container are included for a persistent cloud
 session. `POST /encounter/month-end` performs the same in-game month close as
 one atomic operation and `/ws` broadcasts the resulting campaign state. It bills
-from the same `data/lifestyle.json` the app does, and both suites are held to the
-same cases in `data/lifestyle_cases.json`, so the two implementations of one rule
+from the same `catalog/lifestyle.json` the app does, and both suites are held to the
+same cases in `catalog/lifestyle_cases.json`, so the two implementations of one rule
 cannot drift quietly.
 
 ![The campaign library](docs/mockups/1a-library.png)
@@ -99,6 +99,27 @@ undo. During setup, tokens can be dragged directly around the board and the
 selected character can make Skill Checks with modifiers and a DV before anyone
 rolls initiative.
 
+Once initiative is rolled, a move is a Move Action rather than a free drag, and
+it goes into the same event log a shot does. **Undo** and **Redo** therefore
+walk tokens back across the board as exactly as they walk damage back off a
+sheet, and each button names what it would take back before it is clicked —
+"Take back Spike Adebayo's move to (7, 4)". Undoing an action also returns the
+turn it cost, so a shot taken back leaves the character with their Action again.
+
+Each turn carries one Action and one Move Action, and the rail prints the whole
+budget with the reason beside anything unavailable — `Empty`, `Jammed`, `Action
+spent`, `Too far` — rather than greying a control out and leaving the GM to
+guess. Attempting one anyway raises a banner with the reason in full and the way
+out of it. Turn order and the action budget are rulings a table can waive, so
+that banner also offers **Do it anyway**; an empty magazine or a jammed weapon
+is not, so it does not. Moving shows the reach of one Move Action as a ring on
+the board, and a cell beyond it lights red under the cursor before it is
+clicked.
+
+**Reloading is an Action**, as it is in the book, so it spends the turn: a
+character who reloads shoots on their next turn, not this one. Clearing a jam
+costs the same.
+
 **Netrun** — the ladder a Netrunner runs down. Architectures are campaign data:
 roll one at a difficulty and edit its floors, or build one floor at a time.
 Passwords, Files, Control Nodes and ICE, with the runner's position, a budget of
@@ -159,7 +180,7 @@ Midnight Market.
 is opened. Browse every built-in or custom item, read its description, and make
 persistent variations by changing price and type-specific stats such as weapon
 damage dice and flat damage, armor SP, or cyberware Humanity loss. Built-ins live
-in `data/items.json` and custom variants in `user://item_variants.json`, outside
+in `catalog/items.json` and custom variants in `user://item_variants.json`, outside
 portable campaign saves.
 
 **Assistant** — a rules reference over the rulebook PDFs a GM legally owns. Ask
@@ -209,7 +230,14 @@ inside their local campaign save.
 
 The combat resolver handles exploding and fumbling d10s, defender-wins ties,
 armor ablation, critical injuries, and cover. Each action records its exact
-inverse so undo restores previous state structurally.
+inverse so undo restores previous state structurally. Moves, initiative and the
+end of a turn are recorded the same way, so undo covers the whole of a round
+rather than only the damage in it.
+
+Nothing in an encounter is refused by crashing. Every action is checked first,
+and a refusal is a printable answer — a code, the sentence the GM reads, the
+hint naming the way out, and whether it is a ruling the table may waive — which
+the screen shows rather than an assertion.
 
 ## Running it
 
@@ -258,14 +286,10 @@ requirements.txt`. The City screen loads the resulting RGB-compatible PNG at
 runtime, preserves its aspect ratio, and toggles it with **M** or **Map [M]**.
 When absent, the built-in map remains usable.
 
-The committed `data/maps/.gdignore` keeps Godot from importing a GM's extracted
-map, which would leave a `.import` file beside it naming a file that is
-deliberately not in Git. It covers that folder rather than all of `data/`,
-because Godot's exporter can only include files its filesystem knows about:
-ignoring the whole folder kept every shipped table out of every exported build.
-If the project was previously opened with extracted tables present, close Godot
-and remove the `.godot/` directory once to clear the old failed import records;
-Godot will rebuild that cache.
+The committed `data/.gdignore` prevents Godot from trying to import private
+runtime tables as translation catalogs. If the project was previously opened
+with extracted tables present, close Godot and remove the `.godot/` directory
+once to clear the old failed import records; Godot will rebuild that cache.
 The City screen loads that RGB-compatible PNG at runtime, preserves its aspect
 ratio, and toggles it with **M** or **Map [M]**. When absent, the built-in map
 remains usable. For cloud use, `docker compose up --build` provides persistent
@@ -295,15 +319,18 @@ assistant/           the local rulebook helper: extraction, index, vault, agent
 tests/               headless runner and suites
 tests/assistant/     the helper's own suite, run by pytest
 docs/mockups/        visual design references
-data/items.json      homebrew placeholder item catalog (shipped)
-data/lifestyle.json  the Lifestyle table both the app and the service bill from
+catalog/items.json   homebrew placeholder item catalog (shipped, packed into builds)
+catalog/lifestyle.json  the Lifestyle table both the app and the service bill from
 data/items_local.json  rulebook-derived catalog, git-ignored, replaces the above
 ```
 
 ## Private item catalog
 
-`data/items.json` ships **homebrew placeholders**, exactly as `tables_default.gd`
-does for the rules tables, so the app boots with a usable catalog. Its weapon and
+`catalog/items.json` ships **homebrew placeholders**, exactly as `tables_default.gd`
+does for the rules tables, so the app boots with a usable catalog. It sits outside
+`data/` because `data/.gdignore` keeps Godot from importing the extracted tables,
+and an ignored directory is skipped by the export scan too — anything under it is
+missing from an exported build. Its weapon and
 armor names and stats deliberately match the rows in `tables_default.gd`, so a
 purchased weapon resolves the same way its table row does.
 
@@ -315,7 +342,10 @@ python scripts/extract_items.py --pdf "/input/Cyberpunk Red.pdf"
 
 That writes `data/items_local.json`, which is git-ignored and, when present,
 replaces the placeholders at runtime rather than sitting beside them as
-near-duplicates. The Market header shows which catalog is loaded. Every row is
+near-duplicates. Book-derived data is never packed into a build, so to use a local
+catalog with an exported Redline, copy that file to `items_local.json` in the
+user data directory (`%APPDATA%\Godotpp_userdata\Redline` on Windows).
+The Market header shows which catalog is loaded. Every row is
 validated on load — an unknown weapon type, an autofire rating on a weapon with
 no autofire range band, a bad armor location or an unknown cyberware body part is
 dropped with a warning instead of asserting later inside the resolver.

@@ -1,8 +1,8 @@
 """The month-end close, checked against the same cases the GDScript suite runs.
 
 The app and this service both close a campaign month, in two languages. They
-read one table now (``data/lifestyle.json``), and this file and
-``tests/test_lifestyle.gd`` both walk ``data/lifestyle_cases.json``, so a rule
+read one table now (``catalog/lifestyle.json``), and this file and
+``tests/test_lifestyle.gd`` both walk ``catalog/lifestyle_cases.json``, so a rule
 change that reaches only one implementation fails rather than drifting quietly.
 """
 
@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from service import app as service
 
-CASES_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "lifestyle_cases.json"
+CASES_PATH = Path(__file__).resolve().parent.parent.parent / "catalog" / "lifestyle_cases.json"
 CASES = json.loads(CASES_PATH.read_text(encoding="utf-8"))
 
 

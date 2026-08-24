@@ -71,12 +71,6 @@ static func is_dead(actor: Dictionary) -> bool:
 	return String(actor.get("wound_state", UNHURT)) == DEAD
 
 
-## Being Mortally Wounded does not take a character out of the fight — it costs
-## them [code]mortally_wounded_penalty[/code] on everything they try. Death does.
-static func can_act(actor: Dictionary) -> bool:
-	return not is_dead(actor)
-
-
 ## True while the actor is down and unstabilized, so a save is owed at the start
 ## of each of their turns until someone stops the bleeding.
 static func owes_death_save(actor: Dictionary) -> bool:

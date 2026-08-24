@@ -30,6 +30,10 @@ var _message := "Roll initiative to begin the round."
 var _drag_unit := ""
 var _skill_result := "Choose a skill for a check before combat."
 var _check_rng := Dice.SeededRandom.new(Time.get_ticks_usec())
+## The reason the last attempted action did not happen, empty once one does.
+var _warning: Dictionary = {}
+## Re-runs the refused action with the ruling waived, when the table may waive it.
+var _retry := Callable()
 
 var _palette_box: VBoxContainer
 var _initiative_box: VBoxContainer
@@ -39,8 +43,11 @@ var _tool_buttons: Dictionary = {}
 var _hint_label: Label
 var _header_label: Label
 var _undo_button: Button
+var _redo_button: Button
 var _end_turn_button: Button
 var _location_id := ""
+var _warning_panel: PanelContainer
+var _warning_box: VBoxContainer
 
 
 func _ready() -> void:
@@ -111,7 +118,13 @@ func _build_encounter(location: Dictionary) -> void:
 		var entry: Dictionary = unit
 		var character := Store.character_by_id(String(entry["character_id"]))
 		if not character.is_empty():
-			actors[String(entry["id"])] = CampaignFixtures.actor_input(character)
+			var input := CampaignFixtures.actor_input(character)
+			# The encounter carries positions so a move can be an event like any
+			# other; the board still draws from the location.
+			input["position"] = {
+				"x": int(entry["x"]), "z": int(entry["z"]), "layer": int(entry.get("layer", 0))
+			}
+			actors[String(entry["id"])] = input
 	if actors.is_empty():
 		return
 	var tables := Tables.new(Store.campaign.get("tables", TablesDefault.document()))
@@ -398,6 +411,12 @@ func _build_stage(location: Dictionary) -> Control:
 	UI.expand(_hint_label, true, false)
 	tools.add_child(_hint_label)
 
+	_warning_panel = UI.panel(UI.PANEL_RAISED, UI.ALERT)
+	_warning_panel.visible = false
+	column.add_child(_warning_panel)
+	_warning_box = UI.vbox(2)
+	_warning_panel.add_child(UI.margins(_warning_box, UI.GAP_3))
+
 	var card := UI.panel()
 	card.custom_minimum_size = Vector2(0, 92)
 	column.add_child(card)
@@ -410,6 +429,7 @@ func _build_stage(location: Dictionary) -> Control:
 func _set_tool(tool_id: String) -> void:
 	_tool = tool_id
 	_pending_place = {}
+	_clear_warning()
 	for id in _tool_buttons:
 		(_tool_buttons[id] as Button).button_pressed = id == tool_id
 	for tool in TOOLS:
@@ -417,7 +437,65 @@ func _set_tool(tool_id: String) -> void:
 			_hint_label.text = UI._letterspace(String((tool as Dictionary)["hint"]).to_upper())
 	if _board != null:
 		_board.show_blast_preview({}, BLAST_RADIUS_M)
+		_refresh_move_range()
+	# Picking a tool the selected unit cannot use says so now rather than after
+	# the click that would have been refused.
+	var blocker := _tool_blocker(tool_id)
+	if not blocker.is_empty():
+		_show_check(blocker, Callable())
 	_rebuild_palette()
+	_refresh_card()
+
+
+## The refusal that would meet this tool if the GM clicked with it, or {} when
+## the tool is usable. Tools that place scenery are never blocked.
+func _tool_blocker(tool_id: String) -> Dictionary:
+	if _encounter == null or _is_setup() or _selected_unit == "":
+		return {}
+	if not _encounter.has_actor(_selected_unit):
+		return {}
+	var options := {"weapon": _selected_weapon_name()}
+	var check := {}
+	match tool_id:
+		"move":
+			check = _encounter.check_action(_selected_unit, "move", {})
+		"fire":
+			options["mode"] = "single"
+			check = _encounter.check_action(_selected_unit, "attack", options)
+		"aimed":
+			options["mode"] = "aimed"
+			check = _encounter.check_action(_selected_unit, "attack", options)
+		"autofire":
+			options["mode"] = "autofire"
+			check = _encounter.check_action(_selected_unit, "attack", options)
+		_:
+			return {}
+	return {} if bool(check["ok"]) else check
+
+
+func _selected_weapon_name() -> String:
+	for actor in _snapshot.get("actors", []):
+		if String((actor as Dictionary)["id"]) == _selected_unit:
+			return String((actor as Dictionary).get("selected_weapon", ""))
+	return ""
+
+
+## A ring showing how far one Move Action reaches, so the limit is visible
+## before a click runs into it.
+func _refresh_move_range() -> void:
+	if _board == null:
+		return
+	if _tool != "move" or _is_setup() or _encounter == null or _selected_unit == "":
+		_board.show_move_range({}, 0.0)
+		return
+	if not _encounter.has_actor(_selected_unit):
+		_board.show_move_range({}, 0.0)
+		return
+	var allowance := _encounter.move_allowance(_selected_unit)
+	if allowance <= 0.0:
+		_board.show_move_range({}, 0.0)
+		return
+	_board.show_move_range(_unit_cell(_selected_unit), allowance)
 
 
 func _on_board_input(event: InputEvent) -> void:
@@ -428,7 +506,7 @@ func _on_board_input(event: InputEvent) -> void:
 		var motion := event as InputEventMouseMotion
 		var pick := _board.pick(motion.position)
 		_hover_cell = pick.get("cell", {}) if not pick.is_empty() else {}
-		_board.set_hover_cell(_hover_cell)
+		_board.set_hover_cell(_hover_cell, _hover_is_out_of_reach())
 		if _drag_unit != "" and _is_setup() and not _hover_cell.is_empty():
 			_move_unit(_drag_unit, _hover_cell, false)
 		if _tool == "blast":
@@ -481,11 +559,13 @@ func _handle_click(pick: Dictionary) -> void:
 		elif _tool == "autofire":
 			begin_attack(id, "autofire")
 		else:
-			_selected_unit = id
-			_refresh()
+			select_unit(id)
 		return
 
-	if _tool == "move" and _selected_unit != "":
+	if _tool == "move":
+		if _selected_unit == "":
+			_warn("no_selection", "No unit is selected.", "Click a unit, then click the cell.")
+			return
 		_move_unit(_selected_unit, cell)
 
 
@@ -549,22 +629,43 @@ func _join_encounter(location: Dictionary, units: Dictionary) -> void:
 	var actors := {}
 	for unit_id in units:
 		var character := Store.character_by_id(String(units[unit_id]))
-		if not character.is_empty():
-			actors[String(unit_id)] = CampaignFixtures.actor_input(character)
+		if character.is_empty():
+			continue
+		var input := CampaignFixtures.actor_input(character)
+		# Arrivals carry the cell they were dropped on, for the same reason the
+		# full build does: a move is an event, and an event needs somewhere to
+		# have moved from.
+		var entry := _unit_entry(String(unit_id))
+		if not entry.is_empty():
+			input["position"] = {
+				"x": int(entry["x"]), "z": int(entry["z"]), "layer": int(entry.get("layer", 0))
+			}
+		actors[String(unit_id)] = input
 	if actors.is_empty():
 		return
 	_encounter.add_actors(actors)
 	_snapshot = _encounter.snapshot()
 
 
-func _move_unit(unit_id: String, cell: Dictionary, commit := true) -> void:
-	var location := Store.active_location()
-	for unit in location["units"]:
+func _write_unit_cell(unit_id: String, cell: Dictionary) -> void:
+	for unit in Store.active_location()["units"]:
 		var entry: Dictionary = unit
 		if String(entry["id"]) == unit_id:
 			entry["x"] = int(cell["x"])
 			entry["z"] = int(cell["z"])
 			entry["layer"] = int(cell.get("layer", 0))
+
+
+func _move_unit(unit_id: String, cell: Dictionary, commit := true) -> void:
+	# Before initiative there is no turn to spend and nothing to take back, so a
+	# setup drag writes straight through. Once the round has started a move is a
+	# Move Action, and goes through the encounter so Undo can walk it back.
+	if not _is_setup():
+		_move_in_combat(unit_id, cell)
+		return
+	_write_unit_cell(unit_id, cell)
+	if _encounter != null and _encounter.has_actor(unit_id):
+		_encounter.place(unit_id, cell)
 	if commit:
 		Store.mark_dirty()
 	_sync_units()
@@ -572,8 +673,136 @@ func _move_unit(unit_id: String, cell: Dictionary, commit := true) -> void:
 		_refresh()
 
 
+## One Move Action, recorded. [param override] is the GM waiving a ruling the
+## banner offered to waive.
+func _move_in_combat(unit_id: String, cell: Dictionary, override := false) -> void:
+	if _encounter == null or not _encounter.has_actor(unit_id):
+		return
+	var from := _unit_cell(unit_id)
+	var distance := _board.distance_m(from, cell) if not from.is_empty() else -1.0
+	var outcome := _encounter.move(
+		unit_id, cell, {"distance_m": distance, "override": override}
+	)
+	_snapshot = _encounter.snapshot()
+	if not bool(outcome["ok"]):
+		_show_check(outcome, _move_in_combat.bind(unit_id, cell, true))
+		_refresh()
+		return
+	_clear_warning()
+	_sync_positions_from_encounter()
+	_message = "Moved %s m — this turn's Move Action is spent." % String.num(distance, 1)
+	_refresh()
+
+
+## Copy the encounter's positions back onto the board. Undo and redo move actors
+## inside the event state; this is what makes the tokens follow.
+func _sync_positions_from_encounter() -> void:
+	if _encounter == null:
+		return
+	for unit in Store.active_location().get("units", []):
+		var entry: Dictionary = unit
+		var unit_id := String(entry["id"])
+		if not _encounter.has_actor(unit_id):
+			continue
+		var at := _encounter.position(unit_id)
+		if at.is_empty():
+			continue
+		_write_unit_cell(unit_id, at)
+	Store.mark_dirty()
+	_sync_units()
+	_refresh_move_range()
+
+
+func _hover_is_out_of_reach() -> bool:
+	if _tool != "move" or _is_setup() or _hover_cell.is_empty() or _selected_unit == "":
+		return false
+	if _encounter == null or not _encounter.has_actor(_selected_unit):
+		return false
+	var allowance := _encounter.move_allowance(_selected_unit)
+	if allowance <= 0.0:
+		return false
+	var from := _unit_cell(_selected_unit)
+	if from.is_empty():
+		return false
+	return _board.distance_m(from, _hover_cell) > allowance + 0.001
+
+
 func _is_setup() -> bool:
 	return int(_snapshot.get("round", 0)) == 0
+
+
+# -- warnings ---------------------------------------------------------------------
+
+
+## Raise a refusal the screen itself found, before the encounter was asked.
+func _warn(code: String, reason: String, hint := "") -> void:
+	_show_check(
+		{"ok": false, "code": code, "reason": reason, "hint": hint, "override": false}, Callable()
+	)
+
+
+## Show a refusal, and keep the way to waive it if the table may waive it.
+func _show_check(check: Dictionary, retry: Callable) -> void:
+	_warning = check.duplicate(true)
+	_retry = retry if bool(check.get("override", false)) and retry.is_valid() else Callable()
+	_message = String(check["reason"])
+	_refresh_warning()
+	_refresh_card()
+
+
+func _clear_warning() -> void:
+	_warning = {}
+	_retry = Callable()
+	_refresh_warning()
+
+
+## The reason the last action did not happen, printed where the GM is already
+## looking: above the resolution card, in alert red, with the way out named.
+func _refresh_warning() -> void:
+	if _warning_panel == null or _warning_box == null:
+		return
+	for child in _warning_box.get_children():
+		child.queue_free()
+	if _warning.is_empty():
+		_warning_panel.visible = false
+		return
+	_warning_panel.visible = true
+
+	var row := UI.hbox(UI.GAP_3)
+	_warning_box.add_child(row)
+
+	var text := UI.vbox(1)
+	UI.expand(text, true, false)
+	row.add_child(text)
+	text.add_child(UI.micro("Cannot do that", UI.ALERT_BRIGHT))
+	var reason := UI.body(String(_warning["reason"]), 12, UI.TEXT)
+	reason.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	reason.clip_text = false
+	text.add_child(reason)
+	if String(_warning.get("hint", "")) != "":
+		var hint := UI.body(String(_warning["hint"]), 11, UI.MUTED)
+		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		hint.clip_text = false
+		text.add_child(hint)
+
+	var buttons := UI.hbox(UI.GAP_2)
+	buttons.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(buttons)
+	if _retry.is_valid():
+		# Turn order and the action budget are the table's to waive. An empty
+		# magazine is not, so nothing is offered for those.
+		var anyway := UI.primary_button("Do it anyway")
+		anyway.tooltip_text = "Resolve this despite the ruling above."
+		anyway.pressed.connect(
+			func() -> void:
+				var retry := _retry
+				_clear_warning()
+				retry.call()
+		)
+		buttons.add_child(anyway)
+	var dismiss := UI.plain_button("Dismiss")
+	dismiss.pressed.connect(_clear_warning)
+	buttons.add_child(dismiss)
 
 
 # -- combat -------------------------------------------------------------------------
@@ -584,12 +813,90 @@ func _is_setup() -> bool:
 func roll_initiative() -> void:
 	_encounter.roll_initiative()
 	_snapshot = _encounter.snapshot()
+	_clear_warning()
 	_message = "Initiative rolled."
+	_refresh()
+
+
+## Pass the turn on. Public so the screenshot harness walks the turn order the
+## way the GM does rather than reaching past it.
+func end_turn() -> void:
+	if _encounter == null:
+		return
+	_encounter.end_turn()
+	_snapshot = _encounter.snapshot()
+	var current: Dictionary = _encounter.current_turn()
+	if not current.is_empty():
+		_selected_unit = String(current["actor_id"])
+	_clear_warning()
+	_refresh()
+
+
+## Whose turn it is, or "" before initiative.
+func current_actor_id() -> String:
+	return String(_snapshot.get("current_actor_id", ""))
+
+
+func undo() -> void:
+	if _encounter == null or not _encounter.can_undo():
+		_warn("nothing_to_undo", "Nothing has happened yet to undo.")
+		return
+	_encounter.undo()
+	_snapshot = _encounter.snapshot()
+	_clear_warning()
+	_sync_positions_from_encounter()
+	_message = String((_snapshot.get("card", {}) as Dictionary).get("title", "Undone"))
+	_refresh()
+
+
+func redo() -> void:
+	if _encounter == null or not _encounter.can_redo():
+		_warn("nothing_to_redo", "Nothing has been undone to put back.")
+		return
+	_encounter.redo()
+	_snapshot = _encounter.snapshot()
+	_clear_warning()
+	_sync_positions_from_encounter()
+	_message = String((_snapshot.get("card", {}) as Dictionary).get("title", "Redone"))
+	_refresh()
+
+
+## Reload the selected unit's weapon. In Cyberpunk RED this is an Action, so it
+## spends the turn: the reloaded weapon fires next turn, not this one.
+func reload_selected(override := false) -> void:
+	if _encounter == null or _selected_unit == "":
+		_warn("no_selection", "No unit is selected.", "Click a unit on the board first.")
+		return
+	var outcome := _encounter.reload(_selected_unit, _selected_weapon_name(), -1, override)
+	_snapshot = _encounter.snapshot()
+	if not bool(outcome["ok"]):
+		_show_check(outcome, reload_selected.bind(true))
+		_refresh()
+		return
+	_clear_warning()
+	_message = "Reloaded — this turn's Action is spent."
+	_refresh()
+
+
+## Clearing a jam is an Action too, so the weapon is ready next turn.
+func clear_jam_selected(override := false) -> void:
+	if _encounter == null or _selected_unit == "":
+		_warn("no_selection", "No unit is selected.", "Click a unit on the board first.")
+		return
+	var outcome := _encounter.clear_jam(_selected_unit, _selected_weapon_name(), override)
+	_snapshot = _encounter.snapshot()
+	if not bool(outcome["ok"]):
+		_show_check(outcome, clear_jam_selected.bind(true))
+		_refresh()
+		return
+	_clear_warning()
+	_message = "Jam cleared — this turn's Action is spent."
 	_refresh()
 
 
 func select_unit(unit_id: String) -> void:
 	_selected_unit = unit_id
+	_clear_warning()
 	_refresh()
 
 
@@ -695,13 +1002,33 @@ func _unit_cell(unit_id: String) -> Dictionary:
 	return {}
 
 
-func begin_attack(target_id: String, mode: String) -> void:
-	if _encounter == null or _selected_unit == "" or target_id == _selected_unit:
+func begin_attack(target_id: String, mode: String, override := false) -> void:
+	if _encounter == null:
+		return
+	if _selected_unit == "":
+		_warn("no_selection", "No unit is selected.", "Click the shooter, then click the target.")
+		return
+	if target_id == _selected_unit:
+		_warn("self_target", "A unit cannot shoot itself.", "Click a different target.")
 		return
 	var from := _unit_cell(_selected_unit)
 	var to := _unit_cell(target_id)
 	if from.is_empty() or to.is_empty():
+		_warn("not_on_board", "One of those units is not placed on the board.")
 		return
+
+	# Asked before the cover prompt on purpose: a jam or an empty magazine should
+	# stop the shot before the GM is made to rule on cover for it.
+	var check := _encounter.check_action(
+		_selected_unit,
+		"attack",
+		{"weapon": _selected_weapon_name(), "mode": mode, "target_id": target_id},
+	)
+	if not bool(check["ok"]) and not (override and bool(check["override"])):
+		_show_check(check, begin_attack.bind(target_id, mode, true))
+		_refresh()
+		return
+	_clear_warning()
 
 	var shot := {
 		"attacker": _selected_unit,
@@ -709,6 +1036,7 @@ func begin_attack(target_id: String, mode: String) -> void:
 		"mode": mode,
 		"location": "head" if mode == "aimed" else "body",
 		"distance_m": snappedf(_board.distance_m(from, to), 0.1),
+		"override": override,
 	}
 
 	var cover := _board.cover_between(from, to)
@@ -814,8 +1142,11 @@ func _resolve(shot: Dictionary, cover_choice: String, cover: Dictionary) -> void
 			attacker = actor
 	var weapon_name := String(attacker.get("selected_weapon", ""))
 	if weapon_name == "":
-		_message = "The selected unit has no weapon configured."
-		_refresh_card()
+		_warn(
+			"no_weapon",
+			"%s has no weapon configured." % String(attacker.get("name", "That unit")),
+			"Give them one on the Forge screen's Gear tab.",
+		)
 		return
 
 	var command := {
@@ -828,13 +1159,19 @@ func _resolve(shot: Dictionary, cover_choice: String, cover: Dictionary) -> void
 		# Partial cover as a flat penalty is a GM call, not the printed rule;
 		# absorbing the hit is what the resolver does by default.
 		"modifiers": -2 if cover_choice == "penalty" else 0,
+		"override": bool(shot.get("override", false)),
 	}
 	if cover_choice == "absorb" and not cover.is_empty():
 		command["cover_hp"] = int(cover["hp"])
 		command["cover_id"] = String(cover["prop_id"])
 
-	_encounter.attack(command)
+	var outcome := _encounter.attack(command)
 	_snapshot = _encounter.snapshot()
+	if not bool(outcome["ok"]):
+		_show_check(outcome, _resolve.bind(_overridden(shot), cover_choice, cover))
+		_refresh()
+		return
+	_clear_warning()
 
 	_board.play_shot(
 		_unit_cell(String(shot["attacker"])),
@@ -844,6 +1181,12 @@ func _resolve(shot: Dictionary, cover_choice: String, cover: Dictionary) -> void
 	_sync_units()
 	_message = String((_snapshot.get("card", {}) as Dictionary).get("title", "Resolved"))
 	_refresh()
+
+
+static func _overridden(shot: Dictionary) -> Dictionary:
+	var copy := shot.duplicate(true)
+	copy["override"] = true
+	return copy
 
 
 ## Grenades hit everyone in radius for full damage with no cover save, so this
@@ -912,14 +1255,12 @@ func _build_rail() -> Control:
 	top.add_child(roll)
 	_undo_button = UI.plain_button("Undo")
 	UI.expand(_undo_button, true, false)
-	_undo_button.pressed.connect(
-		func() -> void:
-			_encounter.undo()
-			_snapshot = _encounter.snapshot()
-			_sync_units()
-			_refresh()
-	)
+	_undo_button.pressed.connect(undo)
 	top.add_child(_undo_button)
+	_redo_button = UI.plain_button("Redo")
+	UI.expand(_redo_button, true, false)
+	_redo_button.pressed.connect(redo)
+	top.add_child(_redo_button)
 	actions.add_child(top)
 
 	var commit := UI.plain_button("Save results to roster")
@@ -928,15 +1269,7 @@ func _build_rail() -> Control:
 	actions.add_child(commit)
 
 	_end_turn_button = UI.primary_button("End turn ▸")
-	_end_turn_button.pressed.connect(
-		func() -> void:
-			_encounter.end_turn()
-			_snapshot = _encounter.snapshot()
-			var current: Dictionary = _encounter.current_turn()
-			if not current.is_empty():
-				_selected_unit = String(current["actor_id"])
-			_refresh()
-	)
+	_end_turn_button.pressed.connect(end_turn)
 	actions.add_child(_end_turn_button)
 	column.add_child(UI.margins(actions, UI.GAP_3))
 
@@ -1008,9 +1341,11 @@ func _refresh() -> void:
 	_refresh_header()
 	_refresh_initiative()
 	_refresh_selected()
+	_refresh_warning()
 	_refresh_card()
 	if _board != null:
 		_board.set_selection(_selected_unit)
+		_refresh_move_range()
 	_publish_player_view()
 
 
@@ -1089,14 +1424,14 @@ func _refresh_initiative() -> void:
 		child.queue_free()
 
 	var order: Array = _snapshot.get("initiative", [])
+	_refresh_history_buttons()
 	if order.is_empty():
 		_initiative_box.add_child(UI.margins(UI.micro("Not rolled yet."), UI.GAP_2))
-		_undo_button.disabled = not bool(_snapshot.get("can_undo", false))
 		_end_turn_button.disabled = true
+		_end_turn_button.tooltip_text = "Roll initiative before turns can be passed."
 		return
-
-	_undo_button.disabled = not bool(_snapshot.get("can_undo", false))
 	_end_turn_button.disabled = false
+	_end_turn_button.tooltip_text = "Hands the turn on and gives the next unit their Action back."
 
 	for entry in order:
 		var row: Dictionary = entry
@@ -1107,6 +1442,25 @@ func _refresh_initiative() -> void:
 				actor = candidate
 		var is_current := String(_snapshot.get("current_actor_id", "")) == actor_id
 		_initiative_box.add_child(_build_initiative_row(row, actor, is_current))
+
+
+## Undo and Redo say what they would take back, so the GM is never guessing at
+## which action a click reaches.
+func _refresh_history_buttons() -> void:
+	var can_undo := bool(_snapshot.get("can_undo", false))
+	_undo_button.disabled = not can_undo
+	_undo_button.tooltip_text = (
+		"Take back %s." % String(_snapshot.get("undo_label", ""))
+		if can_undo
+		else "Nothing has happened yet to undo."
+	)
+	var can_redo := bool(_snapshot.get("can_redo", false))
+	_redo_button.disabled = not can_redo
+	_redo_button.tooltip_text = (
+		"Put back %s." % String(_snapshot.get("redo_label", ""))
+		if can_redo
+		else "Nothing has been undone to put back."
+	)
 
 
 func _build_initiative_row(entry: Dictionary, actor: Dictionary, is_current: bool) -> Control:
@@ -1219,20 +1573,93 @@ func _refresh_selected() -> void:
 		_build_setup_skill_check()
 
 	_selected_box.add_child(UI.margins(UI.micro("Actions this turn"), UI.GAP_2))
-	var actions := UI.vbox(1)
-	var spent: Array = (_snapshot.get("actions_taken", {}) as Dictionary).get(_selected_unit, [])
-	for action in spent:
-		actions.add_child(_action_row(String(action), "Used", true))
-	actions.add_child(_action_row("Move · %d m" % (int(stats.get("MOVE", 0)) * 2), "Action", false))
-	var weapons: Array = actor.get("weapons", [])
-	var ammo_text := "—"
-	if not weapons.is_empty():
-		ammo_text = "%d rds" % int((weapons[0] as Dictionary)["ammo"])
-	actions.add_child(
-		_action_row("Attack · %s" % String(actor.get("selected_weapon", "—")), ammo_text, false)
+	_selected_box.add_child(UI.margins(_build_budget(actor, stats), UI.GAP_2))
+	_selected_box.add_child(UI.margins(_build_weapon_controls(actor), UI.GAP_2))
+
+
+## The turn budget, spelled out. An action the unit cannot take keeps its row
+## and prints the reason in place of its cost, so the answer to "why is that
+## greyed out" is already on screen.
+func _build_budget(actor: Dictionary, stats: Dictionary) -> Control:
+	var available: Dictionary = actor.get("available", {})
+	var spent: Dictionary = actor.get("spent", {})
+	var rows := UI.vbox(1)
+
+	var reach := int(actor.get("move_allowance", int(stats.get("MOVE", 0)) * 2))
+	var budget := [
+		{"key": "move", "label": "Move · %d m" % reach, "note": "Move Action"},
+		{"key": "attack", "label": "Attack · %s" % _weapon_summary(actor), "note": "Action"},
+		{"key": "aimed", "label": "Aimed shot · head", "note": "−8 DV · Action"},
+		{"key": "autofire", "label": "Autofire", "note": "10 rds · Action"},
+		{"key": "reload", "label": "Reload", "note": "Action — fires next turn"},
+	]
+	if bool(_selected_weapon_view(actor).get("jammed", false)):
+		budget.append({"key": "clear_jam", "label": "Clear jam", "note": "Action"})
+
+	for row in budget:
+		var entry: Dictionary = row
+		var check: Dictionary = available.get(String(entry["key"]), _clear_check())
+		rows.add_child(
+			_action_row(
+				String(entry["label"]),
+				String(entry["note"]),
+				String(check.get("short", "")),
+				String(check.get("reason", "")),
+			)
+		)
+
+	var used := PackedStringArray()
+	for cost in ["action", "move"]:
+		if String(spent.get(cost, "")) != "":
+			used.append("%s on %s" % [String(Encounter.COST_LABELS[cost]), String(spent[cost])])
+	if not used.is_empty():
+		rows.add_child(UI.micro("Spent: %s" % ", ".join(used), UI.WARN))
+	return rows
+
+
+func _selected_weapon_view(actor: Dictionary) -> Dictionary:
+	for weapon in actor.get("weapons", []):
+		if String((weapon as Dictionary)["name"]) == String(actor.get("selected_weapon", "")):
+			return weapon
+	return {}
+
+
+func _weapon_summary(actor: Dictionary) -> String:
+	var weapon := _selected_weapon_view(actor)
+	if weapon.is_empty():
+		return "no weapon"
+	return "%s %d/%d" % [String(weapon["name"]), int(weapon["ammo"]), int(weapon["magazine"])]
+
+
+## Reload and Clear jam sit next to the ammo count they act on. Each stays
+## visible when it is unavailable and carries the reason on its tooltip.
+func _build_weapon_controls(actor: Dictionary) -> Control:
+	var available: Dictionary = actor.get("available", {})
+	var row := UI.hbox(UI.GAP_2)
+	var reload_check: Dictionary = available.get("reload", _clear_check())
+	var reload := UI.plain_button("Reload")
+	UI.expand(reload, true, false)
+	reload.disabled = not bool(reload_check.get("ok", true))
+	reload.tooltip_text = (
+		String(reload_check.get("reason", ""))
+		if reload.disabled
+		else "Refills the magazine. Costs this turn's Action."
 	)
-	actions.add_child(_action_row("Aimed shot · head", "−8 DV", false))
-	_selected_box.add_child(UI.margins(actions, UI.GAP_2))
+	reload.pressed.connect(reload_selected.bind(false))
+	row.add_child(reload)
+
+	var jam_check: Dictionary = available.get("clear_jam", _clear_check())
+	var jam := UI.plain_button("Clear jam")
+	UI.expand(jam, true, false)
+	jam.disabled = not bool(jam_check.get("ok", true))
+	jam.tooltip_text = (
+		String(jam_check.get("reason", ""))
+		if jam.disabled
+		else "Clears the jam. Costs this turn's Action."
+	)
+	jam.pressed.connect(clear_jam_selected.bind(false))
+	row.add_child(jam)
+	return row
 
 
 ## Condition, and the medicine that answers it.
@@ -1461,14 +1888,28 @@ func roll_selected_skill(skill_name: String, modifier := 0, dv := 13) -> Diction
 	return rolled
 
 
-func _action_row(label: String, note: String, used: bool) -> Control:
-	var panel := UI.panel(UI.PANEL_INSET, Color.TRANSPARENT if used else UI.HAIRLINE)
+static func _clear_check() -> Dictionary:
+	return {"ok": true, "reason": "", "short": ""}
+
+
+## One line of the turn budget. [param blocked] is the terse form of why the
+## action is unavailable and takes the place of its cost; [param detail] is the
+## whole sentence, which the row carries on its tooltip so the narrow column
+## never has to elide it.
+func _action_row(label: String, note: String, blocked := "", detail := "") -> Control:
+	var available := blocked == ""
+	var panel := UI.panel(UI.PANEL_INSET, UI.HAIRLINE if available else UI.ALERT)
+	panel.tooltip_text = detail
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	var row := UI.hbox(UI.GAP_2)
 	panel.add_child(UI.margins(row, 5))
-	var text := UI.body(label, 11, UI.MUTED_DIM if used else UI.TEXT)
+	var text := UI.elide(UI.body(label, 11, UI.TEXT if available else UI.MUTED_DIM))
 	UI.expand(text, true, false)
 	row.add_child(text)
-	row.add_child(UI.micro(note))
+	var side := UI.micro(note if available else blocked, UI.MUTED if available else UI.ALERT_BRIGHT)
+	side.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	side.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(side)
 	return panel
 
 
@@ -1487,12 +1928,19 @@ func _refresh_card() -> void:
 	var head := UI.vbox(1)
 	head.custom_minimum_size = Vector2(180, 0)
 	row.add_child(head)
-	head.add_child(UI.micro("Attack resolution"))
+	head.add_child(
+		UI.micro(
+			"Refused" if String(card.get("tone", "")) == "blocked" else "Attack resolution",
+			UI.ALERT_BRIGHT if String(card.get("tone", "")) == "blocked" else UI.MUTED,
+		)
+	)
 	var tone := UI.TEXT_DISPLAY
 	if String(card.get("tone", "")) == "miss":
 		tone = UI.MUTED
 	elif String(card.get("tone", "")) == "hit":
 		tone = UI.ACCENT
+	elif String(card.get("tone", "")) == "blocked":
+		tone = UI.ALERT_BRIGHT
 	head.add_child(UI.display(String(card["title"]), 26, tone))
 
 	var lines := UI.vbox(0)

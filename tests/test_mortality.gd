@@ -51,6 +51,15 @@ static func _cast() -> Dictionary:
 			"skills": {"First Aid": 14, "Surgery": 16},
 			"weapons": {},
 		},
+		"hurt":
+		{
+			"name": "Wounded Booster",
+			"max_hp": 40,
+			"hp": 5,
+			"stats": {"BODY": 6},
+			"evasion_base": 8,
+			"weapons": {},
+		},
 		"downed":
 		{
 			"name": "Booster",
@@ -198,19 +207,27 @@ static func _stabilizing(h: Harness) -> void:
 	h.equal(String(failed.card["title"]), "STILL DYING", "card")
 
 	h.it("puts a stabilized character back on saves when they are hit again")
-	# The stabilise check, then the attack: a d10 of 5, damage 6 6 6, and the
-	# critical injury those three sixes trip.
+	# Shooting someone already at zero is a ruling the table waives rather than a
+	# rule the app enforces — "only if the table is finishing them off" — so this
+	# is both halves: refused by default, and on the waiver the stabilised
+	# character goes back on the clock.
 	var shot := _encounter([4, 5, 6, 6, 6, 3, 4])
 	shot.stabilize("downed", "medtech")
 	h.equal(_actor(shot, "downed")["death_save_due"], false, "stabilized")
-	shot.attack(
-		{
-			"attacker_id": "solo",
-			"target_id": "downed",
-			"weapon": "Heavy Pistol",
-			"distance_m": 5.0,
-		}
-	)
+	var command := {
+		"attacker_id": "solo",
+		"target_id": "downed",
+		"weapon": "Heavy Pistol",
+		"distance_m": 5.0,
+	}
+	var refused := shot.attack(command.duplicate())
+	h.equal(bool(refused["ok"]), false, "a body is not a target by default")
+	h.equal(String(refused["code"]), "target_down", "and the reason says so")
+	h.equal(_actor(shot, "downed")["death_save_due"], false, "nothing happened")
+
+	command["override"] = true
+	var finished := shot.attack(command)
+	h.equal(bool(finished["ok"]), true, "the table can waive it")
 	h.equal(_actor(shot, "downed")["death_save_due"], true, "back on the clock")
 
 	h.it("undoes a stabilization")
@@ -287,13 +304,15 @@ static func _penalties(h: Harness) -> void:
 	h.it("puts the attacker's wound penalty on their attack")
 	var cast := _cast()
 	(cast["solo"] as Dictionary)["hp"] = 10
-	# Attack base 12, seriously wounded at -2, a d10 of 5: 12 - 2 + 5 = 15.
+	# Attack base 12, seriously wounded at -2, a d10 of 5: 12 - 2 + 5 = 15. The
+	# target is on their feet: shooting a body is a separate ruling, and this
+	# case is about the shooter.
 	var session := Encounter.new(_tables(), cast, Dice.FixedRandom.new([5, 1, 1, 1]))
 	h.equal(String(session.actor("solo")["wound_state"]), "seriously_wounded", "wound state")
 	session.attack(
 		{
 			"attacker_id": "solo",
-			"target_id": "downed",
+			"target_id": "medtech",
 			"weapon": "Heavy Pistol",
 			"distance_m": 5.0,
 		}
@@ -306,17 +325,23 @@ static func _penalties(h: Harness) -> void:
 	contest.attack(
 		{
 			"attacker_id": "solo",
-			"target_id": "downed",
+			"target_id": "hurt",
 			"weapon": "Heavy Pistol",
 			"distance_m": 5.0,
 			"contested": true,
 		}
 	)
-	# Evasion base 8, mortally wounded at -4, a d10 of 5: 8 - 4 + 5 = 9.
-	h.equal(int(contest.result["defense"]), 9, "defence carries the penalty")
+	# Evasion base 8, seriously wounded at -2, a d10 of 5: 8 - 2 + 5 = 11.
+	h.equal(int(contest.result["defense"]), 11, "defence carries the penalty")
 
-	h.it("refuses to let a dead actor act")
+	h.it("refuses to let a dead actor act, and says death is why")
+	# The turn-budget checks already stop anyone at zero HP. A corpse gets its
+	# own reason, because "undo the hit that dropped them" is the wrong remedy
+	# for a failed Death Save.
 	var morgue := _encounter([7])
 	morgue.death_save("downed")
-	h.equal(Mortality.can_act(morgue.actor("downed")), false, "the dead do not act")
-	h.equal(Mortality.can_act(morgue.actor("solo")), true, "the living do")
+	h.equal(Mortality.is_dead(morgue.actor("downed")), true, "dead")
+	var refusal := morgue.check_action("downed", "attack", {"weapon": "Heavy Pistol"})
+	h.equal(bool(refusal["ok"]), false, "and cannot act")
+	h.equal(String(refusal["code"]), "actor_dead", "for the right reason")
+	h.equal(bool(refusal.get("override", false)), false, "which the table cannot waive")
