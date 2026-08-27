@@ -21,6 +21,8 @@ const ACTION_COSTS := {
 	"Attack": "action",
 	"Aimed Shot": "action",
 	"Autofire": "action",
+	"Suppressive Fire": "action",
+	"Melee": "action",
 	"Reload": "action",
 	"Clear Jam": "action",
 	"Move": "move",
@@ -35,6 +37,8 @@ const COST_LABELS := {"action": "Action", "move": "Move Action"}
 const SHORT_REASONS := {
 	"unknown_actor": "No unit",
 	"actor_down": "Down",
+	"actor_dead": "Dead",
+	"suppressed": "Pinned",
 	"not_your_turn": "Not their turn",
 	"action_spent": "Action spent",
 	"move_spent": "Move spent",
@@ -129,6 +133,10 @@ static func _normalise_actor(actor_id: String, entry: Dictionary) -> Dictionary:
 	actor["wound_state"] = String(actor.get("wound_state", Mortality.state_for(hp, max_hp)))
 	actor["death_save_due"] = bool(actor.get("death_save_due", hp <= 0))
 	actor["death_save_penalty"] = maxi(0, int(actor.get("death_save_penalty", 0)))
+	actor["suppressed"] = bool(actor.get("suppressed", false))
+	# An actor who walks in with a LUCK stat and no recorded pool has spent none
+	# of it, which is the same reading [Luck.ensure] gives a sheet.
+	actor["luck_available"] = maxi(0, int(actor.get("luck_available", Luck.pool(actor))))
 	actor["critical_injuries"] = actor.get("critical_injuries", [])
 	actor["weapons"] = weapons
 	var cell: Dictionary = actor.get("position", {})
@@ -256,20 +264,80 @@ func end_turn() -> void:
 	if initiative.is_empty():
 		return
 	var current := current_turn()
+
+	# Whoever is up next stops being pinned and pays for anything still burning
+	# on them. Both are recorded with the turn change rather than after it, so
+	# taking the turn back takes the fire damage back with it.
+	var next_index := turn_index + 1
+	if next_index >= initiative.size():
+		next_index = 0
+	var upkeep: Array[Dictionary] = []
+	if next_index < initiative.size():
+		upkeep = _turn_upkeep(String((initiative[next_index] as Dictionary)["actor_id"]))
+
 	_record(
 		{
 			"kind": "end_turn",
 			"actor_id": String(current.get("actor_id", "")),
 			"round": round_number,
 		},
-		[{"kind": "noop"}],
+		upkeep if not upkeep.is_empty() else [{"kind": "noop"}],
 	)
+	if not upkeep.is_empty():
+		events = upkeep.duplicate(true)
 	if not current.is_empty():
 		actions_taken.erase(String(current["actor_id"]))
 	turn_index += 1
 	if turn_index >= initiative.size():
 		turn_index = 0
 		round_number += 1
+
+
+## What the start of [param actor_id]'s turn costs them before they act.
+##
+## Suppression lasts until their turn comes round, and fire burns for as many
+## rounds as it was set for. Both are returned as events rather than applied, so
+## the turn change that causes them stays one reversible step.
+func _turn_upkeep(actor_id: String) -> Array[Dictionary]:
+	var upkeep: Array[Dictionary] = []
+	if not has_actor(actor_id):
+		return upkeep
+	var entry := actor(actor_id)
+
+	if bool(entry.get("suppressed", false)):
+		upkeep.append({"kind": "unsuppressed", "target_id": actor_id})
+
+	var burning: Variant = entry.get("burning", null)
+	if burning != null:
+		var burn: Dictionary = burning
+		var rounds := int(burn.get("rounds", 0))
+		var amount := int(burn.get("amount", 0))
+		if rounds > 0 and amount > 0:
+			upkeep.append({"kind": "damage_taken", "target_id": actor_id, "amount": amount})
+			upkeep.append_array(
+				Resolver.wound_events(
+					Resolver.TargetState.new(
+						actor_id,
+						int(entry["hp"]),
+						int(entry["max_hp"]),
+						entry.get("armor", {}),
+						0,
+					),
+					amount,
+				)
+			)
+		# The fire either burns down by one round or goes out.
+		upkeep.append({"kind": "extinguished", "target_id": actor_id})
+		if rounds - 1 > 0:
+			upkeep.append(
+				{
+					"kind": "ignited",
+					"target_id": actor_id,
+					"amount": amount,
+					"rounds": rounds - 1,
+				}
+			)
+	return upkeep
 
 
 ## Bring actors into a fight that is already running.
@@ -371,6 +439,10 @@ static func action_label(kind: String, options := {}) -> String:
 			return "Autofire"
 		if mode == "aimed":
 			return "Aimed Shot"
+		if mode == "suppressive":
+			return "Suppressive Fire"
+		if mode == "melee":
+			return "Melee"
 		return "Attack"
 	if kind == "reload":
 		return "Reload"
@@ -420,6 +492,13 @@ func check_action(actor_id: String, kind: String, options := {}) -> Dictionary:
 			"actor_dead",
 			"%s is dead." % who,
 			"A failed Death Save is not undone by healing. Undo the save itself to take it back.",
+		)
+	if bool(entry.get("suppressed", false)):
+		return _blocked(
+			"suppressed",
+			"%s is pinned down." % who,
+			"Suppression lifts at the start of their next turn.",
+			true,
 		)
 	if int(entry["hp"]) <= 0:
 		return _blocked(
@@ -522,13 +601,20 @@ func _check_attack(actor_id: String, options: Dictionary) -> Dictionary:
 			"Fire it single shot, or pick a weapon that sprays.",
 		)
 
+	if mode == "suppressive" and _autofire_rating(actor_id, weapon_name) <= 0:
+		return _blocked(
+			"no_autofire",
+			"%s cannot lay down fire." % weapon_name,
+			"Suppressing takes a weapon that sprays.",
+		)
+
 	var ammo := int(state["ammo"])
-	var needed: int = int(Resolver.RULES["autofire_ammo_cost"]) if mode == "autofire" else 1
+	var needed := Resolver.ammo_cost_for(mode)
 	if ammo < needed:
 		var short_reason := (
 			"%s is empty." % weapon_name
 			if ammo == 0
-			else "%s holds %d rounds and autofire needs %d." % [weapon_name, ammo, needed]
+			else "%s holds %d rounds and that needs %d." % [weapon_name, ammo, needed]
 		)
 		return _blocked(
 			"no_ammo" if ammo == 0 else "not_enough_ammo",
@@ -841,6 +927,10 @@ func attack(command: Dictionary) -> Dictionary:
 	)
 	request.wound_penalty = Mortality.action_penalty(attacker)
 	request.defender_wound_penalty = defender_wound_penalty
+	request.ammo_type = String(command.get("ammo_type", "basic"))
+	# A melee hit carries the arm behind it, which is the attacker's BODY rather
+	# than anything the weapon knows about.
+	request.melee_bonus = _melee_bonus(attacker)
 	var attack_result := Resolver.resolve_attack(request, tables, _rng)
 
 	var applied: Array[Dictionary] = []
@@ -935,6 +1025,60 @@ func clear_jam(actor_id: String, weapon_name: String, override := false) -> Dict
 	result = {}
 	_note_action(actor_id, "Clear Jam")
 	return _ok()
+
+
+## Spend Luck ahead of an actor's next check.
+##
+## Declared before the die, never after seeing it: the points raise whatever the
+## actor rolls next and are gone whether or not it lands. Recorded through the
+## session so undoing the shot gives them back.
+func spend_luck(actor_id: String, amount: int) -> Dictionary:
+	if not has_actor(actor_id):
+		return _refuse(
+			_blocked("unknown_actor", "No such unit.", "Pick a unit on the board.")
+		)
+	var entry := actor(actor_id)
+	var outcome := Luck.spend(actor_id, entry, amount)
+	if not bool(outcome["ok"]):
+		card = {
+			"kind": "luck",
+			"title": "NO LUCK LEFT",
+			"attacker": String(entry["name"]),
+			"lines": outcome["card_lines"],
+			"tone": "miss",
+		}
+		return _ok()
+
+	var luck_events: Array[Dictionary] = outcome["events"]
+	_record({"kind": "spend_luck", "actor_id": actor_id, "amount": amount}, luck_events)
+	card = {
+		"kind": "luck",
+		"title": "LUCK SPENT",
+		"attacker": String(entry["name"]),
+		"lines": outcome["card_lines"],
+		"tone": "neutral",
+	}
+	events = luck_events.duplicate(true)
+	result = {}
+	return _ok()
+
+
+## The damage an actor's own strength adds to a melee hit.
+##
+## Read off BODY, in the same band shape the rest of the sheet uses: an average
+## person adds nothing, and it takes real strength before it shows up.
+static func _melee_bonus(actor_entry: Dictionary) -> int:
+	var stats: Dictionary = actor_entry.get("stats", {})
+	var body := int(actor_entry.get("body", stats.get("BODY", 0)))
+	if body >= 11:
+		return 4
+	if body >= 9:
+		return 3
+	if body >= 7:
+		return 2
+	if body >= 5:
+		return 1
+	return 0
 
 
 # -- mortality -----------------------------------------------------------------
@@ -1276,6 +1420,9 @@ func _actor_view(actor_id: String, entry: Dictionary) -> Dictionary:
 		"death_save_due": bool(entry["death_save_due"]),
 		"death_save_penalty": int(entry["death_save_penalty"]),
 		"action_penalty": Mortality.action_penalty(entry),
+		"suppressed": bool(entry.get("suppressed", false)),
+		"burning": (entry.get("burning", {}) as Dictionary).duplicate(),
+		"luck_available": int(entry.get("luck_available", 0)),
 		"critical_injuries": (entry["critical_injuries"] as Array).duplicate(),
 		"attack_base": int(entry.get("attack_base", 0)),
 		"evasion_base": int(entry.get("evasion_base", 0)),
