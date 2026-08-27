@@ -245,6 +245,12 @@ static func ensure_character(character: Dictionary) -> void:
 	# Reputation is what a Facedown is actually fought with, so every sheet
 	# carries one whether or not the GM has ever set it.
 	character["reputation"] = clampi(int(character.get("reputation", 0)), 0, 10)
+	# LUCK is a stat that now buys something, so every sheet carries a pool. One
+	# that has never spent a point starts with all of them.
+	Luck.ensure(character)
+	# The Humanity band is derived rather than stored, for the same reason the
+	# wound state is: several screens read it.
+	Humanity.reconcile(character)
 	_reconcile_wound_state(character)
 	# Old sheets predate the creation workflow and remain completed rather than
 	# unexpectedly becoming locked behind a point-allocation screen.
