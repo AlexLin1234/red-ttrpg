@@ -239,6 +239,36 @@ and a refusal is a printable answer — a code, the sentence the GM reads, the
 hint naming the way out, and whether it is a ruling the table may waive — which
 the screen shows rather than an assertion.
 
+Beyond a single shot, the resolver covers **ammunition types** (armour-piercing
+halves the plate it meets and half of what gets through; expansive doubles
+against anyone wearing nothing and never marks armour; incendiary sets the
+target alight for a few rounds), **melee**, which is contested at arm's length
+and carries the attacker's BODY behind it, **suppressive fire**, which spends a
+burst to pin rather than to wound, and **area attacks**, where one grenade roll
+is shared by everyone inside the blast and a miss scatters rather than
+disappearing. Fire ticks and suppression lifts at the start of the target's
+turn, both recorded with the turn change so undo takes them back together.
+
+**Luck** is spendable. LUCK was a stat nothing spent; a character now starts each
+session with a pool that size, adds points to a check before the die is rolled,
+and gets them back only when the pool is refreshed — or when the GM undoes the
+check that spent them. Asking for more than the pool holds is refused rather
+than quietly clamped.
+
+**Humanity** does something. Cyberware already subtracted it and therapy already
+restored it, but nothing read the number. It now sits in bands that cap the
+Empathy every social check uses, and the bottom of the scale is cyberpsychosis:
+the character stops being a player character. Like death, that is not undone by
+the number going back up — the GM undoes the loss that caused it, or they stay
+gone.
+
+A netrunner can be **met by another netrunner** rather than only by a building:
+the defender rolls Interface against the intruder's, ties go to the intruder,
+and what a defender wins is spent in the currency the architecture already uses —
+the intruder's HP, the trace, or an alert. In a chase, a collision now reaches
+**the people inside the car** as well as the car: the frame keeps most of it off
+them and a restraint keeps off more, and a bike has neither.
+
 ## Running it
 
 Open `project.godot` in Godot 4.7, or run:
