@@ -46,6 +46,33 @@ def _backend():
     return keyring
 
 
+# Control flow, not vault failure: these must reach the caller untouched.
+_PASS_THROUGH = (KeyboardInterrupt, SystemExit, GeneratorExit, MemoryError)
+
+
+def _vault(operation: str, call, *args):
+    """Run one vault call, turning any backend failure into ``VaultUnavailable``.
+
+    Catching ``BaseException`` rather than ``Exception`` is deliberate. A keyring
+    backend is a stack of optional native libraries, and a broken one does not
+    always fail politely: a Rust backend raises ``pyo3_runtime.PanicException``,
+    which inherits straight from ``BaseException``, so an ``except Exception``
+    here lets it past and turns a missing key into a 500 on every request that
+    draws the Assistant tab. A vault this module cannot read is the same
+    condition however it failed — the key is unavailable, and the caller is
+    expected to carry on without one.
+    """
+
+    try:
+        return call(*args)
+    except VaultUnavailable:
+        raise
+    except _PASS_THROUGH:
+        raise
+    except BaseException as exc:
+        raise VaultUnavailable(redaction.safe_error(exc, operation)) from exc
+
+
 def validate(key: str) -> str:
     """Return the trimmed key, or raise ``ValueError`` describing the problem."""
 
@@ -69,12 +96,13 @@ def hint_for(key: str) -> str:
 
 def store(key: str) -> KeyStatus:
     candidate = validate(key)
-    try:
-        _backend().set_password(SERVICE_NAME, ACCOUNT_NAME, candidate)
-    except VaultUnavailable:
-        raise
-    except Exception as exc:
-        raise VaultUnavailable(redaction.safe_error(exc, "the credential vault refused the key")) from exc
+    _vault(
+        "the credential vault refused the key",
+        _backend().set_password,
+        SERVICE_NAME,
+        ACCOUNT_NAME,
+        candidate,
+    )
     redaction.register_secret(candidate)
     return KeyStatus(stored=True, hint=hint_for(candidate))
 
@@ -82,12 +110,12 @@ def store(key: str) -> KeyStatus:
 def load() -> str | None:
     """The stored key, or ``None``. Callers must never log the result."""
 
-    try:
-        key = _backend().get_password(SERVICE_NAME, ACCOUNT_NAME)
-    except VaultUnavailable:
-        raise
-    except Exception as exc:
-        raise VaultUnavailable(redaction.safe_error(exc, "the credential vault could not be read")) from exc
+    key = _vault(
+        "the credential vault could not be read",
+        _backend().get_password,
+        SERVICE_NAME,
+        ACCOUNT_NAME,
+    )
     if key:
         redaction.register_secret(key)
     return key
@@ -100,10 +128,13 @@ def remove() -> bool:
     except VaultUnavailable:
         pass
     try:
-        _backend().delete_password(SERVICE_NAME, ACCOUNT_NAME)
+        _vault(
+            "the credential vault could not be written",
+            _backend().delete_password,
+            SERVICE_NAME,
+            ACCOUNT_NAME,
+        )
     except VaultUnavailable:
-        raise
-    except Exception:
         # Deleting a key that was never stored is not a failure worth surfacing.
         return False
     if key:

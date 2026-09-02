@@ -40,6 +40,7 @@ static func run(h: Harness) -> void:
 	_gap(h)
 	_maneuvers(h)
 	_endings(h)
+	_passengers(h)
 
 
 static func _garage(h: Harness) -> void:
@@ -181,3 +182,55 @@ static func _endings(h: Harness) -> void:
 	wreck.undo()
 	h.equal(wreck.outcome(), Vehicles.RUNNING, "back in the chase")
 	h.equal(wreck.is_over(), false, "and drivable")
+
+
+static func _passengers(h: Harness) -> void:
+	# SDP is the car, not the crew. Before this, a sedan could be driven to a
+	# wreck with four unharmed passengers inside it.
+	var sedan := Vehicles.from_template("compact")
+	var bike := Vehicles.from_template("bike")
+
+	h.it("passes a share of a collision to the people inside")
+	# 20 SDP quartered is 5, less the frame's 2 and a belt's 2, leaves 1.
+	var belted := Vehicles.passenger_damage(sedan, 20, [{"id": "driver", "restrained": true}])
+	h.equal((belted["hurt"] as Array).size(), 1, "the driver felt it")
+	h.equal(int((belted["hurt"][0] as Dictionary)["amount"]), 1, "how much")
+
+	h.it("hurts anyone who is not belted in more")
+	var loose := Vehicles.passenger_damage(sedan, 20, [{"id": "passenger", "restrained": false}])
+	h.equal(int((loose["hurt"][0] as Dictionary)["amount"]), 3, "no belt, no reduction")
+
+	h.it("gives a rider no frame at all")
+	# A bike keeps nothing off: 5 less the belt that is not there.
+	var rider := Vehicles.passenger_damage(bike, 20, [{"id": "rider", "restrained": false}])
+	h.equal(int((rider["hurt"][0] as Dictionary)["amount"]), 5, "all of the share")
+
+	h.it("absorbs a small knock entirely")
+	var scrape := Vehicles.passenger_damage(sedan, 4, [{"id": "driver", "restrained": true}])
+	h.equal((scrape["hurt"] as Array).size(), 0, "nobody hurt")
+	h.equal((scrape["events"] as Array).size(), 0, "and nothing recorded")
+
+	h.it("hurts every occupant, not only the driver")
+	var crowded := Vehicles.passenger_damage(
+		sedan,
+		40,
+		[
+			{"id": "driver", "restrained": true},
+			{"id": "shotgun", "restrained": true},
+			{"id": "back", "restrained": false},
+		]
+	)
+	h.equal((crowded["hurt"] as Array).size(), 3, "all three")
+
+	h.it("does nothing when the car was not hit or nobody is in it")
+	h.equal((Vehicles.passenger_damage(sedan, 0, [{"id": "driver"}])["hurt"] as Array).size(), 0, "no hit")
+	h.equal((Vehicles.passenger_damage(sedan, 40, [])["hurt"] as Array).size(), 0, "empty car")
+
+	h.it("records passenger damage as ordinary damage, so undo covers it")
+	var state := {"actors": {"driver": {"hp": 30, "max_hp": 30}}}
+	var session := Events.Session.new(state)
+	var outcome := Vehicles.passenger_damage(sedan, 40, [{"id": "driver", "restrained": true}])
+	session.record({"kind": "collision"}, outcome["events"])
+	h.equal(int(session.state["actors"]["driver"]["hp"]), 24, "hurt")
+	session.undo()
+	h.equal(int(session.state["actors"]["driver"]["hp"]), 30, "and unhurt again")

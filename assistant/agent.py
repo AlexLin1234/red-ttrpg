@@ -188,6 +188,7 @@ class RulesAssistant:
 
         for _ in range(MAX_TOOL_ROUNDS):
             response = self._create(client, messages)
+            self._check_stop_reason(response)
             blocks = [self._block_dict(block) for block in response.content]
             messages.append({"role": "assistant", "content": blocks})
             tool_uses = [block for block in blocks if block.get("type") == "tool_use"]
@@ -221,6 +222,30 @@ class RulesAssistant:
             )
         except Exception as exc:
             raise self._transport_error(exc) from exc
+
+    @staticmethod
+    def _check_stop_reason(response: Any) -> None:
+        """Refuse to present a stopped answer as a finished one.
+
+        A refusal and a truncation both arrive as HTTP 200, so neither reaches
+        the transport handler above. Left unchecked, a reply cut off at the token
+        ceiling would be shown as a complete ruling — a half-sentence about how
+        armor behaves is worse at a table than no answer at all — and a refusal
+        would surface as "returned nothing, ask again", which invites a retry
+        that cannot succeed.
+        """
+
+        stop_reason = getattr(response, "stop_reason", None)
+        if stop_reason == "refusal":
+            raise AnswerError(
+                "refused",
+                "Anthropic declined to answer that question. Try rewording it.",
+            )
+        if stop_reason == "max_tokens":
+            raise AnswerError(
+                "answer_truncated",
+                "The answer ran past its length limit and would be cut off. Ask something narrower.",
+            )
 
     @staticmethod
     def _transport_error(exc: Exception) -> AnswerError:

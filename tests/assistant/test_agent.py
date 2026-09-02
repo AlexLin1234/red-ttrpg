@@ -20,27 +20,29 @@ INJECTION = (
 
 
 class FakeResponse:
-    def __init__(self, blocks: list[dict]) -> None:
+    def __init__(self, blocks: list[dict], stop_reason: str | None = None) -> None:
         self.content = blocks
+        self.stop_reason = stop_reason
 
 
 class FakeMessages:
-    def __init__(self, script: list[list[dict]], recorder: list[dict]) -> None:
+    def __init__(self, script: list[list[dict]], recorder: list[dict], stop_reason: str | None = None) -> None:
         self._script = list(script)
         self._recorder = recorder
+        self._stop_reason = stop_reason
 
     def create(self, **kwargs):
         self._recorder.append(kwargs)
         blocks = self._script.pop(0) if self._script else [{"type": "text", "text": "UNSUPPORTED"}]
-        return FakeResponse(blocks)
+        return FakeResponse(blocks, self._stop_reason)
 
 
 class FakeClient:
     """Stands in for anthropic.Anthropic, recording exactly what was sent."""
 
-    def __init__(self, script: list[list[dict]]) -> None:
+    def __init__(self, script: list[list[dict]], stop_reason: str | None = None) -> None:
         self.requests: list[dict] = []
-        self.messages = FakeMessages(script, self.requests)
+        self.messages = FakeMessages(script, self.requests, stop_reason)
 
 
 def search_then(text: str, query: str = "armor ablation") -> list[list[dict]]:
@@ -235,3 +237,29 @@ def test_transport_failures_become_codes_the_setup_tab_can_act_on(books):
             assistant.ask("When does armor ablate?", [core])
         assert failure.value.code == code
         assert "sk-ant" not in failure.value.message
+
+
+def test_an_answer_cut_off_at_the_token_ceiling_is_not_shown_as_a_ruling(books):
+    """A truncated reply arrives as HTTP 200, so nothing else would catch it."""
+
+    library, core, _dlc = books
+    client = FakeClient(search_then("Armor ablates one point [c1] unless the attack is"), stop_reason="max_tokens")
+    assistant = RulesAssistant(Retriever(library.index, library), "sk-ant-test", client=client)
+
+    with pytest.raises(AnswerError) as caught:
+        assistant.ask("How does armor ablation work?", [core])
+
+    assert caught.value.code == "answer_truncated"
+
+
+def test_a_refusal_is_reported_as_a_refusal_rather_than_an_empty_answer(books):
+    """ "Returned nothing, ask again" invites a retry that cannot succeed."""
+
+    library, core, _dlc = books
+    client = FakeClient([[]], stop_reason="refusal")
+    assistant = RulesAssistant(Retriever(library.index, library), "sk-ant-test", client=client)
+
+    with pytest.raises(AnswerError) as caught:
+        assistant.ask("How does armor ablation work?", [core])
+
+    assert caught.value.code == "refused"

@@ -88,6 +88,7 @@ func _ready() -> void:
 
 	await _drive_search(app)
 	await _drive_shortcuts(app)
+	await _drive_assistant(app)
 
 	app.call("_show", "forge")
 	await _settle(30)
@@ -640,6 +641,32 @@ func _drive_shortcuts(app: Control) -> void:
 	await _settle(8)
 	if bool(overlay.get("visible")):
 		_errors.append("closing the shortcut overlay did not hide it")
+
+
+## The rules helper, drawn on a machine that has no helper to talk to.
+##
+## CI has no packaged helper process, which is the point: the tab has to say so
+## and stay usable rather than sitting blank or bringing the app down. Every tab
+## is opened, because each builds its own body and a break in one is invisible
+## from the other two.
+func _drive_assistant(app: Control) -> void:
+	app.call("_show", "assistant")
+	await _settle(30)
+	var screen: Node = app.get("_screen")
+	if screen == null:
+		_errors.append("the assistant screen did not open")
+		return
+	await _shoot("1j-assistant")
+
+	for tab in ["books", "setup", "ask"]:
+		if not screen.has_method("_show_tab"):
+			_errors.append("the assistant screen did not expose its tabs")
+			return
+		screen.call("_show_tab", tab)
+		await _settle(12)
+		if String(screen.get("_tab")) != tab:
+			_errors.append("the assistant tab %s did not open" % tab)
+		await _shoot("1j-assistant-%s" % tab)
 
 
 ## Whether this platform can honour a request not to be captured.

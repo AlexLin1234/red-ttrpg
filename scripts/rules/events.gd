@@ -226,6 +226,75 @@ static func _apply_one(state: Dictionary, event: Dictionary) -> Dictionary:
 
 	var target := _actor(state, String(event.get("target_id", "")))
 
+	if kind == "luck_spent" or kind == "luck_restored":
+		var previous := int(target.get("luck_available", 0))
+		var amount := int(event["amount"])
+		var next: int = (
+			maxi(0, previous - amount) if kind == "luck_spent" else previous + amount
+		)
+		target["luck_available"] = next
+		var actual: int = previous - next if kind == "luck_spent" else next - previous
+		return {
+			"kind": "luck_restored" if kind == "luck_spent" else "luck_spent",
+			"target_id": event["target_id"],
+			"amount": actual,
+		}
+
+	if kind == "humanity_lost" or kind == "humanity_restored":
+		var previous := int(target.get("humanity", 0))
+		var amount := int(event["amount"])
+		var ceiling := int(target.get("max_humanity", previous))
+		var next: int = (
+			maxi(0, previous - amount)
+			if kind == "humanity_lost"
+			else mini(ceiling, previous + amount)
+		)
+		target["humanity"] = next
+		var actual: int = previous - next if kind == "humanity_lost" else next - previous
+		return {
+			"kind": "humanity_restored" if kind == "humanity_lost" else "humanity_lost",
+			"target_id": event["target_id"],
+			"amount": actual,
+		}
+
+	if kind == "humanity_state_set":
+		var previous := String(target.get("humanity_state", "stable"))
+		target["humanity_state"] = String(event["state"])
+		return {
+			"kind": "humanity_state_set",
+			"target_id": event["target_id"],
+			"state": previous,
+		}
+
+	if kind == "suppressed" or kind == "unsuppressed":
+		# Pinned until the target's next turn. Self-inverse: the undo carries
+		# whichever state the target was in before the burst arrived.
+		var previous := bool(target.get("suppressed", false))
+		target["suppressed"] = kind == "suppressed"
+		return {
+			"kind": "suppressed" if previous else "unsuppressed",
+			"target_id": event["target_id"],
+		}
+
+	if kind == "ignited" or kind == "extinguished":
+		var previous_burn: Variant = target.get("burning", null)
+		if kind == "ignited":
+			target["burning"] = {
+				"amount": int(event["amount"]),
+				"rounds": int(event["rounds"]),
+			}
+		else:
+			target.erase("burning")
+		if previous_burn == null:
+			return {"kind": "extinguished", "target_id": event["target_id"]}
+		var burn: Dictionary = previous_burn
+		return {
+			"kind": "ignited",
+			"target_id": event["target_id"],
+			"amount": int(burn.get("amount", 0)),
+			"rounds": int(burn.get("rounds", 0)),
+		}
+
 	if kind == "cover_set":
 		var previous_hp := int(target.get("cover_hp", 0))
 		var target_cover_id_existed := target.has("cover_id")

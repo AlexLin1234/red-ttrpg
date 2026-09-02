@@ -29,6 +29,23 @@ const RULES := {
 	"sideswipe_dice": 2,
 	## A shortcut that does not pay off puts the car into something.
 	"crash_dice": 3,
+	## What reaches the people inside when the car takes a hit. A bike offers
+	## nothing, which is why it carries no frame at all in the table below.
+	"passenger_share_divisor": 4,
+	## Below this, the impact is absorbed by the car and the passengers are only
+	## shaken.
+	"passenger_damage_floor": 1,
+	## A seatbelt is worth this many points off what reaches the passenger.
+	"restraint_reduction": 2,
+}
+
+## How much of a collision the frame keeps off the people inside, by vehicle
+## kind. A rider takes all of it.
+const PASSENGER_FRAME := {
+	"ground": 2,
+	"air": 1,
+	"water": 2,
+	"bike": 0,
 }
 
 const CAUGHT := "caught"
@@ -434,3 +451,54 @@ static func outcome_label(outcome: String) -> String:
 			return "The quarry is wrecked"
 		_:
 			return "Still running"
+
+
+## What a hit on the car does to the people in it.
+##
+## SDP is the car, not the crew: before this, a sedan could be driven to a wreck
+## with four unharmed passengers inside. The frame keeps most of an impact off
+## them and a restraint keeps off some more, but a bike has neither, which is
+## the difference between riding one and driving something with doors.
+##
+## [param occupants] is a list of {"id", "restrained"}. Returns {"events",
+## "card_lines", "hurt"} where "hurt" lists {"id", "amount"} per person.
+static func passenger_damage(
+	vehicle: Dictionary, sdp_damage: int, occupants: Array
+) -> Dictionary:
+	var events: Array[Dictionary] = []
+	var lines := PackedStringArray()
+	var hurt: Array[Dictionary] = []
+	if sdp_damage <= 0 or occupants.is_empty():
+		return {"events": events, "card_lines": lines, "hurt": hurt}
+
+	var kind := String(vehicle.get("kind", "ground"))
+	if String(vehicle.get("template", "")) == "bike":
+		kind = "bike"
+	var frame := int(PASSENGER_FRAME.get(kind, PASSENGER_FRAME["ground"]))
+	@warning_ignore("integer_division")
+	var share := sdp_damage / int(RULES["passenger_share_divisor"])
+	var reaching := share - frame
+
+	for value in occupants:
+		var occupant: Dictionary = value
+		var occupant_id := String(occupant.get("id", ""))
+		if occupant_id == "":
+			continue
+		var taken := reaching
+		if bool(occupant.get("restrained", true)):
+			taken -= int(RULES["restraint_reduction"])
+		if taken < int(RULES["passenger_damage_floor"]):
+			lines.append("%s is shaken but unhurt." % occupant_id)
+			continue
+		events.append({"kind": "damage_taken", "target_id": occupant_id, "amount": taken})
+		hurt.append({"id": occupant_id, "amount": taken})
+		lines.append(
+			"%s takes %d%s."
+			% [
+				occupant_id,
+				taken,
+				"" if bool(occupant.get("restrained", true)) else " — not belted in",
+			]
+		)
+
+	return {"events": events, "card_lines": lines, "hurt": hurt}

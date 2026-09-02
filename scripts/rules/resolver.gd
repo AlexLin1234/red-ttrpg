@@ -26,6 +26,55 @@ const RULES := {
 	"excellent_quality_attack_bonus": 1,  # core rulebook p. 342
 }
 
+## Working values for the mechanics the first version of this resolver did not
+## cover: ammunition types, melee and brawling, and suppressive fire.
+##
+## Unlike [constant RULES] these carry no page citation, because they were not
+## checked line by line against a licensed copy. Treat them the way
+## [TablesDefault] is treated: something a GM who owns the book confirms before
+## leaning on it at the table.
+const EXTENDED_RULES := {
+	## Armour-piercing trades damage for penetration. It halves the SP it meets
+	## and then halves what gets through.
+	"armor_piercing_sp_divisor": 2,
+	"armor_piercing_damage_divisor": 2,
+	## Expansive rounds double what reaches flesh and never mark armour, which
+	## makes them worse than basic against anyone wearing any.
+	"expansive_unarmored_multiplier": 2,
+	"expansive_ablates": false,
+	## Incendiary sets the target alight instead of hitting harder.
+	"incendiary_burn_damage": 2,
+	"incendiary_burn_rounds": 3,
+	## Suppressive fire spends a burst to pin rather than to wound.
+	"suppressive_ammo_cost": 10,
+	"suppressive_dv": 15,
+	## Melee is close enough that the defender always gets to move.
+	"melee_max_distance_m": 2.0,
+	## A thrown weapon that misses still lands somewhere.
+	"area_scatter_max_m": 4,
+	## Anyone who beats the blast DV throws themselves clear of half of it.
+	"area_evasion_dv": 15,
+	"area_evasion_damage_divisor": 2,
+}
+
+## What a round does on the way through armour. "basic" is the default and
+## changes nothing, so an attack that never names a type resolves as before.
+const AMMO_TYPES: PackedStringArray = ["basic", "armor_piercing", "expansive", "incendiary"]
+
+## Attack modes. "melee" is contested at conversational range; "suppressive"
+## spends a burst to pin a target rather than to damage them.
+const MODES: PackedStringArray = ["single", "aimed", "autofire", "melee", "suppressive"]
+
+
+## The ammunition cost of one attack in [param mode].
+static func ammo_cost_for(mode: String) -> int:
+	if mode == "autofire":
+		return int(RULES["autofire_ammo_cost"])
+	if mode == "suppressive":
+		return int(EXTENDED_RULES["suppressive_ammo_cost"])
+	return 1
+
+
 ## The original resolver modelled body and head only. Limb locations were added
 ## for the character sheet's per-location SP; they use their own armour value
 ## and take no damage multiplier.
@@ -114,6 +163,11 @@ class AttackRequest extends RefCounted:
 	## are read off the actor's state by whoever owns it, not chosen per shot.
 	var wound_penalty := 0
 	var defender_wound_penalty := 0
+	## What is loaded. See [constant AMMO_TYPES]; "basic" changes nothing.
+	var ammo_type := "basic"
+	## The damage a strong arm adds to a melee or brawling hit. Set by whoever
+	## owns the attacker's BODY, for the same reason the wound penalties are.
+	var melee_bonus := 0
 
 	func _init(
 		p_attacker_id: String,
@@ -131,6 +185,14 @@ class AttackRequest extends RefCounted:
 		assert(p_ammo >= 0, "ammo cannot be negative")
 		assert(p_location == "body" or p_mode == "aimed", "a called shot must use aimed mode")
 		assert(p_mode != "autofire" or p_weapon.can_autofire(), "weapon does not support autofire")
+		assert(
+			p_mode != "suppressive" or p_weapon.can_autofire(),
+			"suppressive fire needs a weapon that can autofire"
+		)
+		assert(
+			p_mode != "melee" or p_distance_m <= float(EXTENDED_RULES["melee_max_distance_m"]),
+			"a melee attack must be made within reach"
+		)
 		attacker_id = p_attacker_id
 		target = p_target
 		weapon = p_weapon
@@ -177,6 +239,29 @@ class AttackResult extends RefCounted:
 		}
 
 
+## What the round does to the damage that got past armour.
+##
+## Armour-piercing gives up half of what it let through; expansive doubles
+## against a target wearing nothing and does nothing at all against one who is.
+static func _apply_ammo_to_damage(ammo_type: String, after_armor: int, armor_sp: int) -> int:
+	if after_armor <= 0:
+		return after_armor
+	if ammo_type == "armor_piercing":
+		@warning_ignore("integer_division")
+		return after_armor / int(EXTENDED_RULES["armor_piercing_damage_divisor"])
+	if ammo_type == "expansive" and armor_sp <= 0:
+		return after_armor * int(EXTENDED_RULES["expansive_unarmored_multiplier"])
+	return after_armor
+
+
+## Whether a round marks the armour it went through. Expansive does not, which
+## is the cost of what it does to anyone not wearing any.
+static func _ammo_ablates(ammo_type: String) -> bool:
+	if ammo_type == "expansive":
+		return bool(EXTENDED_RULES["expansive_ablates"])
+	return true
+
+
 ## Critical injury tables are printed for the body and the head only.
 static func injury_table_for(location: String) -> String:
 	return "head" if location == "head" else "body"
@@ -193,7 +278,7 @@ static func _meets_defense(total: int, defense: int, kind: String) -> bool:
 static func resolve_attack(
 	request: AttackRequest, tables: Tables, rng: Dice.RandomSource
 ) -> AttackResult:
-	var ammo_cost: int = int(RULES["autofire_ammo_cost"]) if request.mode == "autofire" else 1
+	var ammo_cost := ammo_cost_for(request.mode)
 	assert(request.ammo >= ammo_cost, "cannot attack with an empty weapon")
 
 	var result := AttackResult.new()
@@ -238,7 +323,13 @@ static func resolve_attack(
 	var defense := 0
 	var defense_kind := "range"
 	var defense_card := ""
-	if not request.is_contested():
+	if request.mode == "suppressive" and not request.is_contested():
+		# Pinning someone is a fixed problem: the burst goes where they are, and
+		# what matters is whether they keep their head up, not how far away it is.
+		defense = int(EXTENDED_RULES["suppressive_dv"])
+		defense_kind = "suppression"
+		defense_card = "DV %d (suppression)" % defense
+	elif not request.is_contested():
 		if request.mode == "autofire":
 			defense = tables.autofire_dv(request.weapon.weapon_type, request.distance_m)
 		else:
@@ -286,6 +377,24 @@ static func resolve_attack(
 		result.card_lines = PackedStringArray([attack_card, defense_card, "MISS"])
 		return result
 
+	# Suppressive fire never rolls damage. A burst that lands pins the target for
+	# a round instead of wounding them, which is the whole reason to spend the
+	# ammunition on it.
+	if request.mode == "suppressive":
+		events.append(
+			{
+				"kind": "suppressed",
+				"target_id": request.target.target_id,
+				"attacker_id": request.attacker_id,
+			}
+		)
+		result.hit = true
+		result.events = events
+		result.card_lines = PackedStringArray(
+			[attack_card, defense_card, "SUPPRESSED — pinned until their next turn."]
+		)
+		return result
+
 	var damage_dice: int = (
 		int(RULES["autofire_damage_dice"]) if request.mode == "autofire" else request.weapon.damage_dice
 	)
@@ -295,14 +404,17 @@ static func resolve_attack(
 	var multiplier := 1
 	if request.mode == "autofire":
 		multiplier = tables.autofire_multiplier(attack_total - defense, request.weapon.autofire_rating)
-	var raw_damage := base_damage * multiplier + request.weapon.damage_bonus
+	var melee_bonus: int = request.melee_bonus if request.mode == "melee" else 0
+	var raw_damage := base_damage * multiplier + request.weapon.damage_bonus + melee_bonus
 
 	var pieces := PackedStringArray()
 	for value in damage_rolls:
 		pieces.append(str(value))
 	var damage_text := "Damage: %s = %d" % [" + ".join(pieces), base_damage]
 	if multiplier != 1:
-		damage_text += "; x %d = %d" % [multiplier, raw_damage]
+		damage_text += "; x %d = %d" % [multiplier, base_damage * multiplier]
+	if melee_bonus != 0:
+		damage_text += "; BODY %+d = %d" % [melee_bonus, raw_damage]
 	var card_lines := PackedStringArray([attack_card, defense_card, damage_text])
 
 	result.hit = true
@@ -327,17 +439,24 @@ static func resolve_attack(
 		result.card_lines = card_lines
 		return result
 
-	var armor_sp := request.target.sp_at(request.location)
+	var worn_sp := request.target.sp_at(request.location)
+	var armor_sp := worn_sp
+	if request.ammo_type == "armor_piercing":
+		# Armour-piercing meets half the plate. Rounded up, so a single point of
+		# SP is not simply ignored.
+		var divisor := int(EXTENDED_RULES["armor_piercing_sp_divisor"])
+		armor_sp = int(ceili(float(worn_sp) / float(divisor)))
 	var penetrates := raw_damage > armor_sp
 	var after_armor := 0
 	if penetrates:
 		after_armor = maxi(int(RULES["min_damage_through_armor"]), raw_damage - armor_sp)
+	after_armor = _apply_ammo_to_damage(request.ammo_type, after_armor, armor_sp)
 	var location_multiplier: int = (
 		int(RULES["headshot_multiplier"]) if request.location == "head" else 1
 	)
 	var armor_damage := after_armor * location_multiplier
 
-	if penetrates or RULES["ablate_on_stopped_hit"]:
+	if (penetrates or RULES["ablate_on_stopped_hit"]) and _ammo_ablates(request.ammo_type):
 		events.append(
 			{
 				"kind": "armor_ablated",
@@ -368,6 +487,23 @@ static func resolve_attack(
 			}
 		)
 
+	if request.ammo_type == "incendiary" and armor_damage > 0:
+		events.append(
+			{
+				"kind": "ignited",
+				"target_id": request.target.target_id,
+				"amount": int(EXTENDED_RULES["incendiary_burn_damage"]),
+				"rounds": int(EXTENDED_RULES["incendiary_burn_rounds"]),
+			}
+		)
+		card_lines.append(
+			"Incendiary: burning for %d damage a round, %d rounds."
+			% [
+				int(EXTENDED_RULES["incendiary_burn_damage"]),
+				int(EXTENDED_RULES["incendiary_burn_rounds"]),
+			]
+		)
+
 	var hp_damage := armor_damage + critical_bonus
 	if hp_damage != 0:
 		events.append(
@@ -378,23 +514,14 @@ static func resolve_attack(
 			}
 		)
 
-	var new_hp := request.target.hp - hp_damage
-	@warning_ignore("integer_division")
-	var serious_threshold := (request.target.max_hp - 1) / 2
-	if request.target.hp > serious_threshold and serious_threshold >= new_hp:
-		events.append({"kind": "seriously_wounded", "target_id": request.target.target_id})
-	if new_hp <= 0:
-		# Dropping to zero a second time re-arms the save, which is how a
-		# stabilised character who is shot again goes back on the clock.
-		events.append(
-			{
-				"kind": "wound_state_set",
-				"target_id": request.target.target_id,
-				"state": "mortally_wounded",
-			}
-		)
-		events.append({"kind": "death_save_due", "target_id": request.target.target_id})
+	# Dropping to zero a second time re-arms the save, which is how a stabilised
+	# character who is shot again goes back on the clock.
+	events.append_array(wound_events(request.target, hp_damage))
 
+	if armor_sp != worn_sp:
+		card_lines.append(
+			"Armour-piercing: SP %d halved to %d" % [worn_sp, armor_sp]
+		)
 	card_lines.append("Armor: %d - SP %d = %d" % [raw_damage, armor_sp, after_armor])
 	if location_multiplier != 1:
 		card_lines.append("Head: %d x %d = %d" % [after_armor, location_multiplier, armor_damage])
@@ -411,3 +538,207 @@ static func resolve_attack(
 	result.events = events
 	result.card_lines = card_lines
 	return result
+
+
+class AreaTarget extends RefCounted:
+	## One body inside the blast, and how far from the centre it stands.
+	var target: TargetState
+	var distance_m: float
+	## -1 means this target does not get a check to dive clear.
+	var evasion_base: int
+	var wound_penalty: int
+
+	func _init(
+		p_target: TargetState, p_distance_m: float, p_evasion_base := -1, p_wound_penalty := 0
+	) -> void:
+		assert(p_distance_m >= 0.0, "distance_m cannot be negative")
+		target = p_target
+		distance_m = p_distance_m
+		evasion_base = p_evasion_base
+		wound_penalty = p_wound_penalty
+
+
+class AreaResult extends RefCounted:
+	var on_target := false
+	var attack_rolls := PackedInt32Array()
+	var attack_total := 0
+	var defense := 0
+	var scatter_m := 0
+	var damage_rolls := PackedInt32Array()
+	var raw_damage := 0
+	## One entry per target caught, each {"target_id", "hp_damage", "evaded"}.
+	var hits: Array[Dictionary] = []
+	var events: Array[Dictionary] = []
+	var card_lines: PackedStringArray = []
+
+	func to_dict() -> Dictionary:
+		return {
+			"on_target": on_target,
+			"attack_rolls": attack_rolls,
+			"attack_total": attack_total,
+			"defense": defense,
+			"scatter_m": scatter_m,
+			"damage_rolls": damage_rolls,
+			"raw_damage": raw_damage,
+			"hits": hits.duplicate(true),
+		}
+
+
+## Resolve one thrown or launched area attack.
+##
+## The throw is checked against the range table like any other, but a miss does
+## not end the attack: the weapon lands short by [constant EXTENDED_RULES]'s
+## scatter and still catches whoever is standing near where it fell. Every
+## target inside [param radius_m] rolls once against the blast; beating it means
+## diving clear of half the damage, not all of it.
+##
+## Damage is rolled once and shared, because it is one explosion.
+static func resolve_area_attack(
+	request: AttackRequest,
+	targets: Array[AreaTarget],
+	radius_m: float,
+	tables: Tables,
+	rng: Dice.RandomSource
+) -> AreaResult:
+	assert(radius_m > 0.0, "an area attack needs a radius")
+	assert(request.ammo >= 1, "cannot throw what is not carried")
+
+	var result := AreaResult.new()
+	var events: Array[Dictionary] = [
+		{
+			"kind": "ammo_spent",
+			"actor_id": request.attacker_id,
+			"weapon": request.weapon.name,
+			"amount": 1,
+		}
+	]
+
+	var check := Dice.roll_check(rng)
+	var attack_total: int = (
+		request.attack_base + request.modifiers + request.wound_penalty + int(check["total"])
+	)
+	var defense := tables.ranged_dv(request.weapon.weapon_type, request.distance_m)
+	var on_target := _meets_defense(attack_total, defense, "range")
+
+	var scatter := 0
+	if not on_target:
+		scatter = rng.randint(1, int(EXTENDED_RULES["area_scatter_max_m"]))
+		events.append(
+			{
+				"kind": "area_scattered",
+				"actor_id": request.attacker_id,
+				"amount": scatter,
+			}
+		)
+
+	var card_lines := PackedStringArray(
+		[
+			"Throw: base %d + d10 %d = %d vs DV %d"
+			% [request.attack_base, int(check["total"]), attack_total, defense]
+		]
+	)
+	card_lines.append(
+		"ON TARGET" if on_target else "SCATTERED %dm — it still went off." % scatter
+	)
+
+	var damage := Dice.damage_roll(request.weapon.damage_dice, rng)
+	var raw_damage: int = int(damage["total"]) + request.weapon.damage_bonus
+	var pieces := PackedStringArray()
+	for value in damage["rolls"]:
+		pieces.append(str(value))
+	card_lines.append("Blast: %s = %d" % [" + ".join(pieces), raw_damage])
+
+	result.on_target = on_target
+	result.attack_rolls = check["rolls"]
+	result.attack_total = attack_total
+	result.defense = defense
+	result.scatter_m = scatter
+	result.damage_rolls = damage["rolls"]
+	result.raw_damage = raw_damage
+
+	for caught in targets:
+		# Scatter moves the blast, so a target who was inside the radius can end
+		# up outside it. Distance is measured from where the weapon actually landed.
+		var reach := caught.distance_m + float(scatter)
+		if reach > radius_m:
+			card_lines.append("%s: outside the blast." % caught.target.target_id)
+			continue
+
+		var evaded := false
+		if caught.evasion_base >= 0:
+			var dive := Dice.roll_check(rng)
+			var dive_total: int = caught.evasion_base + caught.wound_penalty + int(dive["total"])
+			evaded = dive_total >= int(EXTENDED_RULES["area_evasion_dv"])
+
+		var reaching := raw_damage
+		if evaded:
+			@warning_ignore("integer_division")
+			reaching = raw_damage / int(EXTENDED_RULES["area_evasion_damage_divisor"])
+
+		var armor_sp := caught.target.sp_at("body")
+		var after_armor := maxi(
+			int(RULES["min_damage_through_armor"]), reaching - armor_sp
+		) if reaching > armor_sp else 0
+
+		if after_armor > 0:
+			events.append(
+				{
+					"kind": "armor_ablated",
+					"target_id": caught.target.target_id,
+					"location": "body",
+					"amount": 1,
+				}
+			)
+			events.append(
+				{
+					"kind": "damage_taken",
+					"target_id": caught.target.target_id,
+					"amount": after_armor,
+				}
+			)
+			events.append_array(wound_events(caught.target, after_armor))
+
+		result.hits.append(
+			{
+				"target_id": caught.target.target_id,
+				"hp_damage": after_armor,
+				"evaded": evaded,
+			}
+		)
+		card_lines.append(
+			"%s: %d - SP %d = %d%s"
+			% [
+				caught.target.target_id,
+				reaching,
+				armor_sp,
+				after_armor,
+				" (dived clear)" if evaded else "",
+			]
+		)
+
+	result.events = events
+	result.card_lines = card_lines
+	return result
+
+
+## The wound-state events a given amount of HP damage causes.
+##
+## Shared by the single-target and area paths so a grenade puts someone on Death
+## Saves by exactly the rule a bullet does.
+static func wound_events(target: TargetState, hp_damage: int) -> Array[Dictionary]:
+	var events: Array[Dictionary] = []
+	var new_hp := target.hp - hp_damage
+	@warning_ignore("integer_division")
+	var serious_threshold := (target.max_hp - 1) / 2
+	if target.hp > serious_threshold and serious_threshold >= new_hp:
+		events.append({"kind": "seriously_wounded", "target_id": target.target_id})
+	if new_hp <= 0:
+		events.append(
+			{
+				"kind": "wound_state_set",
+				"target_id": target.target_id,
+				"state": "mortally_wounded",
+			}
+		)
+		events.append({"kind": "death_save_due", "target_id": target.target_id})
+	return events

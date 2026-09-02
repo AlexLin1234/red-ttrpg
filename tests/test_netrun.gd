@@ -61,6 +61,7 @@ static func run(h: Harness) -> void:
 	_endings(h)
 	_damage_belongs_to_the_runner(h)
 	_generation(h)
+	_defenders(h)
 
 
 static func _ladder(h: Harness) -> void:
@@ -263,3 +264,59 @@ static func _generation(h: Harness) -> void:
 	h.equal(session.can("move"), true, "the lobby opens onto it")
 	session.perform("move")
 	h.equal(session.runner()["level"], 1, "level")
+
+
+static func _defenders(h: Harness) -> void:
+	# A run used to be a person against a building. These cases cover the one
+	# where somebody is home.
+	h.it("lets the intruder hold off a defender who rolls lower")
+	# Interface 6 for the defender against 6 for the intruder, then a 2 against
+	# an 8: the intruder wins, and ties go to them as well.
+	var held := Netrun.defender_resolve(
+		"counter_zap", _runner(), _runner(), Dice.FixedRandom.new([2, 8])
+	)
+	h.check(not bool(held["success"]), "held off")
+	h.equal((held["events"] as Array).size(), 0, "nothing reached the intruder")
+
+	h.it("gives a tie to the intruder, who chose the moment")
+	var tied := Netrun.defender_resolve(
+		"counter_zap", _runner(), _runner(), Dice.FixedRandom.new([5, 5])
+	)
+	h.check(not bool(tied["success"]), "the intruder keeps a tie")
+
+	h.it("costs the intruder HP when the defender lands a zap")
+	var zapped := Netrun.defender_resolve(
+		"counter_zap", _runner(), _runner(), Dice.FixedRandom.new([9, 2, 3, 3])
+	)
+	h.check(bool(zapped["success"]), "it landed")
+	var zap_event: Dictionary = zapped["events"][0]
+	h.equal(String(zap_event["kind"]), "runner_damaged", "the intruder took it")
+	h.equal(int(zap_event["amount"]), 6, "two dice of three")
+
+	h.it("advances the trace instead of trading damage")
+	var traced := Netrun.defender_resolve(
+		"trace", _runner(), _runner(), Dice.FixedRandom.new([9, 2])
+	)
+	var trace_event: Dictionary = traced["events"][0]
+	h.equal(String(trace_event["kind"]), "trace_advanced", "the trace moved")
+	h.equal(int(trace_event["amount"]), 3, "by the defender's gain")
+
+	h.it("alerts the architecture when a defender blocks")
+	var blocked := Netrun.defender_resolve(
+		"block", _runner(), _runner(), Dice.FixedRandom.new([9, 2])
+	)
+	h.equal(String((blocked["events"][0] as Dictionary)["kind"]), "alert_raised", "alerted")
+
+	h.it("ignores an action the defender does not have")
+	var nonsense := Netrun.defender_resolve(
+		"teleport", _runner(), _runner(), Dice.FixedRandom.new([9, 2])
+	)
+	h.equal((nonsense["events"] as Array).size(), 0, "nothing happened")
+
+	h.it("undoes a defender's zap exactly, like any other NET damage")
+	var state := {"runner": {"hp": 30, "max_hp": 30}}
+	var session := Events.Session.new(state)
+	session.record({"kind": "defend"}, [{"kind": "runner_damaged", "amount": 6}])
+	h.equal(int(session.state["runner"]["hp"]), 24, "hurt")
+	session.undo()
+	h.equal(int(session.state["runner"]["hp"]), 30, "and unhurt again")

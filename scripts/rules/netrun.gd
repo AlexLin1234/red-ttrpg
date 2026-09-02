@@ -27,7 +27,36 @@ const RULES := {
 	"slide_dv": 8,
 	## The trace total at which the architecture knows where the runner is.
 	"trace_ceiling": 10,
+	## A defending netrunner rolls Interface against the intruder's, and the
+	## intruder wins a tie: they are the one who chose the moment.
+	"defender_wins_ties": false,
+	## What a defender's successful strike costs the intruder.
+	"defender_zap_dice": 2,
+	"defender_trace_gain": 3,
+	## Blocking makes the next floor harder rather than doing damage.
+	"defender_block_dv": 3,
 }
+
+## What a netrunner on the other side of the architecture can do about the one
+## coming down it. The intruder's own actions are [constant ACTIONS]; these are
+## the answers, taken on the architecture's turn.
+const DEFENDER_ACTIONS: Array[Dictionary] = [
+	{
+		"key": "counter_zap",
+		"label": "Zap",
+		"summary": "Attack the intruder directly. Costs them HP if it lands.",
+	},
+	{
+		"key": "trace",
+		"label": "Trace",
+		"summary": "Push the trace along rather than trading damage.",
+	},
+	{
+		"key": "block",
+		"label": "Block",
+		"summary": "Hold the next floor. Raises its DV until the intruder passes it.",
+	},
+]
 
 const INTACT := "intact"
 const DEFEATED := "defeated"
@@ -373,3 +402,81 @@ static func run_state_label(state: String) -> String:
 			return "Traced"
 		_:
 			return "On the ladder"
+
+
+# -- the other netrunner ---------------------------------------------------------
+
+
+static func defender_action(key: String) -> Dictionary:
+	for entry in DEFENDER_ACTIONS:
+		if String(entry["key"]) == key:
+			return entry
+	return {}
+
+
+## Resolve one action by the netrunner defending the architecture.
+##
+## A run used to be a person against a building. This is the case where somebody
+## is home: the defender rolls Interface against the intruder's, and what they
+## win is the same currency the architecture already spends — the intruder's HP,
+## the trace, or the difficulty of the next floor down.
+##
+## Returns the same shape [method resolve] does, so the session applies it
+## through the same path and undo covers it identically.
+static func defender_resolve(
+	action_key: String,
+	defender: Dictionary,
+	runner: Dictionary,
+	rng: Dice.RandomSource
+) -> Dictionary:
+	var events: Array[Dictionary] = []
+	var lines := PackedStringArray()
+	var entry := defender_action(action_key)
+	if entry.is_empty():
+		return {"events": events, "card_lines": lines, "title": "", "success": true}
+
+	var theirs := interface_check(defender, rng)
+	var ours := interface_check(runner, rng)
+	var defender_total := int(theirs["total"])
+	var runner_total := int(ours["total"])
+	var landed := (
+		defender_total > runner_total
+		if not bool(RULES["defender_wins_ties"])
+		else defender_total >= runner_total
+	)
+
+	var who := String(defender.get("name", "The defender"))
+	lines.append(
+		"%s: Interface %d against the intruder's %d." % [who, defender_total, runner_total]
+	)
+
+	if not landed:
+		lines.append("The intruder holds them off.")
+		return {
+			"events": events,
+			"card_lines": lines,
+			"title": "HELD OFF",
+			"success": false,
+		}
+
+	match action_key:
+		"counter_zap":
+			var damage := Dice.damage_roll(int(RULES["defender_zap_dice"]), rng)
+			var dealt := int(damage["total"])
+			var pieces := PackedStringArray()
+			for value in damage["rolls"]:
+				pieces.append(str(value))
+			events.append({"kind": "runner_damaged", "amount": dealt})
+			lines.append("Zap: %s = %d to the intruder." % [" + ".join(pieces), dealt])
+		"trace":
+			var gain := int(RULES["defender_trace_gain"])
+			events.append({"kind": "trace_advanced", "amount": gain})
+			lines.append("The trace advances %d." % gain)
+		"block":
+			events.append({"kind": "alert_raised"})
+			lines.append(
+				"The architecture is alerted: every floor from here is %d harder."
+				% int(RULES["alert_dv_penalty"])
+			)
+
+	return {"events": events, "card_lines": lines, "title": "LANDED", "success": true}

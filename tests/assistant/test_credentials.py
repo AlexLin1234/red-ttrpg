@@ -63,3 +63,50 @@ def test_a_secret_is_forgotten_once_it_is_removed(vault):
 
     # Registered patterns still catch the shape even after the value is forgotten.
     assert SAMPLE_KEY not in redaction.redact(f"leaked {SAMPLE_KEY}")
+
+
+def test_a_vault_that_panics_reads_as_no_key_rather_than_crashing(monkeypatch):
+    """A broken native backend must degrade, not take the Assistant tab down.
+
+    keyring sits on a stack of optional native libraries. A broken one does not
+    always raise politely: the Rust-backed path raises
+    ``pyo3_runtime.PanicException``, which inherits from ``BaseException`` and so
+    walks straight through ``except Exception``. When that escaped, every request
+    that drew the Assistant tab answered 500, because listing the library reports
+    whether a key is stored.
+    """
+
+    class Panic(BaseException):
+        """Stands in for pyo3_runtime.PanicException, which is not an Exception."""
+
+    class PanickingVault:
+        def get_password(self, service: str, account: str) -> str | None:
+            raise Panic("Python API call failed")
+
+        def set_password(self, service: str, account: str, password: str) -> None:
+            raise Panic("Python API call failed")
+
+        def delete_password(self, service: str, account: str) -> None:
+            raise Panic("Python API call failed")
+
+    monkeypatch.setattr(credentials, "_backend", lambda: PanickingVault())
+
+    assert credentials.status() == credentials.KeyStatus(stored=False)
+    assert credentials.remove() is False
+    with pytest.raises(credentials.VaultUnavailable):
+        credentials.load()
+    with pytest.raises(credentials.VaultUnavailable):
+        credentials.store(SAMPLE_KEY)
+
+
+def test_an_interrupt_during_a_vault_call_is_not_swallowed(monkeypatch):
+    """Widening the catch must not turn Ctrl-C into "no key stored"."""
+
+    class InterruptingVault:
+        def get_password(self, service: str, account: str) -> str | None:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(credentials, "_backend", lambda: InterruptingVault())
+
+    with pytest.raises(KeyboardInterrupt):
+        credentials.status()
