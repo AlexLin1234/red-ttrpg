@@ -178,11 +178,10 @@ func _build_ground() -> void:
 	box.size = Vector3(0.96, 0.12, 0.96)
 
 	# The material stays white: the per-instance colour multiplies into it, so a
-	# tint here would apply twice and crush the deck to black.
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color.WHITE
-	material.roughness = 0.82
-	material.metallic = 0.12
+	# tint here would apply twice and crush the deck to black. The texture
+	# multiplies in the same way, which is why it is generated as a narrow band
+	# around white rather than as the colour of anything.
+	var material := BoardSurfaces.material_for("deck", Color.WHITE)
 	material.vertex_color_use_as_albedo = true
 	box.material = material
 
@@ -198,10 +197,13 @@ func _build_ground() -> void:
 		multi.set_instance_transform(
 			index, Transform3D(Basis.IDENTITY, position + Vector3(0, -0.06, 0))
 		)
-		# Elevation shading, plus a faint checker so the grid reads without lines.
+		# Elevation shading, plus a faint checker so the grid reads without lines,
+		# and a slow drift across the deck so it weathers unevenly instead of
+		# repeating one identical tile all the way out to the edge.
 		var lift := 1.0 + float(tile.get("layer", 0)) * 0.4
 		var base := Color("2b3a4d") if (int(tile["x"]) + int(tile["z"])) % 2 == 0 else Color("25323f")
-		multi.set_instance_color(index, base * lift)
+		var wear := BoardSurfaces.deck_variation(int(tile["x"]), int(tile["z"]))
+		multi.set_instance_color(index, base * lift * wear)
 
 	_tiles = MultiMeshInstance3D.new()
 	_tiles.multimesh = multi
@@ -256,10 +258,14 @@ func _build_props() -> void:
 			var box := BoxMesh.new()
 			box.size = extents
 			mesh.mesh = box
-			var material := StandardMaterial3D.new()
-			material.albedo_color = _material_color(String(cover["material"]))
-			material.roughness = 0.7
-			material.metallic = 0.25
+			var material := BoardSurfaces.material_for(
+				BoardSurfaces.profile_for_material(String(cover["material"])),
+				_material_color(String(cover["material"])),
+			)
+			# Two crates of the same material would otherwise be pixel-identical.
+			# The offset is keyed to the prop, so undoing back to a board and
+			# forward again returns the same grain rather than reshuffling it.
+			material.uv1_offset = BoardSurfaces.offset_for(String(entry["id"]))
 			mesh.material_override = material
 			body.add_child(mesh)
 		else:
