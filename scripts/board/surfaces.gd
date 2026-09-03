@@ -28,6 +28,17 @@ const MATERIAL_PROFILES := {
 	"Vehicle Hulk": "corroded",
 }
 
+## The location editor exposes these five floor types. Keep the visual mapping
+## here, beside the object-material mapping, so saved boards immediately regain
+## the right finish when they are loaded.
+const TILE_PROFILES := {
+	"deck": "deck",
+	"grate": "grate",
+	"rubble": "rubble",
+	"ramp": "ramp",
+	"water": "water",
+}
+
 const DEFAULT_PROFILE := "concrete"
 
 ## How each profile is built.
@@ -85,6 +96,22 @@ const PROFILES := {
 		"roughness": 0.78,
 		"metallic": 0.35,
 	},
+	"grate": {
+		"frequency": 0.12, "octaves": 2, "contrast": 0.16, "stretch": 1.0,
+		"roughness": 0.58, "metallic": 0.48, "pattern": "grate",
+	},
+	"rubble": {
+		"frequency": 0.18, "octaves": 5, "contrast": 0.19, "stretch": 1.0,
+		"roughness": 0.96, "metallic": 0.02, "pattern": "rubble",
+	},
+	"ramp": {
+		"frequency": 0.11, "octaves": 3, "contrast": 0.10, "stretch": 5.0,
+		"roughness": 0.72, "metallic": 0.28, "pattern": "ramp",
+	},
+	"water": {
+		"frequency": 0.055, "octaves": 2, "contrast": 0.09, "stretch": 8.0,
+		"roughness": 0.08, "metallic": 0.18, "pattern": "water",
+	},
 }
 
 ## Built textures, keyed by profile. Static so a board rebuilt by undo does not
@@ -95,6 +122,22 @@ static var _cache: Dictionary = {}
 
 static func profile_for_material(material_name: String) -> String:
 	return String(MATERIAL_PROFILES.get(material_name, DEFAULT_PROFILE))
+
+
+static func profile_for_tile(tile_id: String) -> String:
+	return String(TILE_PROFILES.get(tile_id, "deck"))
+
+
+static func color_for_tile(tile_id: String, alternate := false) -> Color:
+	var colors := {
+		"deck": [Color("2b3a4d"), Color("25323f")],
+		"grate": [Color("38414a"), Color("303840")],
+		"rubble": [Color("4a4642"), Color("403d3a")],
+		"ramp": [Color("414956"), Color("38404b")],
+		"water": [Color("173f52"), Color("123747")],
+	}
+	var pair: Array = colors.get(tile_id, colors["deck"])
+	return pair[1] if alternate else pair[0]
 
 
 ## The texture for [param profile], generated on first use.
@@ -173,11 +216,33 @@ static func _build(spec: Dictionary) -> ImageTexture:
 
 	var contrast := float(spec["contrast"])
 	var stretch := maxf(1.0, float(spec["stretch"]))
+	var pattern := String(spec.get("pattern", "noise"))
 	for y in SIZE:
 		for x in SIZE:
 			# Sampling a squashed row turns the same isotropic noise into a
 			# directional one, which is what reads as brushing or wood grain.
 			var level: float = source.get_pixel(int(float(x) / stretch) % SIZE, y).r
+			match pattern:
+				"grate":
+					# Recessed square apertures with a narrow metal web.
+					var inside := (
+						(x % 16) > 3 and (x % 16) < 13
+						and (y % 16) > 3 and (y % 16) < 13
+					)
+					level = level * 0.25 if inside else 0.72 + level * 0.28
+				"rubble":
+					# Hard thresholds turn noise islands into chips and aggregate.
+					level = 0.22 if level < 0.36 else (0.82 if level > 0.66 else level)
+				"ramp":
+					# Diagonal traction ribs remain seamless at the texture edges.
+					level = clampf(level + (0.28 if (x + y) % 18 < 3 else -0.04), 0.0, 1.0)
+				"water":
+					# Fine horizontal highlights read as shallow pooled water.
+					level = clampf(
+						level + (0.20 if (y + int(level * 8.0)) % 15 < 2 else 0.0),
+						0.0,
+						1.0,
+					)
 			var scale: float = 1.0 + (level - 0.5) * 2.0 * contrast
 			image.set_pixel(x, y, Color(scale, scale, scale))
 

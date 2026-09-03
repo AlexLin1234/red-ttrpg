@@ -21,7 +21,7 @@ const SIDE_COLORS := {
 }
 
 var camera: Camera3D
-var _tiles: MultiMeshInstance3D
+var _tiles := Node3D.new()
 var _props := Node3D.new()
 var _units := Node3D.new()
 var _effects := Node3D.new()
@@ -42,6 +42,7 @@ var _zoom := 26.0
 ## after constructing it, before the SubViewport it lives in has entered the
 ## tree, so waiting for _ready would leave every node null at that point.
 func _init() -> void:
+	add_child(_tiles)
 	add_child(_props)
 	add_child(_units)
 	add_child(_effects)
@@ -168,46 +169,51 @@ func _clear(node: Node3D) -> void:
 
 
 func _build_ground() -> void:
-	if is_instance_valid(_tiles):
-		_tiles.queue_free()
+	_clear(_tiles)
 	if is_instance_valid(_ground_body):
 		_ground_body.queue_free()
 
 	var tiles: Array = _location.get("tiles", [])
-	var box := BoxMesh.new()
-	box.size = Vector3(0.96, 0.12, 0.96)
+	var groups := {}
+	for tile in tiles:
+		var entry: Dictionary = tile
+		var profile := BoardSurfaces.profile_for_tile(String(entry.get("tile_id", "deck")))
+		if not groups.has(profile):
+			groups[profile] = []
+		(groups[profile] as Array).append(entry)
 
-	# The material stays white: the per-instance colour multiplies into it, so a
-	# tint here would apply twice and crush the deck to black. The texture
-	# multiplies in the same way, which is why it is generated as a narrow band
-	# around white rather than as the colour of anything.
-	var material := BoardSurfaces.material_for("deck", Color.WHITE)
-	material.vertex_color_use_as_albedo = true
-	box.material = material
-
-	var multi := MultiMesh.new()
-	multi.transform_format = MultiMesh.TRANSFORM_3D
-	multi.use_colors = true
-	multi.mesh = box
-	multi.instance_count = tiles.size()
-
-	for index in tiles.size():
-		var tile: Dictionary = tiles[index]
-		var position := world_of(tile)
-		multi.set_instance_transform(
-			index, Transform3D(Basis.IDENTITY, position + Vector3(0, -0.06, 0))
-		)
-		# Elevation shading, plus a faint checker so the grid reads without lines,
-		# and a slow drift across the deck so it weathers unevenly instead of
-		# repeating one identical tile all the way out to the edge.
-		var lift := 1.0 + float(tile.get("layer", 0)) * 0.4
-		var base := Color("2b3a4d") if (int(tile["x"]) + int(tile["z"])) % 2 == 0 else Color("25323f")
-		var wear := BoardSurfaces.deck_variation(int(tile["x"]), int(tile["z"]))
-		multi.set_instance_color(index, base * lift * wear)
-
-	_tiles = MultiMeshInstance3D.new()
-	_tiles.multimesh = multi
-	add_child(_tiles)
+	# A MultiMesh can only carry one material, so make one batch per floor
+	# profile. This retains cheap instancing while allowing grates, rubble,
+	# ramps, water and deck plates to use genuinely different textures.
+	for profile in groups:
+		var entries: Array = groups[profile]
+		var box := BoxMesh.new()
+		box.size = Vector3(0.96, 0.12, 0.96)
+		var material := BoardSurfaces.material_for(String(profile), Color.WHITE)
+		material.vertex_color_use_as_albedo = true
+		box.material = material
+		var multi := MultiMesh.new()
+		multi.transform_format = MultiMesh.TRANSFORM_3D
+		multi.use_colors = true
+		multi.mesh = box
+		multi.instance_count = entries.size()
+		for index in entries.size():
+			var tile: Dictionary = entries[index]
+			var position := world_of(tile)
+			var rotation := Basis(Vector3.UP, deg_to_rad(float(tile.get("rotation", 0))))
+			multi.set_instance_transform(
+				index, Transform3D(rotation, position + Vector3(0, -0.06, 0))
+			)
+			var lift := 1.0 + float(tile.get("layer", 0)) * 0.4
+			var alternate := (int(tile["x"]) + int(tile["z"])) % 2 != 0
+			var base := BoardSurfaces.color_for_tile(
+				String(tile.get("tile_id", "deck")), alternate
+			)
+			var wear := BoardSurfaces.deck_variation(int(tile["x"]), int(tile["z"]))
+			multi.set_instance_color(index, base * lift * wear)
+		var batch := MultiMeshInstance3D.new()
+		batch.multimesh = multi
+		_tiles.add_child(batch)
 
 	# One flat body under the deck carries ground picking, rather than a
 	# collider per tile.
