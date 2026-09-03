@@ -181,6 +181,7 @@ func _build_palette(location: Dictionary) -> Control:
 
 	column.add_child(UI.rule_line())
 	var hint := UI.micro("Click a palette entry, then click the grid.")
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(UI.margins(hint, UI.GAP_2))
 	column.add_child(UI.rule_line())
 
@@ -406,7 +407,7 @@ func _build_stage(location: Dictionary) -> Control:
 		button.pressed.connect(_set_tool.bind(String(entry["id"])))
 		tools.add_child(button)
 		_tool_buttons[String(entry["id"])] = button
-	_hint_label = UI.micro("")
+	_hint_label = UI.elide(UI.micro(""))
 	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	UI.expand(_hint_label, true, false)
 	tools.add_child(_hint_label)
@@ -1239,12 +1240,27 @@ func _build_rail() -> Control:
 	scroll.add_child(init_wrapper)
 
 	column.add_child(UI.rule_line())
-	_selected_box = UI.vbox(0)
-	UI.expand(_selected_box)
-	column.add_child(_selected_box)
 
-	column.add_child(UI.rule_line())
-	column.add_child(UI.margins(_build_player_display_controls(), UI.GAP_3))
+	# The selected unit's card and the player-display toggles are the two
+	# sections whose height depends on the data on screen — several critical
+	# injuries and a full turn budget run well past what a 980px-tall window
+	# has room for. They scroll together here so Roll Initiative, Undo, Redo,
+	# Save results and End turn stay pinned below and reachable regardless of
+	# how tall the selected unit's own card gets.
+	var mid_scroll := ScrollContainer.new()
+	mid_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	UI.expand(mid_scroll)
+	column.add_child(mid_scroll)
+	var mid_column := UI.vbox(0)
+	UI.expand(mid_column, true, false)
+	mid_scroll.add_child(mid_column)
+
+	_selected_box = UI.vbox(0)
+	UI.expand(_selected_box, true, false)
+	mid_column.add_child(_selected_box)
+
+	mid_column.add_child(UI.rule_line())
+	mid_column.add_child(UI.margins(_build_player_display_controls(), UI.GAP_3))
 
 	column.add_child(UI.rule_line())
 	var actions := UI.vbox(UI.GAP_2)
@@ -1535,7 +1551,7 @@ func _refresh_selected() -> void:
 	var title := UI.micro("Selected")
 	UI.expand(title, true, false)
 	head.add_child(title)
-	head.add_child(UI.micro(String(actor["name"])))
+	head.add_child(UI.elide(UI.micro(String(actor["name"]))))
 	_selected_box.add_child(UI.margins(head, UI.GAP_2))
 
 	var hidden := bool(_unit_entry(_selected_unit).get(PlayerView.HIDDEN_KEY, false))
@@ -1814,6 +1830,7 @@ func _build_setup_skill_check() -> void:
 	var row := UI.hbox(UI.GAP_2)
 	var selected := OptionButton.new()
 	UI.expand(selected, true, false)
+	selected.clip_text = true
 	for index in skills.size():
 		var skill: Dictionary = skills[index]
 		selected.add_item(String(skill["name"]))

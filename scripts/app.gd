@@ -125,9 +125,10 @@ func _build_header() -> Control:
 	# the window and clip the Save button off the right-hand edge.
 	_title_label = UI.elide(UI.micro("GM Console · Build 0.5.0"))
 	_title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	# Enough to read a few words of the campaign name once the nav strip has
-	# taken its share, and no more: this is the half of the bar that gives way.
-	_title_label.custom_minimum_size.x = 116
+	# Ten nav tabs plus the GM Window and Player Display buttons already come
+	# close to the app's own 1600px default width, so this floor stays low
+	# rather than "a few words": it is the first half of the bar that gives way.
+	_title_label.custom_minimum_size.x = 60
 	UI.expand(_title_label, true, false)
 	row.add_child(_title_label)
 
@@ -159,10 +160,12 @@ func _build_header() -> Control:
 	row.add_child(_player_window_button)
 
 	# A downtime report or a Hustle result can be a whole sentence, and the bar
-	# has ten tabs on it. It elides rather than pushing the Save button off the
+	# has ten tabs on it plus the GM Window and Player Display buttons once a
+	# campaign is open — together they leave no room for a generous floor here,
+	# so this elides down early rather than pushing the Save button off the
 	# edge of the window.
 	_status_label = UI.elide(UI.micro("", UI.GOOD))
-	_status_label.custom_minimum_size.x = 180
+	_status_label.custom_minimum_size.x = 100
 	_status_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(_status_label)
 
