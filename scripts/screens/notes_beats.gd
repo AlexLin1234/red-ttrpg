@@ -367,29 +367,8 @@ class _BeatCanvas extends Control:
 		queue_redraw()
 
 	func _draw() -> void:
-		var step := 40.0
-		var x := 0.0
-		while x <= size.x:
-			draw_line(Vector2(x, 0), Vector2(x, size.y), Color("141c26"), 1.0)
-			x += step
-		var y := 0.0
-		while y <= size.y:
-			draw_line(Vector2(0, y), Vector2(size.x, y), Color("141c26"), 1.0)
-			y += step
-
-		for value in _beats:
-			var source: Dictionary = value
-			var from := _beat_rect(source).position + Vector2(NODE_SIZE.x, NODE_SIZE.y * 0.5)
-			for next_id in source.get("next_ids", []):
-				var target := _by_id(String(next_id))
-				if target.is_empty():
-					continue
-				var to := _beat_rect(target).position + Vector2(0, NODE_SIZE.y * 0.5)
-				var elbow_x := (from.x + to.x) * 0.5
-				var points := PackedVector2Array([from, Vector2(elbow_x, from.y), Vector2(elbow_x, to.y), to])
-				draw_polyline(points, UI.ACCENT_FILL, 2.0)
-				draw_line(to, to + Vector2(-8, -5), UI.ACCENT_FILL, 2.0)
-				draw_line(to, to + Vector2(-8, 5), UI.ACCENT_FILL, 2.0)
+		_draw_grid()
+		_draw_links()
 
 		for value in _beats:
 			var beat: Dictionary = value
@@ -397,9 +376,45 @@ class _BeatCanvas extends Control:
 			var rect := _beat_rect(beat)
 			var status := String(beat.get("status", "planned"))
 			var color := _status_color(status)
-			draw_rect(rect, UI.PANEL_RAISED, true)
-			draw_rect(rect, UI.ACCENT if id == _selected else UI.RULE, false, 2.0 if id == _selected else 1.0)
-			draw_rect(Rect2(rect.position, Vector2(5, rect.size.y)), color, true)
+			var selected := id == _selected
+			var item := get_canvas_item()
+			# The card is cut on both diagonals, like every other frame in the
+			# console, and lit by its own status colour rather than outlined in
+			# it: on a board of a dozen beats the lit one is the one being run.
+			var shape := Chrome.outline(rect, 12.0, Chrome.CUT_DIAGONAL)
+			Chrome.fill(item, shape, UI.PANEL_RAISED)
+			Chrome.glow_stroke(
+				item,
+				Chrome.closed(shape),
+				UI.ACCENT if selected else UI.RULE,
+				2.0 if selected else 1.0,
+				1.4 if selected else 0.0,
+			)
+			# The status flash leans, so it reads as a marker stuck on the card
+			# rather than as another rectangle inside it.
+			Chrome.fill(
+				item,
+				PackedVector2Array(
+					[
+						rect.position + Vector2(12, 0),
+						rect.position + Vector2(18, 0),
+						rect.position + Vector2(6, rect.size.y),
+						rect.position + Vector2(0, rect.size.y),
+					]
+				),
+				color,
+			)
+			Chrome.glow_stroke(
+				item,
+				PackedVector2Array(
+					[rect.position + Vector2(15, 0), rect.position + Vector2(3, rect.size.y)]
+				),
+				color,
+				1.0,
+				1.2,
+			)
+			if selected:
+				_draw_corners(rect, UI.AMBER)
 			draw_string(
 				UI.BODY_BOLD_FONT,
 				rect.position + Vector2(14, 27),
@@ -418,6 +433,72 @@ class _BeatCanvas extends Control:
 				10,
 				color,
 			)
+
+	## The board's ground: a fine grid with every fourth line brought up, so a
+	## dragged beat has something to land against.
+	func _draw_grid() -> void:
+		var step := 40.0
+		var item := get_canvas_item()
+		var fine := Color(UI.ACCENT, 0.035)
+		var heavy := Color(UI.ACCENT, 0.08)
+		var column := 0
+		var x := 0.0
+		while x <= size.x:
+			var colour := heavy if column % 4 == 0 else fine
+			Chrome.stroke(item, PackedVector2Array([Vector2(x, 0), Vector2(x, size.y)]), colour, 1.0)
+			x += step
+			column += 1
+		var row := 0
+		var y := 0.0
+		while y <= size.y:
+			var colour := heavy if row % 4 == 0 else fine
+			Chrome.stroke(item, PackedVector2Array([Vector2(0, y), Vector2(size.x, y)]), colour, 1.0)
+			y += step
+			row += 1
+
+	## What follows what: a lit track with square elbows, a node where it turns
+	## and a solid head where it arrives.
+	func _draw_links() -> void:
+		var item := get_canvas_item()
+		for value in _beats:
+			var source: Dictionary = value
+			var from := _beat_rect(source).position + Vector2(NODE_SIZE.x, NODE_SIZE.y * 0.5)
+			for next_id in source.get("next_ids", []):
+				var target := _by_id(String(next_id))
+				if target.is_empty():
+					continue
+				var to := _beat_rect(target).position + Vector2(0, NODE_SIZE.y * 0.5)
+				var elbow_x := (from.x + to.x) * 0.5
+				var points := PackedVector2Array(
+					[from, Vector2(elbow_x, from.y), Vector2(elbow_x, to.y), to]
+				)
+				Chrome.glow_stroke(item, points, UI.ACCENT, 1.5, 1.0)
+				Chrome.fill(item, Chrome.diamond(Vector2(elbow_x, from.y), 3.0), UI.AMBER)
+				Chrome.fill(item, Chrome.diamond(Vector2(elbow_x, to.y), 3.0), UI.AMBER)
+				Chrome.fill(
+					item,
+					PackedVector2Array([to, to + Vector2(-9, -5), to + Vector2(-9, 5)]),
+					UI.ACCENT,
+				)
+
+	## Amber corner marks on the selected card, held off it by a couple of
+	## pixels so they clasp the card rather than trace it.
+	func _draw_corners(rect: Rect2, colour: Color) -> void:
+		var box := rect.grow(4.0)
+		var arm := 12.0
+		var item := get_canvas_item()
+		var left := box.position.x
+		var top := box.position.y
+		var right := box.position.x + box.size.x
+		var bottom := box.position.y + box.size.y
+		var corners := [
+			[Vector2(left, top + arm), Vector2(left, top), Vector2(left + arm, top)],
+			[Vector2(right - arm, top), Vector2(right, top), Vector2(right, top + arm)],
+			[Vector2(right, bottom - arm), Vector2(right, bottom), Vector2(right - arm, bottom)],
+			[Vector2(left + arm, bottom), Vector2(left, bottom), Vector2(left, bottom - arm)],
+		]
+		for corner in corners:
+			Chrome.glow_stroke(item, PackedVector2Array(corner), colour, 1.5, 1.0)
 
 	func _status_color(status: String) -> Color:
 		match status:

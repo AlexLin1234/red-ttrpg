@@ -392,6 +392,11 @@ func _build_stage(location: Dictionary) -> Control:
 	_viewport.transparent_bg = false
 	container.add_child(_viewport)
 
+	# A sibling of the viewport rather than a child of it: PanelContainer fits
+	# every child to its rect, so the reticle lands exactly over the render and
+	# is drawn after it.
+	frame.add_child(UI.reticle())
+
 	_board = IsoBoard.new()
 	_viewport.add_child(_board)
 	_board.set_location(location, Store.cover_palette())

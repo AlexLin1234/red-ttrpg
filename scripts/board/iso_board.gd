@@ -73,9 +73,13 @@ func _init() -> void:
 	key.rotation_degrees = Vector3(-52, -38, 0)
 	add_child(key)
 
+	# The rim is warm on purpose. Everything else lighting this board is blue —
+	# the ambient, the key, the tiles themselves — so a cold rim left the models
+	# reading as one flat blue mass from the far side of the table. An amber
+	# back-light separates every figure from the floor it stands on.
 	var rim := DirectionalLight3D.new()
-	rim.light_color = Color("bb5451")
-	rim.light_energy = 0.7
+	rim.light_color = UI.AMBER_FILL
+	rim.light_energy = 0.8
 	rim.rotation_degrees = Vector3(-20, 140, 0)
 	add_child(rim)
 

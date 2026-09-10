@@ -348,16 +348,7 @@ func _gui_input(event: InputEvent) -> void:
 func _draw() -> void:
 	_recompute_transform()
 
-	var step := 20.0 * _scale
-	var grid_colour := Color("141c26")
-	var x := 0.0
-	while x < size.x:
-		draw_line(Vector2(x, 0), Vector2(x, size.y), grid_colour, 1.0)
-		x += step
-	var y := 0.0
-	while y < size.y:
-		draw_line(Vector2(0, y), Vector2(size.x, y), grid_colour, 1.0)
-		y += step
+	_draw_grid()
 
 	if _backdrop != null and _backdrop_visible:
 		# The backdrop fills exactly the letterboxed rect the zones map into,
@@ -387,9 +378,19 @@ func _draw() -> void:
 		var fill: Color = colors["fill"]
 		fill.a *= NightCity.zone_opacity(entry)
 		draw_colored_polygon(points, fill)
-		var outline := points.duplicate()
-		outline.append(points[0])
-		draw_polyline(outline, colors["stroke"], 2.0 if focused else 1.5)
+		# A zone's border is a lit edge rather than a drawn one: the halo under
+		# it is what separates two neighbouring districts of nearly the same
+		# dark colour without needing a brighter line between them.
+		var outline := Chrome.closed(points)
+		var stroke: Color = colors["stroke"]
+		Chrome.glow_stroke(
+			get_canvas_item(),
+			outline,
+			stroke,
+			2.0 if focused else 1.5,
+			1.4 if focused else 0.6,
+		)
+		_draw_zone_corners(points, stroke, focused)
 
 		var label_at := _to_screen(NightCity.label_of(entry))
 		draw_string(
@@ -412,16 +413,14 @@ func _draw() -> void:
 		)
 
 		if _hooked.has(id):
+			# A zone with work waiting in it is marked in amber, not blue: it is
+			# the one thing on the map the table put there.
 			var marker := _to_screen(NightCity.centroid_of(NightCity.points_of(entry)))
-			draw_polyline(
-				PackedVector2Array([
-					marker + Vector2(0, -8), marker + Vector2(8, 0),
-					marker + Vector2(0, 8), marker + Vector2(-8, 0),
-					marker + Vector2(0, -8),
-				]),
-				UI.ACCENT,
-				1.5,
+			var item := get_canvas_item()
+			Chrome.glow_stroke(
+				item, Chrome.closed(Chrome.diamond(marker, 9.0)), UI.AMBER, 1.5, 1.2
 			)
+			Chrome.fill(item, Chrome.diamond(marker, 3.0), UI.AMBER)
 
 	_draw_pins()
 
@@ -431,6 +430,79 @@ func _draw() -> void:
 		_draw_draft()
 	elif _pinning:
 		_draw_pin_cursor()
+
+## The ground the districts sit on: a fine survey grid with every fifth line
+## brought up, so the map has a sense of scale even where no zone is drawn.
+##
+## The bright lines are what a distance is counted in — twenty metres a square,
+## a hundred to a heavy one — and the diagonal in the corner is there to keep
+## an empty quadrant from reading as a hole in the screen.
+func _draw_grid() -> void:
+	var step := 20.0 * _scale
+	if step <= 1.0:
+		return
+	var item := get_canvas_item()
+	var fine := Color(UI.ACCENT, 0.045)
+	var heavy := Color(UI.ACCENT, 0.10)
+	var column := 0
+	var x := fposmod(_origin.x, step * 5.0) - step * 5.0
+	while x < size.x:
+		if x >= 0.0:
+			var colour := heavy if column % 5 == 0 else fine
+			Chrome.stroke(item, PackedVector2Array([Vector2(x, 0), Vector2(x, size.y)]), colour, 1.0)
+		x += step
+		column += 1
+	var row := 0
+	var y := fposmod(_origin.y, step * 5.0) - step * 5.0
+	while y < size.y:
+		if y >= 0.0:
+			var colour := heavy if row % 5 == 0 else fine
+			Chrome.stroke(item, PackedVector2Array([Vector2(0, y), Vector2(size.x, y)]), colour, 1.0)
+		y += step
+		row += 1
+	for index in 6:
+		var reach := 120.0 - float(index) * 10.0
+		var offset := float(index) * 18.0
+		Chrome.stroke(
+			item,
+			PackedVector2Array([Vector2(offset, size.y), Vector2(offset + reach, size.y - reach)]),
+			Color(UI.AMBER, 0.035),
+			1.0,
+		)
+
+
+## Brackets clasping the extremes of a zone's outline.
+##
+## The polygons are irregular, so a corner mark cannot be put on a corner the
+## way a panel's is. These go on the bounding box instead, which is close enough
+## to read as "this district is the one selected" without redrawing its shape.
+func _draw_zone_corners(points: PackedVector2Array, stroke: Color, focused: bool) -> void:
+	if not focused:
+		return
+	var bounds := Rect2(points[0], Vector2.ZERO)
+	for point in points:
+		bounds = bounds.expand(point)
+	# Held off the shape by a few pixels. A zone that happens to be rectangular
+	# would otherwise have its brackets land exactly on its own outline, which
+	# marks nothing.
+	bounds = bounds.grow(7.0)
+	var arm := minf(26.0, minf(bounds.size.x, bounds.size.y) * 0.3)
+	if arm <= 4.0:
+		return
+	var item := get_canvas_item()
+	var left := bounds.position.x
+	var top := bounds.position.y
+	var right := bounds.position.x + bounds.size.x
+	var bottom := bounds.position.y + bounds.size.y
+	var corners := [
+		[Vector2(left, top + arm), Vector2(left, top), Vector2(left + arm, top)],
+		[Vector2(right - arm, top), Vector2(right, top), Vector2(right, top + arm)],
+		[Vector2(right, bottom - arm), Vector2(right, bottom), Vector2(right - arm, bottom)],
+		[Vector2(left + arm, bottom), Vector2(left, bottom), Vector2(left, bottom - arm)],
+	]
+	for corner in corners:
+		Chrome.glow_stroke(item, PackedVector2Array(corner), Color(stroke, 0.75), 1.5, 1.0)
+
 
 ## A pin: a filled head on a short stem, with its name beside it. Drawn after
 ## the plates so it always reads on top of them.
@@ -442,14 +514,23 @@ func _draw_pins() -> void:
 		var focused := String(entry["id"]) == _focus_poi
 		var linked := String(entry.get("location_id", "")) != ""
 
-		draw_line(at, at + Vector2(0, 9), colour, 1.5)
-		draw_circle(at, 6.0 if focused else 5.0, colour)
+		var item := get_canvas_item()
+		Chrome.glow_stroke(
+			item, PackedVector2Array([at, at + Vector2(0, 10)]), colour, 1.5, 0.8
+		)
+		# The head is a hexagon rather than a circle: on a map of straight-edged
+		# districts a round pin is the only curve on the screen.
+		var head := Chrome.hexagon(at, 7.0 if focused else 6.0)
+		Chrome.fill(item, head, colour)
+		Chrome.glow_stroke(item, Chrome.closed(head), colour, 1.0, 1.2)
 		# A hollow head means the pin is a note; a filled one has a board
 		# behind it that the party can walk into.
 		if not linked:
-			draw_circle(at, 3.0, UI.PANEL_INSET)
+			Chrome.fill(item, Chrome.hexagon(at, 3.2), UI.PANEL_INSET)
 		if focused:
-			draw_arc(at, 11.0, 0, TAU, 24, colour, 1.5)
+			Chrome.glow_stroke(
+				item, Chrome.closed(Chrome.diamond(at, 13.0)), colour, 1.5, 1.4
+			)
 
 		draw_string(
 			UI.BODY_BOLD_FONT,
