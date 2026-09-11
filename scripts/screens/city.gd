@@ -29,6 +29,7 @@ var _map_dialog: FileDialog
 var _month_dialog: ConfirmationDialog
 var _hustle_dialog: ConfirmationDialog
 var _downtime_dialog: DowntimeDialog
+var _session_dialog: SessionDialog
 var _hustle_all: CheckBox
 var _hustle_list: VBoxContainer
 var _hustle_checks: Dictionary = {}
@@ -104,6 +105,7 @@ func _ready() -> void:
 
 	_build_hustle_dialog()
 	_build_downtime_dialog()
+	_build_session_dialog()
 
 	_build_campaign_dialog()
 	_refresh()
@@ -162,6 +164,18 @@ func _build_downtime_dialog() -> void:
 
 func open_downtime_dialog(action_key := "") -> void:
 	_downtime_dialog.open(action_key)
+
+
+## Closing the evening. Built here beside the clock because ending a session is
+## a campaign action, not an encounter one.
+func _build_session_dialog() -> void:
+	_session_dialog = SessionDialog.new()
+	_session_dialog.finished.connect(_refresh)
+	add_child(_session_dialog)
+
+
+func open_session_dialog() -> void:
+	_session_dialog.present()
 
 
 func _build_bar() -> Control:
@@ -731,6 +745,15 @@ func _build_month_close(clock: Dictionary) -> Control:
 	downtime_button.disabled = _closing_month
 	downtime_button.pressed.connect(open_downtime_dialog)
 	box.add_child(downtime_button)
+
+	var session_button := UI.plain_button("End session · award IP")
+	session_button.disabled = _closing_month
+	session_button.tooltip_text = (
+		"Close the evening: hand out Improvement Points, write the log line, and take "
+		+ "a restore point."
+	)
+	session_button.pressed.connect(open_session_dialog)
+	box.add_child(session_button)
 
 	box.add_child(_build_street_encounter())
 

@@ -94,6 +94,18 @@ func _ready() -> void:
 	await _settle(30)
 	await _shoot("1d-forge")
 
+	# The Lifepath tab is where a GM turns the fourth Booster in a squad into
+	# somebody, so it is drawn with a history already rolled onto it.
+	var forge: Node = app.get("_screen")
+	if forge != null and forge.has_method("show_tab"):
+		Store.roll_lifepath(Store.active_character_id, Dice.SeededRandom.new(11))
+		Store.add_life_event(Store.active_character_id, Dice.SeededRandom.new(12))
+		forge.call("show_tab", "lifepath")
+		await _settle(20)
+		await _shoot("1d-lifepath")
+		forge.call("show_tab", "stats")
+		await _settle(10)
+
 	# The markets render arbitrary catalog text, which is exactly where a row can
 	# grow wider than the viewport, so both are drawn. The Night Market needs a
 	# Fixer of Operator Rank 5 to have any stock at all.

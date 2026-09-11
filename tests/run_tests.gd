@@ -17,6 +17,7 @@ const SUITES := [
 	preload("res://tests/test_combat_extras.gd"),
 	preload("res://tests/test_luck.gd"),
 	preload("res://tests/test_lifepath.gd"),
+	preload("res://tests/test_progression.gd"),
 	preload("res://tests/test_humanity.gd"),
 	preload("res://tests/test_player_view.gd"),
 	preload("res://tests/test_netrun.gd"),

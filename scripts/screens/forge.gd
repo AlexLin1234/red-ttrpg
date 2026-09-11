@@ -158,6 +158,15 @@ func _refresh_roster() -> void:
 # -- sheet ------------------------------------------------------------------------
 
 
+## Show one tab of the sheet. Public so the screen suite can draw each of them
+## the way a GM reaches them.
+func show_tab(tab: String) -> void:
+	if not TABS.has(tab):
+		return
+	_tab = tab
+	_refresh_sheet()
+
+
 func _build_sheet() -> Control:
 	var shell := UI.panel()
 	UI.expand(shell)
