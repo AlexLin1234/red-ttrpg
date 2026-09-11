@@ -106,7 +106,7 @@ jobs:
 
       # Worth keeping when a screen changes shape: the diff is easier to read as
       # a picture than as a description of one.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: screens
