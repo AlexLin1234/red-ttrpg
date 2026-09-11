@@ -492,6 +492,11 @@ static func actor_input(character: Dictionary) -> Dictionary:
 	for key in ["wound_state", "death_save_due", "death_save_penalty", "critical_injuries"]:
 		if character.has(key):
 			input[key] = character[key]
+	# A vehicle crosses the board at its own speed rather than at a Solo's
+	# walking pace, and it has to reach the encounter for that to be true.
+	for key in ["speed_m", "vehicle_id", "driver_id"]:
+		if character.has(key):
+			input[key] = character[key]
 	return input
 
 

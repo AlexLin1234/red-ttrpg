@@ -900,6 +900,49 @@ func perform_hustles(character_ids: Array, rng: Dice.RandomSource) -> Dictionary
 ## A vehicle parked on a board is cover with a wreck value, so it belongs in the
 ## same palette rather than in a system of its own: line of sight, ablation and
 ## the cover prompt all then work on it unchanged.
+## Put a garaged vehicle on the board, with somebody behind the wheel.
+##
+## The vehicle joins the roster as an actor rather than as a fourth kind of
+## thing, so every part of the encounter that already knows how to shoot at a
+## Solo knows how to shoot at a car. It keeps its garage entry: this is the same
+## vehicle driven out, not a copy, and damage taken on the board is written back
+## to the garage when the encounter is saved.
+func deploy_vehicle(vehicle_id: String, driver_id: String) -> Dictionary:
+	var vehicle := vehicle_by_id(vehicle_id)
+	if vehicle.is_empty():
+		return {"ok": false, "error": "no such vehicle"}
+	var driver := character_by_id(driver_id)
+	if driver_id != "" and driver.is_empty():
+		return {"ok": false, "error": "no such driver"}
+	var entry := Vehicles.as_roster_entry(vehicle, driver)
+	var existing := character_by_id(String(entry["id"]))
+	if not existing.is_empty():
+		return {"ok": false, "error": "%s is already on the board" % String(vehicle["name"])}
+	add_character(entry)
+	log_line(
+		"%s drove onto the board" % String(vehicle.get("name", "A vehicle"))
+		if driver_id != ""
+		else "%s is parked on the board" % String(vehicle.get("name", "A vehicle"))
+	)
+	mark_dirty()
+	return {"ok": true, "character": entry}
+
+
+## Write a driven vehicle's damage back to the garage.
+##
+## An encounter is a scratch copy that is often replayed, so this is called when
+## the GM saves results rather than every time a bullet lands.
+func return_vehicle(actor_entry: Dictionary) -> bool:
+	var vehicle := vehicle_by_id(String(actor_entry.get("vehicle_id", "")))
+	if vehicle.is_empty():
+		return false
+	vehicle["sdp"] = clampi(
+		int(actor_entry.get("hp", vehicle.get("sdp", 0))), 0, int(vehicle.get("max_sdp", 1))
+	)
+	mark_dirty()
+	return true
+
+
 # -- lifepath, IP and reputation ------------------------------------------------
 
 

@@ -138,6 +138,8 @@ static func _normalise_actor(actor_id: String, entry: Dictionary) -> Dictionary:
 	# of it, which is the same reading [Luck.ensure] gives a sheet.
 	actor["luck_available"] = maxi(0, int(actor.get("luck_available", Luck.pool(actor))))
 	actor["critical_injuries"] = actor.get("critical_injuries", [])
+	# A vehicle carries its own reach across; zero means "read MOVE instead".
+	actor["speed_m"] = maxf(0.0, float(actor.get("speed_m", 0.0)))
 	actor["weapons"] = weapons
 	var cell: Dictionary = actor.get("position", {})
 	actor["position"] = {
@@ -426,8 +428,17 @@ func spent_on(actor_id: String, cost: String) -> String:
 
 
 ## Metres one Move Action covers for this actor: MOVE x 2.
+## How far one Move Action carries this actor.
+##
+## A person walks MOVE times two metres. A vehicle covers what its template says
+## instead, because a car crossing a board at a Solo's walking pace is not a car
+## — and because SPD is the number a driver actually reads.
 func move_allowance(actor_id: String) -> float:
-	var stats: Dictionary = actor(actor_id).get("stats", {})
+	var entry := actor(actor_id)
+	var speed := float(entry.get("speed_m", 0.0))
+	if speed > 0.0:
+		return speed
+	var stats: Dictionary = entry.get("stats", {})
 	return float(int(stats.get("MOVE", 0))) * METRES_PER_MOVE
 
 

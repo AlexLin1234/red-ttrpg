@@ -39,6 +39,12 @@ const RULES := {
 	"restraint_reduction": 2,
 }
 
+## Metres a vehicle covers on one Move Action when its template does not say.
+##
+## Vehicles saved before they could be driven on a board carry no speed, and a
+## car that cannot move is worse than one that moves at a guessed rate.
+const DEFAULT_SPEED_M := 20
+
 ## How much of a collision the frame keeps off the people inside, by vehicle
 ## kind. A rider takes all of it.
 const PASSENGER_FRAME := {
@@ -65,6 +71,7 @@ const TEMPLATES: Array[Dictionary] = [
 		"sp": 5,
 		"seats": 2,
 		"handling": 3,
+		"speed_m": 28,
 		"size_m": [2.0, 1.2, 0.8],
 		"notes": "Fast, nimble, and nothing at all between the rider and the road.",
 	},
@@ -76,6 +83,7 @@ const TEMPLATES: Array[Dictionary] = [
 		"sp": 8,
 		"seats": 4,
 		"handling": 1,
+		"speed_m": 22,
 		"size_m": [4.2, 1.5, 1.8],
 		"notes": "What most of Night City drives, and what most of it abandons.",
 	},
@@ -87,6 +95,7 @@ const TEMPLATES: Array[Dictionary] = [
 		"sp": 10,
 		"seats": 4,
 		"handling": 2,
+		"speed_m": 30,
 		"size_m": [4.8, 1.4, 1.9],
 		"notes": "Built to be seen leaving.",
 	},
@@ -98,6 +107,7 @@ const TEMPLATES: Array[Dictionary] = [
 		"sp": 12,
 		"seats": 8,
 		"handling": 0,
+		"speed_m": 18,
 		"size_m": [5.4, 2.1, 2.0],
 		"notes": "The whole team, their gear, and no corners taken quickly.",
 	},
@@ -109,6 +119,7 @@ const TEMPLATES: Array[Dictionary] = [
 		"sp": 20,
 		"seats": 6,
 		"handling": -1,
+		"speed_m": 16,
 		"size_m": [6.0, 2.4, 2.4],
 		"notes": "Corporate. Slow. Very hard to open.",
 	},
@@ -120,6 +131,7 @@ const TEMPLATES: Array[Dictionary] = [
 		"sp": 15,
 		"seats": 4,
 		"handling": 2,
+		"speed_m": 36,
 		"size_m": [7.0, 2.2, 3.0],
 		"notes": "Ignores the street entirely, which is the point.",
 	},
@@ -216,6 +228,7 @@ static func from_template(key: String, name := "") -> Dictionary:
 		"sp": int(spec["sp"]),
 		"seats": int(spec["seats"]),
 		"handling": int(spec["handling"]),
+		"speed_m": int(spec.get("speed_m", DEFAULT_SPEED_M)),
 		"size_m": (spec["size_m"] as Array).duplicate(),
 		"notes": String(spec["notes"]),
 		"owner_id": "",
@@ -233,6 +246,76 @@ static func as_actor(vehicle: Dictionary) -> Dictionary:
 		"handling": int(vehicle.get("handling", 0)),
 		"kind": String(vehicle.get("kind", "ground")),
 	}
+
+
+## The roster entry a driven vehicle becomes.
+##
+## A vehicle on the board is not a special case of a unit — it is a unit. Making
+## it a roster entry rather than a fourth kind of thing means initiative,
+## targeting, damage, armour ablation, the player view and undo all reach it
+## without knowing it is a car: SDP is where its HP goes and SP is the plate on
+## its body, which is what [method as_actor] has always said.
+##
+## What the driver lends it is REF, because a car is only as quick off the mark
+## as whoever is behind the wheel. An empty vehicle keeps its own, which is
+## nothing, so a parked car acts last and does not move.
+static func as_roster_entry(vehicle: Dictionary, driver: Dictionary) -> Dictionary:
+	var driver_stats: Dictionary = driver.get("stats", {})
+	var speed := maxi(1, int(vehicle.get("speed_m", DEFAULT_SPEED_M)))
+	var driver_id := String(driver.get("id", ""))
+	# A car takes the side of whoever is driving it. Without this a getaway car
+	# the party drove in reads as neutral on the board and in the turn order,
+	# which is exactly the thing a GM should not have to remember mid-fight.
+	var side := String(driver.get("side", "neutral"))
+	var name := String(vehicle.get("name", "Vehicle"))
+	if driver_id != "":
+		name = "%s · %s" % [name, String(driver.get("name", "driver"))]
+	return {
+		"id": "vehicle-actor-%s" % String(vehicle.get("id", "unknown")),
+		"name": name,
+		"role": "Vehicle",
+		"role_key": "",
+		"tags": ["VEHICLE", "HOSTILE"] if side == "hostile" else ["VEHICLE"],
+		"side": side,
+		"hp": maxi(0, int(vehicle.get("sdp", vehicle.get("max_sdp", 1)))),
+		"max_hp": maxi(1, int(vehicle.get("max_sdp", vehicle.get("sdp", 1)))),
+		"humanity": 0,
+		"max_humanity": 0,
+		"armor": _plated(int(vehicle.get("sp", 0))),
+		"weapons": [],
+		"gear": [],
+		"skills": [],
+		# MOVE is what the rest of the app reads to work out how far something
+		# goes; speed_m is what the encounter prefers when it is present. Both
+		# are set so a screen that only knows about MOVE is not left guessing.
+		"stats": {
+			"REF": int(driver_stats.get("REF", 0)),
+			"MOVE": maxi(1, roundi(float(speed) / 2.0)),
+			"BODY": 10,
+			"LUCK": 0,
+		},
+		"speed_m": speed,
+		"vehicle_id": String(vehicle.get("id", "")),
+		"driver_id": driver_id,
+		"seats": int(vehicle.get("seats", 1)),
+		"handling": int(vehicle.get("handling", 0)),
+		"kind": String(vehicle.get("kind", "ground")),
+		"creation_complete": true,
+	}
+
+
+## A vehicle's plating covers the whole of it, so every location reads the same
+## SP rather than a car having an unarmoured head.
+static func _plated(sp: int) -> Dictionary:
+	var armor := {}
+	for location in Resolver.HIT_LOCATIONS:
+		armor[location] = {"sp": maxi(0, sp), "ablated": false}
+	return armor
+
+
+## Whether an actor or sheet is a vehicle rather than a person.
+static func is_vehicle(entry: Dictionary) -> bool:
+	return entry.has("vehicle_id") or (entry.get("tags", []) as Array).has("VEHICLE")
 
 
 ## A vehicle parked on an isometric board is cover with a wreck value: it stops

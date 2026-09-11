@@ -230,6 +230,8 @@ func _rebuild_palette() -> void:
 	if _palette_tab == "units":
 		_palette_box.add_child(_build_squad_spawner())
 		_palette_box.add_child(UI.rule_line())
+		_palette_box.add_child(_build_vehicle_spawner())
+		_palette_box.add_child(UI.rule_line())
 
 	for entry in entries:
 		_palette_box.add_child(_build_palette_chip(entry))
@@ -269,7 +271,96 @@ func _build_squad_spawner() -> Control:
 	return box
 
 
-## Roll a squad and stand it on the nearest free tiles.
+## Drive something out of the garage and onto the deck.
+##
+## A car was already cover with a wreck value and an actor a chase could damage;
+## what it could not be was a thing that moved during a fight. It is a unit now,
+## and the driver lends it their REF, because a car is only as quick off the
+## mark as whoever is behind the wheel.
+func _build_vehicle_spawner() -> Control:
+	var box := UI.vbox(UI.GAP_1)
+	box.add_child(UI.micro("Drive a vehicle in"))
+
+	var garage := Store.vehicles()
+	if garage.is_empty():
+		box.add_child(UI.micro("The garage is empty.", UI.MUTED_DIM))
+		return box
+
+	var vehicle_picker := OptionButton.new()
+	vehicle_picker.clip_text = true
+	for entry in garage:
+		var vehicle: Dictionary = entry
+		vehicle_picker.add_item(
+			"%s · SDP %d" % [String(vehicle["name"]), int(vehicle.get("sdp", 0))]
+		)
+		vehicle_picker.set_item_metadata(
+			vehicle_picker.item_count - 1, String(vehicle["id"])
+		)
+	box.add_child(vehicle_picker)
+
+	var driver_picker := OptionButton.new()
+	driver_picker.clip_text = true
+	driver_picker.add_item("Parked · nobody driving")
+	driver_picker.set_item_metadata(0, "")
+	for entry in Store.characters():
+		var character: Dictionary = entry
+		if Vehicles.is_vehicle(character):
+			continue
+		driver_picker.add_item("Driven by %s" % String(character["name"]))
+		driver_picker.set_item_metadata(driver_picker.item_count - 1, String(character["id"]))
+	box.add_child(driver_picker)
+
+	var drive := UI.primary_button("Drive in")
+	drive.pressed.connect(
+		func() -> void:
+			deploy_vehicle(
+				String(vehicle_picker.get_item_metadata(vehicle_picker.selected)),
+				String(driver_picker.get_item_metadata(driver_picker.selected)),
+			)
+	)
+	box.add_child(drive)
+	return box
+
+
+## Put a vehicle on the board and stand it on a free tile.
+##
+## Public for the same reason [method spawn_squad] is: the screenshot runner
+## drives the GM's own path rather than a private one.
+func deploy_vehicle(vehicle_id: String, driver_id: String) -> Dictionary:
+	var location := Store.active_location()
+	if location.is_empty():
+		return {"ok": false, "error": "no location open"}
+	var deployed := Store.deploy_vehicle(vehicle_id, driver_id)
+	if not bool(deployed.get("ok", false)):
+		Store.set_status(String(deployed.get("error", "That vehicle cannot be driven in")))
+		return deployed
+	var cell := _free_cell()
+	if cell.is_empty():
+		return {"ok": false, "error": "the board is full"}
+	var character: Dictionary = deployed["character"]
+	var unit := {
+		"id": "unit-%d" % Time.get_ticks_usec(),
+		"character_id": String(character["id"]),
+		"x": int(cell["x"]),
+		"z": int(cell["z"]),
+		"layer": int(cell.get("layer", 0)),
+	}
+	(location["units"] as Array).append(unit)
+	Store.mark_dirty()
+	# The same path a spawned squad takes: the unit joins the encounter under
+	# its board id, which is what every event and every undo is keyed to.
+	_join_encounter(location, {String(unit["id"]): String(unit["character_id"])})
+	_board.set_location(location, Store.cover_palette())
+	_sync_units()
+	# The palette lists the garage, and the garage just changed — without this
+	# it goes on saying the garage is empty after a car has been driven out of it.
+	_rebuild_palette()
+	_message = "%s is on the deck." % String(character["name"])
+	_refresh()
+	return {"ok": true, "unit": unit}
+
+
+## Roll a squad and stand it on the nearest free tiles.## Roll a squad and stand it on the nearest free tiles.
 ##
 ## Public so the screenshot runner drives the GM's own path.
 func spawn_squad(squad_key: String, count := 0) -> Array:

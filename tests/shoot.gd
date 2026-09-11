@@ -423,6 +423,23 @@ func _drive_spawn(screen: Node) -> void:
 		cells[key] = true
 	await _shoot("1c-squad")
 
+	# A car on the deck: the garage's own vehicle, driven in by a PC, taking a
+	# place in initiative like anything else standing there.
+	if screen.has_method("deploy_vehicle"):
+		# The Garage section runs after this one, so the campaign has no cars yet.
+		# One is put in so the board can be shown with a vehicle standing on it.
+		if Store.vehicles().is_empty():
+			Store.add_vehicle(Vehicles.from_template("muscle", "Getaway Coupe"))
+		var garage := Store.vehicles()
+		if not garage.is_empty():
+			var drove: Dictionary = screen.call(
+				"deploy_vehicle", String((garage[0] as Dictionary)["id"]), Store.active_character_id
+			)
+			if not bool(drove.get("ok", false)):
+				_errors.append("driving a vehicle in failed: %s" % String(drove.get("error", "")))
+			await _settle(20)
+			await _shoot("1c-vehicle")
+
 
 ## The condition rail: whoever came out of that exchange worst, and the buttons
 ## the GM reaches for when they are on the floor.
