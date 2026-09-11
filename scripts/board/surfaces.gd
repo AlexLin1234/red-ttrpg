@@ -1,12 +1,13 @@
 class_name BoardSurfaces
 extends RefCounted
 
-## Procedural surface textures for the isometric board.
+## Authored surface textures for the isometric board.
 ##
 ## The board used to be flat-shaded boxes: one albedo colour per material and
 ## nothing else, so a concrete barrier and a steel plate differed only in hue.
-## These are generated from noise at runtime rather than shipped as image files,
-## which keeps them out of the export, out of Git, and reviewable as code.
+## Each profile now uses a generated, game-ready source texture. The committed
+## images are greyscale modulation maps: the board still owns the colour, while
+## the art supplies recognisable plate, grate, rubble, grain and corrosion.
 ##
 ## Every texture is deliberately quiet. It multiplies over the colour the board
 ## already chose, in a narrow band around white, so it adds grain without
@@ -14,8 +15,8 @@ extends RefCounted
 ## colour is the one thing on the board that has to stay instantly legible, and
 ## grain on top of it would only make it harder to read.
 
-## Textures are square, seamless, and generated once per profile per run.
-const SIZE := 96
+## Textures are square, seamless and power-of-two so mipmaps stay inexpensive.
+const SIZE := 512
 
 ## The profile each cover material draws with. A material with no entry here
 ## falls back to [constant DEFAULT_PROFILE].
@@ -41,83 +42,34 @@ const TILE_PROFILES := {
 
 const DEFAULT_PROFILE := "concrete"
 
-## How each profile is built.
-##
-## "contrast" is the half-width of the band the noise is remapped into: 0.10
-## means the texture runs from 0.90 to 1.10, so it modulates the underlying
-## colour by at most ten per cent either way. "stretch" squashes the noise on one
-## axis, which is what turns isotropic noise into a brushed or grained look.
-const PROFILES := {
-	"deck": {
-		"frequency": 0.09,
-		"octaves": 3,
-		"contrast": 0.075,
-		"stretch": 1.0,
-		"roughness": 0.82,
-		"metallic": 0.12,
-	},
-	"concrete": {
-		"frequency": 0.07,
-		"octaves": 4,
-		"contrast": 0.10,
-		"stretch": 1.0,
-		"roughness": 0.88,
-		"metallic": 0.04,
-	},
-	"brushed": {
-		"frequency": 0.16,
-		"octaves": 2,
-		"contrast": 0.07,
-		"stretch": 7.0,
-		"roughness": 0.42,
-		"metallic": 0.62,
-	},
-	"glass": {
-		"frequency": 0.05,
-		"octaves": 2,
-		"contrast": 0.035,
-		"stretch": 2.0,
-		"roughness": 0.16,
-		"metallic": 0.30,
-	},
-	"grain": {
-		"frequency": 0.10,
-		"octaves": 3,
-		"contrast": 0.13,
-		"stretch": 5.0,
-		"roughness": 0.90,
-		"metallic": 0.02,
-	},
-	"corroded": {
-		"frequency": 0.12,
-		"octaves": 5,
-		"contrast": 0.16,
-		"stretch": 1.0,
-		"roughness": 0.78,
-		"metallic": 0.35,
-	},
-	"grate": {
-		"frequency": 0.12, "octaves": 2, "contrast": 0.16, "stretch": 1.0,
-		"roughness": 0.58, "metallic": 0.48, "pattern": "grate",
-	},
-	"rubble": {
-		"frequency": 0.18, "octaves": 5, "contrast": 0.19, "stretch": 1.0,
-		"roughness": 0.96, "metallic": 0.02, "pattern": "rubble",
-	},
-	"ramp": {
-		"frequency": 0.11, "octaves": 3, "contrast": 0.10, "stretch": 5.0,
-		"roughness": 0.72, "metallic": 0.28, "pattern": "ramp",
-	},
-	"water": {
-		"frequency": 0.055, "octaves": 2, "contrast": 0.09, "stretch": 8.0,
-		"roughness": 0.08, "metallic": 0.18, "pattern": "water",
-	},
+## Generated source art, normalized into quiet greyscale modulation maps. Keeping
+## the paths here makes the complete board texture set auditable in one place.
+const TEXTURES := {
+	"deck": preload("res://assets/textures/board/deck.png"),
+	"concrete": preload("res://assets/textures/board/concrete.png"),
+	"brushed": preload("res://assets/textures/board/brushed.png"),
+	"glass": preload("res://assets/textures/board/glass.png"),
+	"grain": preload("res://assets/textures/board/grain.png"),
+	"corroded": preload("res://assets/textures/board/corroded.png"),
+	"grate": preload("res://assets/textures/board/grate.png"),
+	"rubble": preload("res://assets/textures/board/rubble.png"),
+	"ramp": preload("res://assets/textures/board/ramp.png"),
+	"water": preload("res://assets/textures/board/water.png"),
 }
 
-## Built textures, keyed by profile. Static so a board rebuilt by undo does not
-## pay for them twice, and so the two boards that can be on screen at once — the
-## GM's and the player display's — share one set.
-static var _cache: Dictionary = {}
+## Physical response remains explicit in code, independent of the albedo art.
+const PROFILES := {
+	"deck": {"roughness": 0.82, "metallic": 0.12},
+	"concrete": {"roughness": 0.88, "metallic": 0.04},
+	"brushed": {"roughness": 0.42, "metallic": 0.62},
+	"glass": {"roughness": 0.16, "metallic": 0.30},
+	"grain": {"roughness": 0.90, "metallic": 0.02},
+	"corroded": {"roughness": 0.78, "metallic": 0.35},
+	"grate": {"roughness": 0.58, "metallic": 0.48},
+	"rubble": {"roughness": 0.96, "metallic": 0.02},
+	"ramp": {"roughness": 0.72, "metallic": 0.28},
+	"water": {"roughness": 0.08, "metallic": 0.18},
+}
 
 
 static func profile_for_material(material_name: String) -> String:
@@ -140,14 +92,9 @@ static func color_for_tile(tile_id: String, alternate := false) -> Color:
 	return pair[1] if alternate else pair[0]
 
 
-## The texture for [param profile], generated on first use.
+## The generated texture for [param profile].
 static func texture_for(profile: String) -> Texture2D:
-	if _cache.has(profile):
-		return _cache[profile]
-	var spec: Dictionary = PROFILES.get(profile, PROFILES[DEFAULT_PROFILE])
-	var texture := _build(spec)
-	_cache[profile] = texture
-	return texture
+	return TEXTURES.get(profile, TEXTURES[DEFAULT_PROFILE]) as Texture2D
 
 
 ## A lit material carrying the profile's texture and surface response.
@@ -161,6 +108,8 @@ static func material_for(profile: String, color: Color) -> StandardMaterial3D:
 	material.albedo_texture = texture_for(profile)
 	material.roughness = float(spec["roughness"])
 	material.metallic = float(spec["metallic"])
+	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	material.texture_repeat = true
 	return material
 
 
@@ -196,54 +145,3 @@ static func deck_variation(x: int, z: int) -> float:
 		_deck_noise.seed = 90210
 		_deck_noise.frequency = DECK_WEAR_SCALE
 	return 1.0 + _deck_noise.get_noise_2d(float(x), float(z)) * DECK_DRIFT
-
-
-static func _build(spec: Dictionary) -> ImageTexture:
-	var noise := FastNoiseLite.new()
-	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
-	# Fixed seed: the board looks the same every run, which matters because the
-	# screenshot suite compares renders.
-	noise.seed = 1312
-	noise.frequency = float(spec["frequency"])
-	noise.fractal_octaves = int(spec["octaves"])
-
-	var image := noise.get_seamless_image(SIZE, SIZE)
-	image.convert(Image.FORMAT_RGB8)
-	# Read the noise from an untouched copy: the loop below both samples and
-	# writes, and sampling a pixel it had already remapped would compound the
-	# remap into a much harder contrast than the profile asked for.
-	var source: Image = image.duplicate()
-
-	var contrast := float(spec["contrast"])
-	var stretch := maxf(1.0, float(spec["stretch"]))
-	var pattern := String(spec.get("pattern", "noise"))
-	for y in SIZE:
-		for x in SIZE:
-			# Sampling a squashed row turns the same isotropic noise into a
-			# directional one, which is what reads as brushing or wood grain.
-			var level: float = source.get_pixel(int(float(x) / stretch) % SIZE, y).r
-			match pattern:
-				"grate":
-					# Recessed square apertures with a narrow metal web.
-					var inside := (
-						(x % 16) > 3 and (x % 16) < 13
-						and (y % 16) > 3 and (y % 16) < 13
-					)
-					level = level * 0.25 if inside else 0.72 + level * 0.28
-				"rubble":
-					# Hard thresholds turn noise islands into chips and aggregate.
-					level = 0.22 if level < 0.36 else (0.82 if level > 0.66 else level)
-				"ramp":
-					# Diagonal traction ribs remain seamless at the texture edges.
-					level = clampf(level + (0.28 if (x + y) % 18 < 3 else -0.04), 0.0, 1.0)
-				"water":
-					# Fine horizontal highlights read as shallow pooled water.
-					level = clampf(
-						level + (0.20 if (y + int(level * 8.0)) % 15 < 2 else 0.0),
-						0.0,
-						1.0,
-					)
-			var scale: float = 1.0 + (level - 0.5) * 2.0 * contrast
-			image.set_pixel(x, y, Color(scale, scale, scale))
-
-	return ImageTexture.create_from_image(image)

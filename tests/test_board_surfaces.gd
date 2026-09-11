@@ -13,6 +13,10 @@ static func run(h: Harness) -> void:
 		var texture := BoardSurfaces.texture_for(profile)
 		h.equal(texture.get_width(), BoardSurfaces.SIZE, "%s texture width" % tile_id)
 		h.equal(texture.get_height(), BoardSurfaces.SIZE, "%s texture height" % tile_id)
+		h.check(
+			texture.resource_path.begins_with("res://assets/textures/board/"),
+			"%s uses committed texture art" % tile_id,
+		)
 
 	h.it("gives location surfaces distinct base colors")
 	var seen := {}
@@ -23,6 +27,13 @@ static func run(h: Harness) -> void:
 
 	h.it("maps object materials to an appropriate finish")
 	h.equal(BoardSurfaces.profile_for_material("Concrete"), "concrete", "concrete")
+	h.equal(BoardSurfaces.profile_for_material("Steel Plate"), "brushed", "steel")
+	h.equal(BoardSurfaces.profile_for_material("Glass"), "glass", "glass")
+	h.equal(BoardSurfaces.profile_for_material("Sheet Metal"), "brushed", "sheet metal")
 	h.equal(BoardSurfaces.profile_for_material("Wood Crate"), "grain", "wood grain")
 	h.equal(BoardSurfaces.profile_for_material("Vehicle Hulk"), "corroded", "vehicle corrosion")
 	h.equal(BoardSurfaces.profile_for_material("unknown"), "concrete", "safe default")
+	for profile in ["concrete", "brushed", "glass", "grain", "corroded"]:
+		var texture := BoardSurfaces.texture_for(profile)
+		h.equal(texture.get_width(), BoardSurfaces.SIZE, "%s width" % profile)
+		h.equal(texture.get_height(), BoardSurfaces.SIZE, "%s height" % profile)
