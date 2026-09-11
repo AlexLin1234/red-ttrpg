@@ -88,6 +88,7 @@ func _ready() -> void:
 
 	await _drive_search(app)
 	await _drive_shortcuts(app)
+	await _drive_dice(app)
 	await _drive_assistant(app)
 
 	app.call("_show", "forge")
@@ -638,6 +639,34 @@ func _drive_sessions(app: Control) -> void:
 
 
 ## The keys, and the two display preferences that answer the same question.
+## The roller, with something already in its history — an empty panel does not
+## show that a roll reads back the faces it came up on.
+func _drive_dice(app: Control) -> void:
+	if not app.has_method("open_dice"):
+		_errors.append("the app did not expose the dice roller")
+		return
+	app.call("open_dice")
+	await _settle(12)
+	var roller: Node = app.get("_dice")
+	if roller == null or not bool(roller.get("visible")):
+		_errors.append("the dice roller did not open")
+		return
+	roller.set("_expression", roller.get("_expression"))
+	var field: Node = roller.get("_expression")
+	if field != null:
+		field.set("text", "2d6+3")
+		roller.call("_roll_expression")
+		field.set("text", "1d10-1d6")
+		roller.call("_roll_expression")
+	roller.call("_roll_check")
+	await _settle(10)
+	await _shoot("1i-dice")
+	roller.call("close")
+	await _settle(8)
+	if bool(roller.get("visible")):
+		_errors.append("closing the dice roller did not hide it")
+
+
 func _drive_shortcuts(app: Control) -> void:
 	if not app.has_method("open_shortcuts"):
 		_errors.append("the app did not expose the shortcut overlay")

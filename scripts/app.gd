@@ -20,6 +20,7 @@ const PlayerDisplayScreen := preload("res://scripts/screens/player_display.gd")
 const SHORTCUTS: Array[Dictionary] = [
 	{"keys": "1 … 0", "does": "Jump to a screen, in the order of the tabs"},
 	{"keys": "Ctrl + K", "does": "Find anything in the campaign"},
+	{"keys": "Ctrl + D", "does": "Roll dice for the things no rule covers"},
 	{"keys": "Ctrl + S", "does": "Save"},
 	{"keys": "M", "does": "Show or hide the uploaded map, on the City screen"},
 	{"keys": "?  or  F1", "does": "This panel"},
@@ -56,6 +57,7 @@ var _gm_notes_campaign_path := ""
 var _recovery_dialog: ConfirmationDialog
 var _search: SearchPalette
 var _shortcuts: ShortcutsOverlay
+var _dice: DiceRoller
 var _player_window_button: Button
 var _player_window: Window
 var _player_screen: Control
@@ -91,6 +93,11 @@ func _ready() -> void:
 
 	_shortcuts = ShortcutsOverlay.new()
 	add_child(_shortcuts)
+
+	# The roller is app-level rather than per-screen: the question it answers
+	# turns up in the middle of whatever the GM is already looking at.
+	_dice = DiceRoller.new()
+	add_child(_dice)
 	AppSettings.apply(get_tree())
 
 	Store.seed_library_if_empty()
@@ -468,6 +475,12 @@ func open_shortcuts() -> void:
 	_shortcuts.present(SHORTCUTS)
 
 
+## Open the dice roller. Unlike the search it does not need a campaign: rolling
+## a die is useful before the first save exists.
+func open_dice() -> void:
+	_dice.open()
+
+
 ## Open the campaign-wide search. Public so a shortcut, a button and a test can
 ## all reach it the same way.
 func open_search() -> void:
@@ -548,6 +561,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 	if key.ctrl_pressed and key.keycode == KEY_K:
 		open_search()
+		get_viewport().set_input_as_handled()
+		return
+
+	if key.ctrl_pressed and key.keycode == KEY_D:
+		open_dice()
 		get_viewport().set_input_as_handled()
 		return
 
