@@ -66,11 +66,7 @@ func _ready() -> void:
 	theme = UI.build_theme()
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 
-	var background := ColorRect.new()
-	background.color = UI.BG_PAGE
-	background.set_anchors_preset(Control.PRESET_FULL_RECT)
-	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(background)
+	add_child(UI.backdrop(UI.BG_PAGE))
 
 	var root := UI.vbox(0)
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -102,18 +98,39 @@ func _ready() -> void:
 
 
 func _build_header() -> Control:
+	# The bar is the one frame in the app that spans the whole window, so it is
+	# the one that carries the identity: square corners, an amber filament along
+	# its bottom edge, and a lit blue tick where the tabs begin.
 	var bar := PanelContainer.new()
-	bar.add_theme_stylebox_override("panel", UI.flat(UI.PANEL, UI.HAIRLINE, 1))
+	var bar_box := UI.chamfer(UI.PANEL, UI.HAIRLINE, 1, 0, 0.0, 0)
+	bar_box.bg_top = UI.PANEL.lightened(0.06)
+	bar_box.foot = Color(UI.AMBER, 0.55)
+	bar_box.foot_width = 1.0
+	bar_box.edge = Color(UI.ACCENT, 0.6)
+	bar_box.edge_length = 120.0
+	bar.add_theme_stylebox_override("panel", bar_box)
 	bar.custom_minimum_size = Vector2(0, 36)
 
 	var row := UI.hbox(UI.GAP_3)
 	row.add_theme_constant_override("margin_left", UI.GAP_3)
 	bar.add_child(UI.margins(row, 6))
 
-	var mark := Panel.new()
-	mark.custom_minimum_size = Vector2(7, 7)
+	# The brand mark: a blue hexagon with an amber diamond inside it.
+	var mark := UI.hbox(0)
 	mark.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	mark.add_theme_stylebox_override("panel", UI.flat(UI.ACCENT))
+	var badge := Control.new()
+	badge.custom_minimum_size = Vector2(11, 11)
+	badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var hex := UI.mark(Chrome.Mark.Kind.HEXAGON, UI.ACCENT, 11.0)
+	hex.set("filled", false)
+	hex.set_anchors_preset(Control.PRESET_FULL_RECT)
+	badge.add_child(hex)
+	var core := UI.mark(Chrome.Mark.Kind.DIAMOND, UI.AMBER, 5.0)
+	core.set_anchors_preset(Control.PRESET_CENTER)
+	core.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	core.grow_vertical = Control.GROW_DIRECTION_BOTH
+	badge.add_child(core)
+	mark.add_child(badge)
 	row.add_child(mark)
 
 	var brand := UI.display("Redline", 15)
@@ -169,7 +186,12 @@ func _build_header() -> Control:
 	_status_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(_status_label)
 
-	_dirty_label = UI.micro("Local library")
+	# "Unsaved · autosaved" is half again as wide as "Saved", and the bar is at
+	# its tightest exactly when that is the text it holds — a campaign open, ten
+	# tabs, and both window buttons showing. Left at its full width it pushed the
+	# Save button off the right-hand edge, so it elides like its neighbours.
+	_dirty_label = UI.elide(UI.micro("Local library"))
+	_dirty_label.custom_minimum_size.x = 76
 	_dirty_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(_dirty_label)
 
@@ -394,11 +416,7 @@ func _build_player_window() -> void:
 	)
 	add_child(_player_window)
 
-	var background := ColorRect.new()
-	background.color = UI.BG_DEEP
-	background.set_anchors_preset(Control.PRESET_FULL_RECT)
-	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_player_window.add_child(background)
+	_player_window.add_child(UI.backdrop(UI.BG_DEEP))
 
 	_player_screen = PlayerDisplayScreen.new()
 	_player_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -434,11 +452,7 @@ func _rebuild_gm_window_content() -> void:
 		if child != _gm_notes_screen:
 			child.queue_free()
 
-	var background := ColorRect.new()
-	background.color = UI.BG_PAGE
-	background.set_anchors_preset(Control.PRESET_FULL_RECT)
-	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_gm_window.add_child(background)
+	_gm_window.add_child(UI.backdrop(UI.BG_PAGE))
 
 	_gm_notes_screen = NotesBeatsScreen.new()
 	_gm_notes_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
