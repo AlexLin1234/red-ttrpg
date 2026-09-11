@@ -19,7 +19,8 @@ const RULES := {
 	## A week of downtime, in days, matching the Hustle's block.
 	"week_days": Economy.HUSTLE_DAYS,
 	"reputation_min": 0,
-	"reputation_max": 10,
+	# One ceiling, shared with the sheet that displays the track.
+	"reputation_max": CharacterRules.REPUTATION_MAX,
 	## HP back per day of rest, per point of BODY.
 	"rest_hp_per_body": 1,
 	## A successful Medtech check doubles what a day of rest is worth.

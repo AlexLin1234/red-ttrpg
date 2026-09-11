@@ -7,7 +7,7 @@ extends Control
 ## campaign's palette, which is where screen 1C reads them from.
 
 const TABS: PackedStringArray = [
-	"stats", "skills", "gear", "cyberware", "cover"
+	"stats", "skills", "lifepath", "gear", "cyberware", "cover"
 ]
 
 const MATERIAL_COLORS := {
@@ -195,6 +195,8 @@ func _refresh_sheet() -> void:
 			_build_stats_tab(body, character)
 		"skills":
 			_build_skills_tab(body, character)
+		"lifepath":
+			_build_lifepath_tab(body, character)
 		"gear":
 			_build_gear_tab(body, character)
 		"cyberware":
@@ -303,6 +305,47 @@ func _build_sheet_head(character: Dictionary) -> Control:
 	risk.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	hum_box.add_child(risk)
 	vitals.add_child(hum_box)
+
+	# Reputation sits beside HP and Humanity because it is the third number a
+	# character is read by, and until now it was the only one of the three with
+	# nowhere on the sheet to show it.
+	var reputation := clampi(int(character.get("reputation", 0)), 0, CharacterRules.REPUTATION_MAX)
+	var tier := CharacterRules.reputation_tier(reputation)
+	var rep_box := UI.vbox(1)
+	var rep_label := UI.micro("Reputation")
+	rep_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	rep_box.add_child(rep_label)
+	var rep_value := UI.display(
+		"%d / %d" % [reputation, CharacterRules.REPUTATION_MAX],
+		30,
+		UI.AMBER if reputation >= 7 else UI.TEXT_DISPLAY,
+	)
+	rep_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	rep_box.add_child(rep_value)
+	var tier_label := UI.micro(String(tier["label"]), UI.AMBER if reputation >= 7 else UI.MUTED)
+	tier_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	rep_box.add_child(tier_label)
+	var rep_row := UI.hbox(UI.GAP_1)
+	rep_row.alignment = BoxContainer.ALIGNMENT_END
+	for step in [-1, 1]:
+		var delta := int(step)
+		var nudge := UI.plain_button("−" if delta < 0 else "+")
+		nudge.custom_minimum_size.x = 26
+		nudge.tooltip_text = (
+			"Lower this character's Reputation by one"
+			if delta < 0
+			else "Raise this character's Reputation by one"
+		)
+		nudge.pressed.connect(
+			func() -> void:
+				Store.award_reputation(
+					String(Store.active_character().get("id", "")), delta, "GM adjustment"
+				)
+				_refresh_sheet()
+		)
+		rep_row.add_child(nudge)
+	rep_box.add_child(rep_row)
+	vitals.add_child(rep_box)
 
 	var column := UI.vbox(UI.GAP_2)
 	column.add_child(head)
@@ -870,6 +913,146 @@ func _show_roll_result(label: Label, result: Dictionary) -> void:
 		var success: Variant = result.get("success", null)
 		color = UI.ACCENT if success == null else (UI.GOOD if bool(success) else UI.ALERT_BRIGHT)
 	label.add_theme_color_override("font_color", color)
+
+
+## Where this character came from, and what has happened to them since.
+##
+## The tab is as much a GM tool as a player one: rolling a whole lifepath is the
+## fastest way to turn the fourth Booster in a squad into somebody with a reason
+## to be there. Every answer is editable, because the dice are a starting point
+## and the GM overrules them more often than not.
+func _build_lifepath_tab(body: VBoxContainer, character: Dictionary) -> void:
+	var tables := Store.lifepath_tables()
+	var character_id := String(character.get("id", ""))
+
+	var actions := UI.hbox(UI.GAP_2)
+	var roll_all := UI.primary_button(
+		"Re-roll everything" if Lifepath.is_written(character) else "Roll a lifepath"
+	)
+	roll_all.tooltip_text = (
+		"Roll every question at once. Undo puts back whatever was written before."
+	)
+	roll_all.pressed.connect(
+		func() -> void:
+			Store.roll_lifepath(character_id, Dice.SeededRandom.new(randi()))
+			_refresh_sheet()
+	)
+	actions.add_child(roll_all)
+	if Store.can_undo_campaign():
+		var undo := UI.plain_button("Undo %s" % Store.undo_label())
+		undo.pressed.connect(
+			func() -> void:
+				Store.undo_campaign()
+				_refresh_sheet()
+		)
+		actions.add_child(undo)
+	actions.add_child(UI.expand(Control.new(), true, false))
+	body.add_child(actions)
+
+	if not Lifepath.is_written(character):
+		var empty := UI.body(
+			(
+				"No history yet. Roll one, or write the answers in by hand — a lifepath is "
+				+ "a prompt, not a constraint."
+			),
+			12,
+			UI.MUTED,
+		)
+		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		empty.clip_text = false
+		body.add_child(empty)
+
+	var groups := {
+		"origin": "Origin",
+		"self": "Who they are",
+		"motivations": "What they care about",
+		"family": "Family",
+		"role": "%s" % String(character.get("role", "Role")),
+	}
+	var current_group := ""
+	for entry in tables.entries(character):
+		var field: Dictionary = entry
+		var group := String(field["group"])
+		if group != current_group:
+			current_group = group
+			body.add_child(UI.rule_line())
+			body.add_child(UI.micro(String(groups.get(group, group))))
+		body.add_child(_lifepath_row(character_id, field, tables))
+
+	body.add_child(UI.rule_line())
+	var events := Lifepath.life_events(character)
+	body.add_child(
+		_section_head("Life events", "%d of %d" % [events.size(), Lifepath.MAX_LIFE_EVENTS])
+	)
+	for index in events.size():
+		var row := UI.hbox(UI.GAP_2)
+		row.add_child(UI.mark(Chrome.Mark.Kind.DIAMOND, UI.AMBER, 9.0))
+		var text := UI.body(String(events[index]), 12)
+		UI.expand(text, true, false)
+		row.add_child(text)
+		var drop := UI.plain_button("Remove")
+		var at := index
+		drop.pressed.connect(
+			func() -> void:
+				Store.remove_life_event(character_id, at)
+				_refresh_sheet()
+		)
+		row.add_child(drop)
+		body.add_child(row)
+	if events.is_empty():
+		body.add_child(UI.micro("Nothing has happened to them yet.", UI.MUTED_DIM))
+	if events.size() < Lifepath.MAX_LIFE_EVENTS:
+		var another := UI.plain_button("Roll another year")
+		another.pressed.connect(
+			func() -> void:
+				Store.add_life_event(character_id, Dice.SeededRandom.new(randi()))
+				_refresh_sheet()
+		)
+		body.add_child(another)
+
+
+## One lifepath answer: its label, the text, and a die to re-roll just that one.
+func _lifepath_row(character_id: String, field: Dictionary, tables: Lifepath) -> Control:
+	var row := UI.hbox(UI.GAP_2)
+	var key := String(field["key"])
+
+	var label := UI.micro(String(field["label"]))
+	label.custom_minimum_size.x = 170
+	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(label)
+
+	var value := LineEdit.new()
+	value.text = String(field["text"])
+	value.placeholder_text = "—"
+	UI.expand(value, true, false)
+	value.text_submitted.connect(
+		func(text: String) -> void: Store.set_lifepath_field(character_id, key, text)
+	)
+	value.focus_exited.connect(
+		func() -> void: Store.set_lifepath_field(character_id, key, value.text)
+	)
+	row.add_child(value)
+
+	var reroll := UI.plain_button("Roll")
+	reroll.tooltip_text = "Re-roll this answer alone"
+	reroll.pressed.connect(
+		func() -> void:
+			var character := Store.character_by_id(character_id)
+			var role_key := String(
+				(character.get("lifepath", {}) as Dictionary).get(
+					"role", character.get("role_key", "")
+				)
+			)
+			var rows: Array = tables.general_rows(key)
+			if rows.is_empty():
+				rows = tables.role_tables(role_key).get(key, [])
+			var rolled := Lifepath.roll_row(rows, Dice.SeededRandom.new(randi()))
+			if rolled != "":
+				Store.set_lifepath_field(character_id, key, rolled)
+				_refresh_sheet()
+	)
+	row.add_child(reroll)
+	return row
 
 
 func _build_gear_tab(body: VBoxContainer, character: Dictionary) -> void:

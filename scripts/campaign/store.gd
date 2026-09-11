@@ -35,8 +35,13 @@ var active_location_id := ""
 var active_character_id := ""
 var active_architecture_id := ""
 var active_vehicle_id := ""
-var _month_undo: Array[Dictionary] = []
-var _month_redo: Array[Dictionary] = []
+# One snapshot stack for the campaign-level actions that are not part of an
+# encounter. Closing a month, awarding IP and awarding Reputation all rewrite
+# several sheets at once, which is exactly the shape that is miserable to put
+# back by hand; each pushes the whole campaign and roster before it acts. An
+# encounter has its own event-based undo and does not come through here.
+var _undo_stack: Array[Dictionary] = []
+var _redo_stack: Array[Dictionary] = []
 var _player_view: Dictionary = {}
 var _autosave_seconds := 0.0
 var _recovery: Dictionary = {}
@@ -124,8 +129,8 @@ func open(save_path: String) -> bool:
 	_normalize_downtime_state()
 	# A month snapshot only means anything against the campaign it was taken
 	# from, so neither stack survives a change of campaign.
-	_month_undo.clear()
-	_month_redo.clear()
+	_undo_stack.clear()
+	_redo_stack.clear()
 	edit_revision += 1
 	_autosave_seconds = 0.0
 	# An autosave newer than the file is the residue of a session that did not
@@ -167,8 +172,8 @@ func close() -> void:
 	active_architecture_id = ""
 	active_vehicle_id = ""
 	_recovery = {}
-	_month_undo.clear()
-	_month_redo.clear()
+	_undo_stack.clear()
+	_redo_stack.clear()
 
 
 func mark_dirty() -> void:
@@ -214,8 +219,7 @@ func close_month(requested_month: String = "") -> Dictionary:
 	if (campaign.get("lifestyle_closed_months", []) as Array).has(closing):
 		set_status("Month %s is already closed" % closing)
 		return {"ok": false, "error": "month already closed", "month": closing}
-	_month_undo.append({"campaign": campaign.duplicate(true), "roster": roster.duplicate(true)})
-	_month_redo.clear()
+	_snapshot("Month close")
 	var after := Lifestyle.next_month_clock(before)
 	campaign["clock"] = after
 	return _process_month_end(closing, Lifestyle.month_key(after))
@@ -249,36 +253,94 @@ func _process_month_end(closing_month: String, billed_month: String) -> Dictiona
 	return report
 
 
+## Record where the campaign stands before an action that rewrites sheets.
+##
+## [param label] is what the undo button will offer to take back, so it names
+## the action rather than describing it — "Month close", "IP award".
+func _snapshot(label: String) -> void:
+	_undo_stack.append(
+		{
+			"label": label,
+			"campaign": campaign.duplicate(true),
+			"roster": roster.duplicate(true),
+		}
+	)
+	_redo_stack.clear()
+
+
+func can_undo_campaign() -> bool:
+	return not _undo_stack.is_empty()
+
+
+func can_redo_campaign() -> bool:
+	return not _redo_stack.is_empty()
+
+
+## What undo would take back, for the button that offers it.
+func undo_label() -> String:
+	if _undo_stack.is_empty():
+		return ""
+	return String((_undo_stack.back() as Dictionary).get("label", ""))
+
+
+func redo_label() -> String:
+	if _redo_stack.is_empty():
+		return ""
+	return String((_redo_stack.back() as Dictionary).get("label", ""))
+
+
+func undo_campaign() -> bool:
+	if not can_undo_campaign():
+		return false
+	var snapshot: Dictionary = _undo_stack.pop_back()
+	_redo_stack.append(
+		{
+			"label": String(snapshot.get("label", "")),
+			"campaign": campaign.duplicate(true),
+			"roster": roster.duplicate(true),
+		}
+	)
+	campaign = snapshot["campaign"]
+	roster = snapshot["roster"]
+	mark_dirty()
+	set_status("%s undone" % String(snapshot.get("label", "Action")))
+	return true
+
+
+func redo_campaign() -> bool:
+	if not can_redo_campaign():
+		return false
+	var snapshot: Dictionary = _redo_stack.pop_back()
+	_undo_stack.append(
+		{
+			"label": String(snapshot.get("label", "")),
+			"campaign": campaign.duplicate(true),
+			"roster": roster.duplicate(true),
+		}
+	)
+	campaign = snapshot["campaign"]
+	roster = snapshot["roster"]
+	mark_dirty()
+	set_status("%s redone" % String(snapshot.get("label", "Action")))
+	return true
+
+
+# The month keeps its own names because the City screen asks about the month
+# rather than about the stack.
 func can_undo_month() -> bool:
-	return not _month_undo.is_empty()
+	return can_undo_campaign()
 
 
 func can_redo_month() -> bool:
-	return not _month_redo.is_empty()
+	return can_redo_campaign()
 
 
 func undo_month() -> bool:
-	if not can_undo_month():
-		return false
-	_month_redo.append({"campaign": campaign.duplicate(true), "roster": roster.duplicate(true)})
-	var snapshot: Dictionary = _month_undo.pop_back()
-	campaign = snapshot["campaign"]
-	roster = snapshot["roster"]
-	mark_dirty()
-	set_status("Month close undone")
-	return true
+	return undo_campaign()
 
 
 func redo_month() -> bool:
-	if not can_redo_month():
-		return false
-	_month_undo.append({"campaign": campaign.duplicate(true), "roster": roster.duplicate(true)})
-	var snapshot: Dictionary = _month_redo.pop_back()
-	campaign = snapshot["campaign"]
-	roster = snapshot["roster"]
-	mark_dirty()
-	set_status("Month close redone")
-	return true
+	return redo_campaign()
 
 
 func save() -> bool:
@@ -349,8 +411,8 @@ func recover() -> bool:
 	dirty = true
 	_recovery = {}
 	_normalize_downtime_state()
-	_month_undo.clear()
-	_month_redo.clear()
+	_undo_stack.clear()
+	_redo_stack.clear()
 	edit_revision += 1
 	publish_player_view({})
 	set_status("Recovered from autosave · unsaved")
@@ -645,8 +707,8 @@ func restore_to(id: String) -> bool:
 		String((characters_list[0] as Dictionary)["id"]) if not characters_list.is_empty() else ""
 	)
 	_normalize_downtime_state()
-	_month_undo.clear()
-	_month_redo.clear()
+	_undo_stack.clear()
+	_redo_stack.clear()
 	publish_player_view({})
 	set_status("Restored · unsaved")
 	campaign_opened.emit()
@@ -838,6 +900,150 @@ func perform_hustles(character_ids: Array, rng: Dice.RandomSource) -> Dictionary
 ## A vehicle parked on a board is cover with a wreck value, so it belongs in the
 ## same palette rather than in a system of its own: line of sight, ablation and
 ## the cover prompt all then work on it unchanged.
+# -- lifepath, IP and reputation ------------------------------------------------
+
+
+## The Lifepath tables this campaign rolls against.
+##
+## Campaign-held like the combat tables, so a GM running a game somewhere other
+## than Night City can replace the questions as well as the answers, and a
+## campaign carries its own history-making with it.
+func lifepath_tables() -> Lifepath:
+	return Lifepath.new(campaign.get("lifepath_tables", LifepathDefault.document()))
+
+
+## Roll a whole history for one character.
+##
+## Returns the lifepath written. Snapshotted rather than event-undone because a
+## re-roll replaces every field at once, and the thing a GM wants back is the
+## sheet as it stood.
+func roll_lifepath(character_id: String, rng: Dice.RandomSource) -> Dictionary:
+	var character := character_by_id(character_id)
+	if character.is_empty():
+		return {}
+	_snapshot("Lifepath roll")
+	var rolled := lifepath_tables().roll(String(character.get("role_key", "")), rng)
+	Lifepath.apply(
+		character, Lifepath.write_event(character_id, character.get("lifepath", {}), rolled)
+	)
+	(campaign.get("session_log", []) as Array).push_front(
+		{
+			"session": int(campaign.get("sessions", 0)),
+			"text": "Rolled a lifepath for %s" % String(character.get("name", "a character")),
+		}
+	)
+	mark_dirty()
+	set_status("Lifepath rolled for %s" % String(character.get("name", "")))
+	return rolled
+
+
+## Hand-write one answer. The GM overrules the dice more often than they roll.
+func set_lifepath_field(character_id: String, key: String, text: String) -> bool:
+	var character := character_by_id(character_id)
+	if character.is_empty():
+		return false
+	var lifepath: Dictionary = character.get("lifepath", {})
+	var before := String(lifepath.get(key, ""))
+	if before == text:
+		return false
+	Lifepath.apply(character, Lifepath.set_field_event(character_id, key, before, text))
+	mark_dirty()
+	return true
+
+
+## Add one more year to a history.
+func add_life_event(character_id: String, rng: Dice.RandomSource) -> String:
+	var character := character_by_id(character_id)
+	if character.is_empty():
+		return ""
+	if Lifepath.life_events(character).size() >= Lifepath.MAX_LIFE_EVENTS:
+		set_status("That is as much history as a sheet holds")
+		return ""
+	var text := lifepath_tables().roll_life_event(rng)
+	if text == "":
+		return ""
+	Lifepath.apply(character, Lifepath.add_event_event(character_id, text))
+	mark_dirty()
+	return text
+
+
+func remove_life_event(character_id: String, index: int) -> bool:
+	var character := character_by_id(character_id)
+	if character.is_empty():
+		return false
+	var lifepath: Dictionary = character.get("lifepath", {})
+	var events: Array = lifepath.get("events", [])
+	if index < 0 or index >= events.size():
+		return false
+	events.remove_at(index)
+	lifepath["events"] = events
+	character["lifepath"] = lifepath
+	mark_dirty()
+	return true
+
+
+## Give out Improvement Points.
+##
+## IP had a sink and no source: it could be spent on a skill or a Role rank, but
+## the only way to grant it was to type a number into one sheet at a time. This
+## is the moment it is actually handed out — end of session, to everyone who was
+## at the table — and it goes in the log so a GM can see what they gave and when.
+func award_improvement_points(amount: int, character_ids: PackedStringArray) -> Dictionary:
+	if amount == 0 or character_ids.is_empty():
+		return {"ok": false, "error": "nothing to award"}
+	_snapshot("IP award")
+	var names := PackedStringArray()
+	for character_id in character_ids:
+		var character := character_by_id(character_id)
+		if character.is_empty():
+			continue
+		character["improvement_points"] = maxi(
+			0, int(character.get("improvement_points", 0)) + amount
+		)
+		names.append(String(character.get("name", "")))
+	if names.is_empty():
+		_undo_stack.pop_back()
+		return {"ok": false, "error": "none of those characters are on the roster"}
+	var text := (
+		"Awarded %d IP to %s" % [amount, ", ".join(names)]
+		if amount > 0
+		else "Took %d IP back from %s" % [-amount, ", ".join(names)]
+	)
+	(campaign.get("session_log", []) as Array).push_front(
+		{"session": int(campaign.get("sessions", 0)), "text": text}
+	)
+	mark_dirty()
+	set_status(text)
+	return {"ok": true, "amount": amount, "names": names}
+
+
+## Move a character's Reputation, and say why.
+##
+## Reputation was read by a Facedown and written by nothing, so it never moved.
+## It moves here, and the reason goes into the session log beside it, because a
+## number that changed for a forgotten reason is worse than no number.
+func award_reputation(character_id: String, delta: int, reason: String) -> Dictionary:
+	var character := character_by_id(character_id)
+	if character.is_empty():
+		return {"ok": false, "error": "no such character"}
+	if delta == 0:
+		return {"ok": false, "error": "nothing to award"}
+	_snapshot("Reputation award")
+	var before := clampi(int(character.get("reputation", 0)), 0, CharacterRules.REPUTATION_MAX)
+	var after := clampi(before + delta, 0, CharacterRules.REPUTATION_MAX)
+	character["reputation"] = after
+	var name := String(character.get("name", ""))
+	var text := "%s: Reputation %d → %d" % [name, before, after]
+	if reason.strip_edges() != "":
+		text += " · %s" % reason.strip_edges()
+	(campaign.get("session_log", []) as Array).push_front(
+		{"session": int(campaign.get("sessions", 0)), "text": text}
+	)
+	mark_dirty()
+	set_status(text)
+	return {"ok": true, "before": before, "after": after}
+
+
 func cover_palette() -> Array:
 	var palette: Array = (campaign.get("cover_palette", []) as Array).duplicate(true)
 	for entry in vehicles():

@@ -166,7 +166,10 @@ static func _suppression(h: Harness) -> void:
 	var weak := Resolver.AttackRequest.new(
 		"solo", _target(0), smg, 1, 5.0, 30, "body", "suppressive", -1, 0
 	)
-	var missed := Resolver.resolve_attack(weak, tables, Dice.FixedRandom.new([1]))
+	# A 1 fumbles, and a fumble rolls a second die to subtract — so a one-value
+	# script runs dry inside roll_check and the check below was passing on a
+	# number that came from nowhere.
+	var missed := Resolver.resolve_attack(weak, tables, Dice.FixedRandom.new([1, 3]))
 	h.check(not missed.hit, "the burst went wide")
 
 
@@ -200,7 +203,7 @@ static func _area(h: Harness) -> void:
 		Resolver.AreaTarget.new(Resolver.TargetState.new("near", 40, 40, {"body": 0}, 0), 1.0),
 	]
 	var stray := Resolver.resolve_area_attack(
-		short_throw, standing, 4.0, tables, Dice.FixedRandom.new([1, 2, 3, 3, 3, 3, 3, 3])
+		short_throw, standing, 4.0, tables, Dice.FixedRandom.new([1, 2, 3, 3, 3, 3, 3, 3, 3, 3])
 	)
 	h.check(not stray.on_target, "the throw missed")
 	h.check(stray.scatter_m > 0, "it landed somewhere else")

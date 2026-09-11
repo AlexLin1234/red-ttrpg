@@ -86,6 +86,23 @@ const BASIC_SKILLS: PackedStringArray = [
 ]
 
 # Complete Package character generation limits and Improvement Point costs.
+## The top of the Reputation track, and what each step of it is worth.
+##
+## Reputation was a number a Facedown read and nothing ever wrote, so it sat at
+## whatever it was created with for the life of a campaign. The tiers give it
+## something to mean between Facedowns: they are what the GM reads out when a
+## stranger recognises somebody, and what the Fixer prices a job against.
+const REPUTATION_MAX := 10
+
+const REPUTATION_TIERS: Array[Dictionary] = [
+	{"min": 0, "label": "Unknown", "note": "Nobody has heard of you."},
+	{"min": 1, "label": "Known", "note": "Your own block knows the name."},
+	{"min": 3, "label": "Known in the district", "note": "The neighbourhood knows the face."},
+	{"min": 5, "label": "Known in the city", "note": "Fixers take the call."},
+	{"min": 7, "label": "Notorious", "note": "Rooms change when you enter them."},
+	{"min": 9, "label": "Legendary", "note": "People argue about which stories are true."},
+]
+
 const STAT_POINT_BUDGET := 62
 const SKILL_POINT_BUDGET := 86
 const CREATION_STAT_MIN := 2
@@ -206,6 +223,17 @@ const SOLO_ALLOCATIONS := {
 }
 
 
+## What a Reputation score reads as. Always returns a tier; the bottom one
+## covers a character nobody has heard of, which is most of them.
+static func reputation_tier(value: int) -> Dictionary:
+	var found: Dictionary = REPUTATION_TIERS[0]
+	for entry in REPUTATION_TIERS:
+		var tier: Dictionary = entry
+		if value >= int(tier["min"]):
+			found = tier
+	return found
+
+
 static func role(key: String) -> Dictionary:
 	for entry in ROLES:
 		if String(entry["key"]) == key:
@@ -248,6 +276,9 @@ static func ensure_character(character: Dictionary) -> void:
 	# LUCK is a stat that now buys something, so every sheet carries a pool. One
 	# that has never spent a point starts with all of them.
 	Luck.ensure(character)
+	# Where they came from. Shaped here so a sheet written before lifepaths
+	# existed gains an empty one rather than a missing key.
+	Lifepath.ensure(character)
 	# The Humanity band is derived rather than stored, for the same reason the
 	# wound state is: several screens read it.
 	Humanity.reconcile(character)
