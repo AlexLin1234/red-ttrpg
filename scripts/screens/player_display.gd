@@ -77,6 +77,8 @@ func _build_stage() -> Control:
 	_viewport.transparent_bg = false
 	container.add_child(_viewport)
 
+	frame.add_child(UI.reticle())
+
 	_board = IsoBoard.new()
 	_viewport.add_child(_board)
 	return frame

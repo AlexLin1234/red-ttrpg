@@ -345,6 +345,8 @@ scripts/
                      forge, markets, assistant, player display
   assistant/         the client that runs and calls the local helper
   ui/theme.gd        palette, fonts, widget factories
+  ui/chrome.gd       the drawn chrome: chamfered frames, lit rules, the
+                     backdrop, the board reticle, the notched meters
 assistant/           the local rulebook helper: extraction, index, vault, agent
 tests/               headless runner and suites
 tests/assistant/     the helper's own suite, run by pytest
