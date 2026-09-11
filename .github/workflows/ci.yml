@@ -27,7 +27,7 @@ jobs:
     name: Python suite
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
@@ -59,7 +59,7 @@ jobs:
     name: GDScript suite
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # The headless binary still links against these; a bare runner image does
       # not always carry them.
@@ -120,7 +120,7 @@ jobs:
     name: Ratchets (advisory)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
