@@ -20,6 +20,7 @@ const SUITES := [
 	preload("res://tests/test_progression.gd"),
 	preload("res://tests/test_dice_expressions.gd"),
 	preload("res://tests/test_vehicle_board.gd"),
+	preload("res://tests/test_rules_documents.gd"),
 	preload("res://tests/test_humanity.gd"),
 	preload("res://tests/test_player_view.gd"),
 	preload("res://tests/test_netrun.gd"),

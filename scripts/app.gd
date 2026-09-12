@@ -14,6 +14,7 @@ const AssistantScreen := preload("res://scripts/screens/assistant.gd")
 const NetrunScreen := preload("res://scripts/screens/netrun.gd")
 const VehiclesScreen := preload("res://scripts/screens/vehicles.gd")
 const PlayerDisplayScreen := preload("res://scripts/screens/player_display.gd")
+const RulesScreen := preload("res://scripts/screens/rules.gd")
 
 ## The keys, in one place, so the overlay that lists them cannot drift from
 ## what they do.
@@ -38,6 +39,7 @@ const SCREENS := [
 	{"id": "market", "label": "Market"},
 	{"id": "night_market", "label": "Night Market"},
 	{"id": "assistant", "label": "Assistant"},
+	{"id": "rules", "label": "Rules"},
 ]
 
 var _current := "library"
@@ -156,11 +158,24 @@ func _build_header() -> Control:
 	UI.expand(_title_label, true, false)
 	row.add_child(_title_label)
 
+	# The tab strip is the widest thing in the bar and the only part of it that
+	# grows when a screen is added. It expands to take the slack and compresses
+	# when there is none, so an eleventh tab shortens the labels rather than
+	# pushing the whole bar wider than the window — which is what happened the
+	# last two times a screen was added.
 	var nav := UI.hbox(1)
+	nav.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	nav.size_flags_stretch_ratio = 8.0
 	row.add_child(nav)
 	for index in SCREENS.size():
 		var entry: Dictionary = SCREENS[index]
-		var button := UI.tab_button("%s %d" % [entry["label"], index + 1], index == 0)
+		# Only the first ten have a number key to jump to them.
+		var label := (
+			"%s %d" % [entry["label"], index + 1] if index < 10 else String(entry["label"])
+		)
+		var button := UI.tab_button(label, index == 0)
+		UI.expand(button, true, false)
+		button.custom_minimum_size.x = 52
 		button.pressed.connect(_show.bind(String(entry["id"])))
 		nav.add_child(button)
 		_nav_buttons[String(entry["id"])] = button
@@ -225,7 +240,7 @@ func _build_header() -> Control:
 func _show(screen_id: String) -> void:
 	# The Assistant opens without a campaign so its library and key can be set up
 	# before the first save exists; its Ask tab is the part that needs one.
-	if screen_id not in ["library", "workshop", "assistant"] and not Store.is_open():
+	if screen_id not in ["library", "workshop", "assistant", "rules"] and not Store.is_open():
 		return
 	_current = screen_id
 	for id in _nav_buttons:
@@ -313,6 +328,8 @@ func _build_screen(screen_id: String) -> Control:
 			return night
 		"assistant":
 			return AssistantScreen.new()
+		"rules":
+			return RulesScreen.new()
 		_:
 			return Control.new()
 
@@ -546,7 +563,9 @@ func _refresh_header() -> void:
 			_player_window.hide()
 
 	for id in _nav_buttons:
-		(_nav_buttons[id] as Button).disabled = id not in ["library", "workshop"] and not Store.is_open()
+		(_nav_buttons[id] as Button).disabled = (
+			id not in ["library", "workshop", "rules"] and not Store.is_open()
+		)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:

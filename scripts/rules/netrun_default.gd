@@ -152,8 +152,15 @@ static func ice(name: String) -> Dictionary:
 
 
 ## Everything a campaign that has never seen the Netrun screen needs to have one.
+## The whole of what a campaign may replace: the ICE, the floor kinds, and the
+## difficulty bands a rolled architecture is built from.
 static func document() -> Dictionary:
-	return {"ice": ICE.duplicate(true), "source": "homebrew placeholder — not book data"}
+	return {
+		"ice": ICE.duplicate(true),
+		"floor_kinds": FLOOR_KINDS.duplicate(true),
+		"difficulties": DIFFICULTIES.duplicate(true),
+		"source": "homebrew placeholder — not book data",
+	}
 
 
 ## Roll an architecture the GM can then edit.
@@ -161,8 +168,16 @@ static func document() -> Dictionary:
 ## A generated ladder is a starting point, not a result: it alternates doors and
 ## defenders so the shape is immediately playable, and every floor is editable
 ## afterwards. The last floor is always worth reaching.
+## Kept for the campaigns that never replaced anything; the reader's own
+## generator is what the screen calls, so a rolled ladder uses whichever
+## difficulty bands and floor kinds are actually in force.
 static func generate_architecture(name: String, difficulty_key: String, rng: Dice.RandomSource) -> Dictionary:
-	var spec := difficulty(difficulty_key)
+	return NetrunTables.new(document()).generate_architecture(name, difficulty_key, rng)
+
+
+static func _generate(
+	name: String, spec: Dictionary, rng: Dice.RandomSource, kind_label: Callable
+) -> Dictionary:
 	var depth := int(spec["floors"])
 	var dv := int(spec["dv"])
 	var pool: Array = spec["ice"]
@@ -191,7 +206,7 @@ static func generate_architecture(name: String, difficulty_key: String, rng: Dic
 				{
 					"id": floor_id,
 					"kind": kind,
-					"name": String(floor_kind(kind)["label"]),
+					"name": String(kind_label.call(kind)),
 					"level": level,
 					"branch": 0,
 					"dv": dv,

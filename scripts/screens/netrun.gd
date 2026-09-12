@@ -83,7 +83,7 @@ func _build_architectures() -> Control:
 	column.add_child(UI.rule_line())
 	var tools := UI.vbox(UI.GAP_2)
 	var difficulty := OptionButton.new()
-	for entry in NetrunDefault.DIFFICULTIES:
+	for entry in Store.netrun_tables().difficulties():
 		var spec: Dictionary = entry
 		difficulty.add_item("%s · %d floors" % [String(spec["label"]), int(spec["floors"])])
 		difficulty.set_item_metadata(difficulty.item_count - 1, String(spec["key"]))
@@ -104,9 +104,9 @@ func _build_architectures() -> Control:
 
 ## Roll a new architecture into the campaign and select it.
 func generate_architecture(difficulty_key: String) -> void:
-	var spec := NetrunDefault.difficulty(difficulty_key)
+	var spec := Store.netrun_tables().difficulty(difficulty_key)
 	var name := "%s Architecture %d" % [String(spec["label"]), Store.architectures().size() + 1]
-	var rolled := NetrunDefault.generate_architecture(
+	var rolled := Store.netrun_tables().generate_architecture(
 		name, difficulty_key, Dice.SeededRandom.new(Time.get_ticks_usec())
 	)
 	Store.add_architecture(rolled)
@@ -161,7 +161,7 @@ func _refresh_architectures() -> void:
 					"%s · %d floors"
 					% [
 						String(
-							NetrunDefault.difficulty(String(architecture.get("difficulty", "standard")))[
+							Store.netrun_tables().difficulty(String(architecture.get("difficulty", "standard")))[
 								"label"
 							]
 						),
@@ -298,7 +298,7 @@ func _floor_card(floor_entry: Dictionary) -> Control:
 		head.add_child(UI.value("◆", 12, UI.ACCENT))
 	box.add_child(head)
 
-	var detail := String(NetrunDefault.floor_kind(kind)["label"]) if revealed else "Not scouted"
+	var detail := String(Store.netrun_tables().floor_kind(kind)["label"]) if revealed else "Not scouted"
 	if revealed and kind == "ice":
 		detail += " · REZ %d/%d" % [int(floor_entry.get("rez", 0)), int(floor_entry.get("max_rez", 0))]
 	elif revealed:
@@ -614,7 +614,7 @@ func _refresh_editor() -> void:
 	if String(selected["kind"]) == "ice":
 		var picker := OptionButton.new()
 		picker.clip_text = true
-		var names := NetrunDefault.ice_names()
+		var names := Store.netrun_tables().ice_names()
 		for index in names.size():
 			picker.add_item(String(names[index]))
 			picker.set_item_metadata(index, String(names[index]))
@@ -634,7 +634,7 @@ func _refresh_editor() -> void:
 				_refresh()
 		)
 		_editor_box.add_child(picker)
-		var profile := NetrunDefault.ice(String(selected.get("ice_id", "Watchdog")))
+		var profile := Store.netrun_tables().ice(String(selected.get("ice_id", "Watchdog")))
 		var effect := UI.body(String(profile["effect"]), 11, UI.MUTED)
 		effect.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_editor_box.add_child(effect)

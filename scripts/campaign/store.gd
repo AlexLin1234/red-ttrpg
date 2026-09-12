@@ -900,7 +900,95 @@ func perform_hustles(character_ids: Array, rng: Dice.RandomSource) -> Dictionary
 ## A vehicle parked on a board is cover with a wreck value, so it belongs in the
 ## same palette rather than in a system of its own: line of sight, ablation and
 ## the cover prompt all then work on it unchanged.
-## Put a garaged vehicle on the board, with somebody behind the wheel.
+# -- rules documents ------------------------------------------------------------
+#
+# Redline ships no book data. Every table a fight resolves against is a homebrew
+# placeholder, and the promise all along was that a GM who owns the book
+# replaces it. The promise was not kept: "tables" was never a campaign key, so
+# the read below could only ever fall through to the default and every fight in
+# every campaign resolved against numbers nobody had checked.
+#
+# Each document is campaign-held rather than per-install, because two campaigns
+# may be run under two different sets of house rules, and a campaign carries its
+# own rules with it when it moves between machines.
+
+
+## Which documents a campaign can carry, and what supplies them when it does not.
+const RULES_DOCUMENTS := {
+	"tables": "combat tables",
+	"netrun_tables": "NET architecture",
+	"lifepath_tables": "lifepath",
+}
+
+
+static func default_rules_document(key: String) -> Dictionary:
+	match key:
+		"netrun_tables":
+			return NetrunDefault.document()
+		"lifepath_tables":
+			return LifepathDefault.document()
+		_:
+			return TablesDefault.document()
+
+
+## The document in force, which is the campaign's own when it has one.
+func rules_document(key := "tables") -> Dictionary:
+	var carried: Variant = campaign.get(key, {})
+	if carried is Dictionary and not (carried as Dictionary).is_empty():
+		return carried
+	return default_rules_document(key)
+
+
+## Whether this campaign has replaced a document with its own.
+func rules_are_custom(key := "tables") -> bool:
+	var carried: Variant = campaign.get(key, {})
+	return carried is Dictionary and not (carried as Dictionary).is_empty()
+
+
+## The combat tables every encounter resolves against.
+func rules_tables() -> Tables:
+	return Tables.new(rules_document("tables"))
+
+
+func netrun_tables() -> NetrunTables:
+	return NetrunTables.new(rules_document("netrun_tables"))
+
+
+func lifepath_tables() -> Lifepath:
+	return Lifepath.new(rules_document("lifepath_tables"))
+
+
+## Replace a document, refusing one the rules cannot read.
+##
+## Validation is not optional here: a table with a missing range band does not
+## fail when it is saved, it fails in the middle of a fight, on the one shot
+## that happened to land in the gap.
+func set_rules_document(key: String, document: Dictionary) -> Dictionary:
+	if not RULES_DOCUMENTS.has(key):
+		return {"ok": false, "problems": PackedStringArray(["%s is not a rules document" % key])}
+	if key == "tables":
+		var problems := Tables.validate(document)
+		if not problems.is_empty():
+			return {"ok": false, "problems": problems}
+	_snapshot("Rules edit")
+	campaign[key] = document.duplicate(true)
+	mark_dirty()
+	set_status("%s updated" % String(RULES_DOCUMENTS[key]).capitalize())
+	return {"ok": true, "problems": PackedStringArray()}
+
+
+## Hand a document back to the homebrew placeholders it started as.
+func reset_rules_document(key: String) -> bool:
+	if not campaign.has(key):
+		return false
+	_snapshot("Rules reset")
+	campaign.erase(key)
+	mark_dirty()
+	set_status("%s back to the built-in placeholders" % String(RULES_DOCUMENTS.get(key, key)))
+	return true
+
+
+## Put a garaged vehicle on the board, with somebody behind the wheel.## Put a garaged vehicle on the board, with somebody behind the wheel.
 ##
 ## The vehicle joins the roster as an actor rather than as a fourth kind of
 ## thing, so every part of the encounter that already knows how to shoot at a
@@ -944,15 +1032,6 @@ func return_vehicle(actor_entry: Dictionary) -> bool:
 
 
 # -- lifepath, IP and reputation ------------------------------------------------
-
-
-## The Lifepath tables this campaign rolls against.
-##
-## Campaign-held like the combat tables, so a GM running a game somewhere other
-## than Night City can replace the questions as well as the answers, and a
-## campaign carries its own history-making with it.
-func lifepath_tables() -> Lifepath:
-	return Lifepath.new(campaign.get("lifepath_tables", LifepathDefault.document()))
 
 
 ## Roll a whole history for one character.

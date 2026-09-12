@@ -91,6 +91,17 @@ func _ready() -> void:
 	await _drive_dice(app)
 	await _drive_assistant(app)
 
+	# The Rules screen: the tables every fight resolves against, and the only
+	# place a GM who owns the book can replace them.
+	app.call("_show", "rules")
+	await _settle(25)
+	await _shoot("1k-rules")
+	var rules: Node = app.get("_screen")
+	if rules != null and rules.has_method("show_group"):
+		rules.call("show_group", "weapons")
+		await _settle(15)
+		await _shoot("1k-rules-weapons")
+
 	app.call("_show", "forge")
 	await _settle(30)
 	await _shoot("1d-forge")

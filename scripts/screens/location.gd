@@ -127,7 +127,9 @@ func _build_encounter(location: Dictionary) -> void:
 			actors[String(entry["id"])] = input
 	if actors.is_empty():
 		return
-	var tables := Tables.new(Store.campaign.get("tables", TablesDefault.document()))
+	# The campaign's own tables when it has replaced them, the built-in
+	# placeholders when it has not. This used to read a key nothing ever wrote.
+	var tables := Store.rules_tables()
 	_encounter = Encounter.new(tables, actors)
 	_snapshot = _encounter.snapshot()
 	var units: Array = location.get("units", [])

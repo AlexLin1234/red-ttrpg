@@ -457,9 +457,15 @@ static func field_row(label: String, value_text: String, value_color := TEXT) ->
 
 
 ## A button styled as a tab in a tab strip.
+##
+## Tabs clip rather than push: a strip of them is the widest thing in the header
+## bar, and a bar that cannot fit its tabs should give up letters rather than
+## grow wider than the window and carry the Save button off the edge with it.
 static func tab_button(text: String, selected: bool) -> Button:
 	var button := Button.new()
 	button.text = _letterspace(text.to_upper())
+	button.clip_text = true
+	button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	button.toggle_mode = true
 	button.button_pressed = selected
 	button.focus_mode = Control.FOCUS_NONE
