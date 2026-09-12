@@ -105,6 +105,12 @@ func on_hidden() -> void:
 		_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 
 
+## The fight goes with the screen it was built for.
+func _exit_tree() -> void:
+	if Store.live_encounter() == _encounter:
+		Store.clear_encounter()
+
+
 ## A different board entirely shares nothing with this one — not the deck, not
 ## the units, and certainly not the fight — so it is built again from scratch.
 func wants_rebuild() -> bool:
@@ -131,6 +137,9 @@ func _build_encounter(location: Dictionary) -> void:
 	# placeholders when it has not. This used to read a key nothing ever wrote.
 	var tables := Store.rules_tables()
 	_encounter = Encounter.new(tables, actors)
+	# Published so the Netrun screen can ask whose turn it is: a netrunner runs
+	# the NET during the fight, on their own initiative, not beside it.
+	Store.publish_encounter(_encounter, _location_id)
 	_snapshot = _encounter.snapshot()
 	var units: Array = location.get("units", [])
 	_selected_unit = String((units[0] as Dictionary)["id"]) if not units.is_empty() else ""
@@ -1452,6 +1461,8 @@ func _sync_units() -> void:
 func _refresh() -> void:
 	if _encounter == null:
 		return
+	# The turn may have moved, and the Netrun screen reads whose it is from here.
+	Store.live_encounter_changed.emit()
 	_refresh_header()
 	_refresh_initiative()
 	_refresh_selected()

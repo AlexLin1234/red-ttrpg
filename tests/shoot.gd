@@ -526,11 +526,20 @@ func _drive_netrun(app: Control) -> void:
 
 	screen.call("jack_in", netrunner, 6)
 	await _settle(12)
-	screen.call("perform", "pathfinder", "")
+
+	# A fight is running by this point, so the run binds to it and the rail
+	# waits for the netrunner's turn. That is the state worth a picture.
+	var bound: bool = screen.call("_turn_gate")["ok"] == false
+	if bound:
+		await _shoot("1g-netrun-waiting")
+
+	# Then the ladder itself. The GM waives turn order to walk it here, which is
+	# the override the screen offers for exactly this — a ruling a table makes.
+	screen.call("perform", "pathfinder", "", true)
 	await _settle(8)
-	screen.call("perform", "move", "")
+	screen.call("perform", "move", "", true)
 	await _settle(8)
-	screen.call("perform", "backdoor", "")
+	screen.call("perform", "backdoor", "", true)
 	await _settle(12)
 	await _shoot("1g-netrun")
 

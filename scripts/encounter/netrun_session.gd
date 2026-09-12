@@ -16,6 +16,13 @@ var events: Array[Dictionary] = []
 var turn := 1
 var order: Array[String] = []
 
+## The board unit this runner is standing on the deck as, when the run is being
+## made during a fight rather than on its own.
+##
+## Empty means an unbound run — a netrunner working alone, which is the other
+## half of how the NET gets used and stays exactly as it was.
+var bound_actor_id := ""
+
 var _rng: Dice.RandomSource
 
 
@@ -131,6 +138,41 @@ func is_over() -> bool:
 
 
 ## Whether this action can be taken right now, and why not when it cannot.
+## Tie this run to a unit standing in a fight.
+##
+## In the book the netrunner is in the room: they spend their NET Actions on
+## their own initiative while the Solo is shooting, and the round the fight is
+## in is the round the run is in. Bound, the run stops keeping a turn counter of
+## its own and reads the encounter's instead.
+func bind_to_actor(actor_id: String) -> void:
+	bound_actor_id = actor_id
+
+
+func is_bound() -> bool:
+	return bound_actor_id != ""
+
+
+## Why the runner cannot act right now, when the answer is the fight rather
+## than the architecture.
+##
+## Returned in the same shape every other refusal in the app is written in, so
+## the screen prints it as it stands. Waiting for your turn is a ruling a table
+## can waive — a GM who wants the runner to act out of order says so — which is
+## why it is offered as an override rather than enforced.
+func turn_block(encounter_turn_actor: String, round_number: int) -> Dictionary:
+	if not is_bound():
+		return {"ok": true, "reason": "", "override": false}
+	if round_number <= 0:
+		return {
+			"ok": false,
+			"reason": "The fight has not rolled initiative yet",
+			"override": true,
+		}
+	if encounter_turn_actor != bound_actor_id:
+		return {"ok": false, "reason": "It is not the netrunner's turn", "override": true}
+	return {"ok": true, "reason": "", "override": false}
+
+
 func availability(action_key: String) -> Dictionary:
 	if is_over():
 		return {"ok": false, "reason": Netrun.run_state_label(run_state())}
@@ -297,6 +339,40 @@ func set_alert(raised: bool) -> void:
 
 
 ## End the runner's turn and hand back a full budget of NET Actions.
+## Refresh the runner's NET Actions for a new round.
+##
+## A bound run does not end its own turn — the fight does. Called when the
+## encounter comes back round to the runner, so their NET Actions arrive with
+## their turn rather than on a button of their own.
+func begin_bound_turn(round_number: int) -> void:
+	if not is_bound() or round_number <= turn:
+		return
+	turn = round_number
+	var spent := (
+		Netrun.actions_per_turn(int(runner()["interface"])) - int(runner()["actions_left"])
+	)
+	var turn_events: Array[Dictionary] = []
+	if spent > 0:
+		turn_events.append({"kind": "net_action_restored", "amount": spent})
+	session.record({"kind": "end_net_turn"}, turn_events)
+	revision += 1
+	events = turn_events.duplicate(true)
+	card = {
+		"kind": "net_turn",
+		"title": "ROUND %d" % round_number,
+		"attacker": String(runner()["name"]),
+		"lines": PackedStringArray(
+			[
+				(
+					"%d NET Actions, on their turn in the fight."
+					% Netrun.actions_per_turn(int(runner()["interface"]))
+				)
+			]
+		),
+		"tone": "neutral",
+	}
+
+
 func end_turn() -> void:
 	var spent := (
 		Netrun.actions_per_turn(int(runner()["interface"])) - int(runner()["actions_left"])

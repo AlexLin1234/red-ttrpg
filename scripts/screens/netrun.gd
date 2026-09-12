@@ -32,6 +32,8 @@ var _header_label: Label
 func _ready() -> void:
 	if not Store.is_open():
 		return
+	# The fight moves on the Location screen; this one has to notice.
+	Store.live_encounter_changed.connect(_on_fight_advanced)
 	var column := UI.vbox(UI.GAP_3)
 	add_child(UI.fill_margins(column, UI.GAP_3))
 	column.add_child(_build_bar())
@@ -456,7 +458,20 @@ func _refresh_runner() -> void:
 			UI.ALERT_BRIGHT if trace > 0 else UI.MUTED
 		)
 	)
-	rows.add_child(UI.field_row("Turn", str(int(_snapshot["turn"]))))
+	if _run != null and _run.is_bound():
+		rows.add_child(
+			UI.field_row("Round", str(maxi(1, Store.live_encounter().round_number)), UI.ACCENT)
+		)
+		var gate := _turn_gate()
+		rows.add_child(
+			UI.field_row(
+				"On the deck",
+				"Acting now" if bool(gate["ok"]) else "Waiting",
+				UI.ACCENT if bool(gate["ok"]) else UI.AMBER,
+			)
+		)
+	else:
+		rows.add_child(UI.field_row("Turn", str(int(_snapshot["turn"]))))
 	_runner_box.add_child(rows)
 	_runner_box.add_child(
 		UI.hp_bar(float(runner["hp"]) / maxf(1.0, float(runner["max_hp"])))
@@ -484,8 +499,17 @@ func jack_in(character_id: String, interface_rank := -1) -> void:
 	if interface_rank >= 0:
 		runner["interface"] = interface_rank
 	_run = NetrunSession.new(architecture, runner)
+	# If this netrunner is standing on a board in a fight that is running, the
+	# run happens on their initiative rather than on a clock of its own.
+	var actor_id := Store.encounter_actor_for_character(character_id)
+	if actor_id != "" and Store.encounter_in_progress():
+		_run.bind_to_actor(actor_id)
 	_snapshot = _run.snapshot()
-	_message = "%s is in the lobby." % String(runner["name"])
+	_message = (
+		"%s is in the lobby, on their turn in the fight." % String(runner["name"])
+		if _run.is_bound()
+		else "%s is in the lobby." % String(runner["name"])
+	)
 	_refresh()
 
 
@@ -497,8 +521,17 @@ func jack_out() -> void:
 
 
 ## Take one NET Action.
-func perform(action_key: String, floor_id := "") -> void:
+##
+## [param anyway] is the GM waiving the turn order, which is a ruling a table
+## can make — the same override the Location screen offers on the same question.
+## What the architecture refuses is not waivable here and never was.
+func perform(action_key: String, floor_id := "", anyway := false) -> void:
 	if _run == null or not _run.can(action_key):
+		return
+	var gate := _turn_gate()
+	if not bool(gate["ok"]) and not anyway:
+		_message = String(gate["reason"])
+		_refresh()
 		return
 	_run.perform(action_key, floor_id)
 	_snapshot = _run.snapshot()
@@ -513,6 +546,20 @@ func _refresh_actions() -> void:
 		_action_box.add_child(UI.micro("Jack in to act."))
 		return
 
+	# Waiting for your turn in the fight is a ruling a table can waive, so it is
+	# printed with the way round it rather than by greying the buttons out and
+	# leaving the GM to guess why.
+	var gate := _turn_gate()
+	if not bool(gate["ok"]):
+		var banner := UI.panel(UI.PANEL_RAISED, UI.AMBER)
+		var banner_box := UI.vbox(2)
+		banner.add_child(UI.margins(banner_box, UI.GAP_2))
+		banner_box.add_child(UI.value(String(gate["reason"]), 12, UI.AMBER))
+		banner_box.add_child(
+			UI.micro("The fight is on the Location screen. Its turn order drives this one.")
+		)
+		_action_box.add_child(banner)
+
 	for entry in _snapshot.get("actions", []):
 		var action: Dictionary = entry
 		var key := String(action["key"])
@@ -526,8 +573,16 @@ func _refresh_actions() -> void:
 		if key == "move":
 			button.pressed.connect(func() -> void: perform("move", _selected_floor))
 		else:
-			button.pressed.connect(perform.bind(key, ""))
+			button.pressed.connect(perform.bind(key, "", false))
 		row.add_child(button)
+		if not bool(gate["ok"]) and bool(action["enabled"]):
+			var anyway := UI.plain_button("Anyway")
+			anyway.tooltip_text = "Take this action out of turn — the GM's call"
+			var action_key := key
+			anyway.pressed.connect(
+				func() -> void: perform(action_key, _selected_floor, true)
+			)
+			row.add_child(anyway)
 		var note := UI.elide(
 			UI.micro(
 				String(action["summary"]) if bool(action["enabled"]) else String(action["reason"]),
@@ -718,6 +773,34 @@ func _commit_runner() -> void:
 ## The app keeps this screen alive between visits, so it catches itself up on
 ## the campaign as it stands rather than being rebuilt.
 func on_shown() -> void:
+	_refresh()
+
+
+## Whether the fight is letting the runner act, and why not when it is not.
+func _turn_gate() -> Dictionary:
+	if _run == null or not _run.is_bound():
+		return {"ok": true, "reason": "", "override": false}
+	var encounter := Store.live_encounter()
+	if encounter == null:
+		# The board was closed under the run. That ends the binding rather than
+		# freezing the runner: the fight it was waiting on no longer exists.
+		_run.bind_to_actor("")
+		return {"ok": true, "reason": "", "override": false}
+	var current := String((encounter.current_turn() as Dictionary).get("actor_id", ""))
+	return _run.turn_block(current, encounter.round_number)
+
+
+## The fight moved. Hand the runner their NET Actions when it comes round to
+## them, and redraw either way so the rail says whose turn it is.
+func _on_fight_advanced() -> void:
+	if _run == null or not _run.is_bound():
+		return
+	var encounter := Store.live_encounter()
+	if encounter == null:
+		return
+	if bool(_turn_gate()["ok"]):
+		_run.begin_bound_turn(encounter.round_number)
+		_snapshot = _run.snapshot()
 	_refresh()
 
 

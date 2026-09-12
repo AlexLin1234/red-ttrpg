@@ -120,6 +120,14 @@ clicked.
 character who reloads shoots on their next turn, not this one. Clearing a jam
 costs the same.
 
+**Netrun** — the ladder a Netrunner runs down, and, when there is a fight on,
+the turn they run it on. A netrunner standing on the Location board jacks in
+bound to the encounter: the run takes its round from the fight, the rail says
+whether they are acting or waiting, and their NET Actions arrive with their turn
+in initiative rather than on a button of their own. Waiting for your turn is a
+ruling a table can waive, so every action carries an **Anyway** beside it. A
+netrunner working alone is untouched by all of it.
+
 **Netrun** — the ladder a Netrunner runs down. Architectures are campaign data:
 roll one at a difficulty and edit its floors, or build one floor at a time.
 Passwords, Files, Control Nodes and ICE, with the runner's position, a budget of
@@ -128,6 +136,14 @@ derezzed program comes back at the REZ it had, and the action that killed it
 comes back with it. The ICE is homebrew placeholder, exactly as the combat
 tables are.
 
+**Garage** — vehicles, and the chase they exist for. A vehicle can also be
+driven onto an encounter board, where it is a unit rather than a fourth kind of
+thing: SDP is where its HP goes, SP is the plate on its body, and everything
+that already knows how to shoot a Solo knows how to shoot a car. It crosses the
+board at its own speed rather than at a walking pace, borrows REF from whoever
+is behind the wheel, and takes their side — a getaway car reading as neutral in
+the turn order is not something a GM should have to remember mid-fight.
+
 **Garage** — vehicles, and the chase they exist for. A vehicle is modelled as an
 actor, SDP where a person has HP and SP where a person has armor, so a car takes
 fire through the same rules a Solo does. The gap is the whole state of a chase:
@@ -135,6 +151,14 @@ open it far enough and the quarry is gone, close it past alongside and they are
 run down. Each side commits a manoeuvre before either rolls, and a manoeuvre buys
 its edge by risking something. A garaged vehicle also joins the Location screen's
 cover palette, because a car parked on a board is cover with a wreck value.
+
+**Lifepath** — where a character came from, on its own tab in the Forge. Roll
+the lot or write any answer by hand: cultural origin, personality, what they
+wear, what they value, who raised them, what went wrong, and the questions their
+Role asks on top. Life events are added a year at a time. Re-rolling a history
+is undoable, because the mistake worth surviving is a hand-written past wiped by
+one stray click. The tables are homebrew placeholders like every other table,
+and a GM replaces them in the Rules screen.
 
 **Forge** — edits PCs, NPCs, and mook templates. Players can choose any of the
 ten Roles, configure Role Ability ranks and specialty/allocation points, and
@@ -182,6 +206,24 @@ persistent variations by changing price and type-specific stats such as weapon
 damage dice and flat damage, armor SP, or cyberware Humanity loss. Built-ins live
 in `catalog/items.json` and custom variants in `user://item_variants.json`, outside
 portable campaign saves.
+
+**Rules** — the table editor. Redline ships no book data, so every fight
+resolves against homebrew placeholders until a GM who owns the book replaces
+them. Range bands, weapon profiles, armour, aimed shots and cover are editable
+in place; everything else, including the critical injury tables, the ICE, the
+NET difficulty bands and the lifepath questions, goes through JSON import and
+export — which is also how a table typed up once moves to another campaign.
+Documents are campaign-held, because two campaigns may run under two different
+sets of house rules, and an edit is validated before it is stored: a table with
+a missing range band does not fail when it is saved, it fails mid-fight on the
+one shot that lands in the gap.
+
+**Dice** — `Ctrl+D` over any screen, for the things no rule covers. It takes an
+expression ("2d6+3", "1d10-1d6") and refuses what it cannot read rather than
+guessing, and it takes the house d10: the same exploding-on-10, fumbling-on-1
+check the rest of the rules are made of, so a ruling made on the spot uses the
+same curve as one made through a sheet. Every roll reads back the faces it came
+up on.
 
 **Assistant** — a rules reference over the rulebook PDFs a GM legally owns. Ask
 a question in table language and get a short answer that names the file and PDF
@@ -347,6 +389,8 @@ scripts/
   ui/theme.gd        palette, fonts, widget factories
   ui/chrome.gd       the drawn chrome: chamfered frames, lit rules, the
                      backdrop, the board reticle, the notched meters
+  rules/lifepath.gd  where a character came from, rolled off supplied tables
+  screens/rules.gd   the table editor: edit, import, export, reset
 assistant/           the local rulebook helper: extraction, index, vault, agent
 tests/               headless runner and suites
 tests/assistant/     the helper's own suite, run by pytest

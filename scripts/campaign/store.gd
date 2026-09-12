@@ -21,6 +21,15 @@ signal open_location_requested(location_id: String)
 ## fetched, so nothing that listens can read more than it was sent.
 signal player_view_changed(payload: Dictionary)
 
+## The fight currently on the Location screen, or null when there is none.
+##
+## Netrunning happens during the fight, not beside it: in the book the runner is
+## in the room, spending their NET Actions on their own initiative while the
+## Solo is shooting. The two screens are siblings and cannot see each other, so
+## the encounter is published here the same way the player view is — the Netrun
+## screen asks the Store whose turn it is rather than reaching across.
+signal live_encounter_changed
+
 var path := ""
 var manifest: Dictionary = {}
 var campaign: Dictionary = {}
@@ -43,6 +52,8 @@ var active_vehicle_id := ""
 var _undo_stack: Array[Dictionary] = []
 var _redo_stack: Array[Dictionary] = []
 var _player_view: Dictionary = {}
+var _live_encounter: Encounter = null
+var _live_location_id := ""
 var _autosave_seconds := 0.0
 var _recovery: Dictionary = {}
 ## Off only for tests and for a GM who wants the disk left alone.
@@ -900,7 +911,63 @@ func perform_hustles(character_ids: Array, rng: Dice.RandomSource) -> Dictionary
 ## A vehicle parked on a board is cover with a wreck value, so it belongs in the
 ## same palette rather than in a system of its own: line of sight, ablation and
 ## the cover prompt all then work on it unchanged.
-# -- rules documents ------------------------------------------------------------
+# -- the fight in progress ------------------------------------------------------
+
+
+## Publish the encounter the Location screen is running.
+##
+## Called when a board builds one and when it is torn down, so anything that
+## needs to know whose turn it is can ask rather than reach across to another
+## screen.
+func publish_encounter(encounter: Encounter, location_id: String) -> void:
+	_live_encounter = encounter
+	_live_location_id = location_id
+	live_encounter_changed.emit()
+
+
+func clear_encounter() -> void:
+	if _live_encounter == null:
+		return
+	_live_encounter = null
+	_live_location_id = ""
+	live_encounter_changed.emit()
+
+
+func live_encounter() -> Encounter:
+	return _live_encounter
+
+
+func live_location_id() -> String:
+	return _live_location_id
+
+
+## Whether a fight is not just loaded but actually running.
+##
+## An encounter exists from the moment a board is opened; it has rounds only
+## once initiative is rolled, and only then is there a turn for a netrunner to
+## take their actions on.
+func encounter_in_progress() -> bool:
+	return _live_encounter != null and _live_encounter.round_number > 0
+
+
+## Which board unit is this character standing on the deck as, if any.
+##
+## A run is bound to a character, and an encounter is keyed by unit id, so this
+## is the translation between the two.
+func encounter_actor_for_character(character_id: String) -> String:
+	if _live_encounter == null or character_id == "":
+		return ""
+	var location := location_by_id(_live_location_id)
+	for unit in location.get("units", []):
+		var entry: Dictionary = unit
+		if String(entry.get("character_id", "")) == character_id:
+			var unit_id := String(entry["id"])
+			if _live_encounter.has_actor(unit_id):
+				return unit_id
+	return ""
+
+
+# -- rules documents ------------------------------------------------------------# -- rules documents ------------------------------------------------------------
 #
 # Redline ships no book data. Every table a fight resolves against is a homebrew
 # placeholder, and the promise all along was that a GM who owns the book
