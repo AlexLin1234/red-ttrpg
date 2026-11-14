@@ -153,6 +153,9 @@ static func buy(character: Dictionary, catalog: Array, item_id: String) -> Dicti
 	owned["detail"] = String(product.get("description", product.get("detail", "")))
 	if product.has("armor"):
 		owned["armor_profile"] = (product["armor"] as Dictionary).duplicate(true)
+	# What it cost is what a resale is worked out from, so it is kept on the
+	# owned copy under a name of its own: "price" is a shelf's word.
+	owned["value"] = price
 	owned.erase("id")
 	owned.erase("price")
 	owned.erase("weapon")
@@ -171,6 +174,58 @@ static func buy(character: Dictionary, catalog: Array, item_id: String) -> Dicti
 		var location := String(armor_profile["location"])
 		(character["armor"] as Dictionary)[location] = {"sp": int(armor_profile["sp"]), "ablated": false}
 	return {"ok": true, "item": product["name"], "price": price}
+
+
+## What the street pays for something used: half of what it cost.
+const RESALE_FRACTION := 0.5
+
+
+## What [param entry], a carried item, would fetch.
+##
+## Gear bought since resale existed remembers its price. Anything older is
+## matched to the catalog by name, and something no shelf has ever carried is
+## worth nothing here — the GM can always move cash by hand for a one-off deal.
+static func resale_value(entry: Dictionary, catalog: Array) -> int:
+	var cost := int(entry.get("value", 0))
+	if cost <= 0:
+		# An exact name first. Failing that, a sheet that says "Kevlar Weave"
+		# where the shelf says "Kevlar Weave (body)" is priced as the cheapest
+		# piece of that name, so an old suit is not worth more than one part.
+		var name := String(entry.get("name", ""))
+		var cheapest := 0
+		for product in catalog:
+			var shelf_name := String((product as Dictionary).get("name", ""))
+			var price := int((product as Dictionary).get("price", 0))
+			if shelf_name == name:
+				cost = price
+				break
+			if name != "" and shelf_name.begins_with(name + " (") and (cheapest == 0 or price < cheapest):
+				cheapest = price
+		if cost <= 0:
+			cost = cheapest
+	return int(floor(cost * RESALE_FRACTION))
+
+
+## Sell one carried item, taking its weapon or armor profile off the sheet with
+## it. Installed cyberware is refused: it has to come out before it can be sold.
+static func sell(character: Dictionary, catalog: Array, gear_index: int) -> Dictionary:
+	var gear: Array = character.get("gear", [])
+	if gear_index < 0 or gear_index >= gear.size():
+		return {"ok": false, "error": "Choose an item to sell."}
+	var entry: Dictionary = gear[gear_index]
+	if String(entry.get("installed_on", "")) != "":
+		return {"ok": false, "error": "Detach installed cyberware before selling it."}
+	var price := resale_value(entry, catalog)
+	if price <= 0:
+		return {"ok": false, "error": "Nobody is buying %s." % String(entry.get("name", "that"))}
+	# The buyer is a sheet that is thrown away, so a sale takes the same care
+	# over a second armor piece or a paired weapon profile that a gift does.
+	var buyer := {"id": "__market__"}
+	var moved := Economy.transfer_item(character, buyer, gear_index)
+	if not bool(moved.get("ok", false)):
+		return moved
+	character["cash"] = int(character.get("cash", 0)) + price
+	return {"ok": true, "item": String(entry.get("name", "Item")), "price": price}
 
 
 static func installed_at(character: Dictionary, body_part: String) -> int:

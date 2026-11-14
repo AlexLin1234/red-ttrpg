@@ -21,6 +21,23 @@ static func _character(id: String, role_key := "solo", rank := 4, cash := 0) -> 
 
 static func run(h: Harness) -> void:
 	h.describe("shared character economy")
+
+	h.it("awards IP to every player character and nobody else")
+	var table := [
+		{"id": "a", "name": "Ana", "kind": "pc", "improvement_points": 10},
+		{"id": "b", "name": "Bo", "kind": "pc"},
+		{"id": "c", "name": "Cy", "kind": "npc"},
+	]
+	var award := Economy.award_ip(table, 40)
+	h.equal(award["ok"], true, "awarded")
+	h.equal(Array(award["names"]), ["Ana", "Bo"], "the party")
+	h.equal(table[0]["improvement_points"], 50, "added to what was there")
+	h.equal(table[1]["improvement_points"], 40, "a sheet with none starts counting")
+	h.equal(table[2].has("improvement_points"), false, "the NPC is left alone")
+	h.equal(Economy.award_ip(table, 5, ["c"])["names"][0], "Cy", "a named sheet can be anyone")
+	h.equal(Economy.award_ip(table, 0)["ok"], false, "nothing to award is refused")
+	h.equal(Economy.award_ip([], 10)["ok"], false, "nobody to award it to is refused")
+
 	h.it("uses the rulebook Role, Rank band, and d6 result for Hustles")
 	var rockerboy := _character("red", "rockerboy", 4)
 	var local_gig := EconomyRules.hustle(rockerboy, Dice.FixedRandom.new([1] as Array[int]))

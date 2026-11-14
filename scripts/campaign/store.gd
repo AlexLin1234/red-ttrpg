@@ -686,6 +686,22 @@ func end_session(summary := "") -> int:
 	return number
 
 
+## Hand out Improvement Points, to the whole party or to the sheets named.
+##
+## The end of a session is when IP is earned, and it used to be typed onto each
+## sheet in turn. An empty [param character_ids] means every player character.
+func award_ip(amount: int, character_ids: Array = []) -> Dictionary:
+	if not is_open():
+		return {"ok": false, "error": "No campaign is open."}
+	var result := Economy.award_ip(characters(), amount, character_ids)
+	if not bool(result.get("ok", false)):
+		return result
+	var names: PackedStringArray = result["names"]
+	log_line("%d IP awarded to %s." % [amount, ", ".join(names)])
+	set_status("%d IP awarded to %d character%s" % [amount, names.size(), "" if names.size() == 1 else "s"])
+	return result
+
+
 ## Roll a squad onto the roster and hand the sheets back.
 ##
 ## The board still has to place them; this only makes them exist, which is the

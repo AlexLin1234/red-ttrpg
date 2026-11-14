@@ -134,7 +134,7 @@ func _refresh_roster() -> void:
 		wrapper.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		button.add_child(wrapper)
 
-		row.add_child(UI.hatch(Vector2(26, 26)))
+		row.add_child(UI.monogram(Vector2(26, 26), String(entry["name"]), _kind_colour(entry)))
 		var text := UI.vbox(0)
 		UI.expand(text, true, false)
 		text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -214,10 +214,20 @@ func _refresh_sheet() -> void:
 			body.add_child(note)
 
 
+## Blue for the party, red for what is pointed at them, grey for everyone else.
+func _kind_colour(character: Dictionary) -> Color:
+	match String(character.get("kind", "npc")):
+		"pc":
+			return UI.ACCENT
+		"mook":
+			return UI.ALERT_BRIGHT
+	return UI.MUTED
+
+
 func _build_sheet_head(character: Dictionary) -> Control:
 	var head := UI.hbox(UI.GAP_3)
 
-	head.add_child(UI.hatch(Vector2(78, 92), "Portrait"))
+	head.add_child(UI.monogram(Vector2(78, 92), String(character["name"]), _kind_colour(character)))
 
 	var identity := UI.vbox(2)
 	UI.expand(identity, true, false)

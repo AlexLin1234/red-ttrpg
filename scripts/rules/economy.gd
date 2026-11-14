@@ -76,6 +76,30 @@ static func hustle(character: Dictionary, rng: Dice.RandomSource) -> Dictionary:
 	}
 
 
+## Add Improvement Points to the player characters, or to the sheets named.
+##
+## An empty [param character_ids] means every player character, which is what
+## the end of a session almost always wants.
+static func award_ip(characters: Array, amount: int, character_ids: Array = []) -> Dictionary:
+	if amount <= 0:
+		return {"ok": false, "error": "Award at least 1 IP."}
+	var names := PackedStringArray()
+	for entry in characters:
+		var character: Dictionary = entry
+		var chosen := (
+			String(character.get("kind", "")) == "pc"
+			if character_ids.is_empty()
+			else character_ids.has(String(character.get("id", "")))
+		)
+		if not chosen:
+			continue
+		character["improvement_points"] = int(character.get("improvement_points", 0)) + amount
+		names.append(String(character.get("name", "Someone")))
+	if names.is_empty():
+		return {"ok": false, "error": "There is nobody to award it to."}
+	return {"ok": true, "amount": amount, "names": names}
+
+
 ## Move cash without allowing either side to be partially changed.
 static func transfer_cash(source: Dictionary, recipient: Dictionary, amount: int) -> Dictionary:
 	if source.is_empty() or recipient.is_empty():

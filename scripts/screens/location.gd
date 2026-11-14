@@ -224,7 +224,12 @@ func _rebuild_palette() -> void:
 			for character in Store.characters():
 				var entry: Dictionary = character
 				entries.append(
-					{"id": String(entry["id"]), "label": String(entry["name"]), "sub": String(entry["role"])}
+					{
+						"id": String(entry["id"]),
+						"label": String(entry["name"]),
+						"sub": String(entry["role"]),
+						"monogram": UI.ACCENT if String(entry.get("kind", "")) == "pc" else UI.ALERT_BRIGHT,
+					}
 				)
 
 	if _palette_tab == "units":
@@ -357,7 +362,10 @@ func _build_palette_chip(entry: Dictionary) -> Control:
 	wrapper.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	button.add_child(wrapper)
 
-	row.add_child(UI.hatch(Vector2(24, 24)))
+	if entry.has("monogram"):
+		row.add_child(UI.monogram(Vector2(24, 24), String(entry["label"]), entry["monogram"]))
+	else:
+		row.add_child(UI.hatch(Vector2(24, 24)))
 	var text := UI.vbox(0)
 	UI.expand(text, true, false)
 	text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -1452,7 +1460,7 @@ func _refresh_initiative() -> void:
 		_end_turn_button.tooltip_text = "Roll initiative before turns can be passed."
 		return
 	_end_turn_button.disabled = false
-	_end_turn_button.tooltip_text = "Hands the turn on and gives the next unit their Action back."
+	_end_turn_button.tooltip_text = "Hands the turn on and gives the next unit their Action back (N)."
 
 	for entry in order:
 		var row: Dictionary = entry
@@ -1471,14 +1479,14 @@ func _refresh_history_buttons() -> void:
 	var can_undo := bool(_snapshot.get("can_undo", false))
 	_undo_button.disabled = not can_undo
 	_undo_button.tooltip_text = (
-		"Take back %s." % String(_snapshot.get("undo_label", ""))
+		"Take back %s (Ctrl+Z)." % String(_snapshot.get("undo_label", ""))
 		if can_undo
 		else "Nothing has happened yet to undo."
 	)
 	var can_redo := bool(_snapshot.get("can_redo", false))
 	_redo_button.disabled = not can_redo
 	_redo_button.tooltip_text = (
-		"Put back %s." % String(_snapshot.get("redo_label", ""))
+		"Put back %s (Ctrl+Shift+Z)." % String(_snapshot.get("redo_label", ""))
 		if can_redo
 		else "Nothing has been undone to put back."
 	)
@@ -1552,11 +1560,20 @@ func _refresh_selected() -> void:
 	if actor.is_empty():
 		return
 
-	var head := UI.hbox()
-	var title := UI.micro("Selected")
-	UI.expand(title, true, false)
-	head.add_child(title)
-	head.add_child(UI.elide(UI.micro(String(actor["name"]))))
+	# The name was an elided label beside an expanding one, which gives it no
+	# width at all: the card showed everything about the unit except who it was.
+	var head := UI.vbox(0)
+	var side := String(actor.get("side", ""))
+	head.add_child(
+		UI.micro(
+			"Selected · %s" % side if side != "" else "Selected",
+			UI.ACCENT if side == "party" else UI.MUTED
+		)
+	)
+	var who := UI.elide(UI.display(String(actor["name"]), 18))
+	who.tooltip_text = String(actor["name"])
+	who.mouse_filter = Control.MOUSE_FILTER_PASS
+	head.add_child(who)
 	_selected_box.add_child(UI.margins(head, UI.GAP_2))
 
 	var hidden := bool(_unit_entry(_selected_unit).get(PlayerView.HIDDEN_KEY, false))

@@ -505,6 +505,24 @@ func perform(action_key: String, floor_id := "") -> void:
 	_refresh()
 
 
+## Take back the last NET Action. Public so Ctrl+Z reaches it the way the
+## button does.
+func undo() -> void:
+	if _run == null or not bool(_snapshot.get("can_undo", false)):
+		return
+	_run.undo()
+	_snapshot = _run.snapshot()
+	_refresh()
+
+
+func end_turn() -> void:
+	if _run == null or _run.is_over():
+		return
+	_run.end_turn()
+	_snapshot = _run.snapshot()
+	_refresh()
+
+
 func _refresh_actions() -> void:
 	for child in _action_box.get_children():
 		child.queue_free()
@@ -528,38 +546,35 @@ func _refresh_actions() -> void:
 		else:
 			button.pressed.connect(perform.bind(key, ""))
 		row.add_child(button)
-		var note := UI.elide(
-			UI.micro(
-				String(action["summary"]) if bool(action["enabled"]) else String(action["reason"]),
-				UI.MUTED if bool(action["enabled"]) else UI.MUTED_DIM
-			)
+		# Sentence case and wrapped, not a letterspaced label cut off mid-word:
+		# this is the line that says what the action does, or why it cannot be
+		# taken, and half of it was an ellipsis.
+		var note := UI.body(
+			String(action["summary"]) if bool(action["enabled"]) else String(action["reason"]),
+			11,
+			UI.MUTED if bool(action["enabled"]) else UI.MUTED_DIM
 		)
+		note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		note.custom_minimum_size.x = 0
+		note.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		UI.expand(note, true, false)
 		row.add_child(note)
 		_action_box.add_child(row)
 
 	_action_box.add_child(UI.rule_line())
 	var controls := UI.hbox(UI.GAP_2)
-	var undo := UI.plain_button("Undo")
-	UI.expand(undo, true, false)
-	undo.disabled = not bool(_snapshot.get("can_undo", false))
-	undo.pressed.connect(
-		func() -> void:
-			_run.undo()
-			_snapshot = _run.snapshot()
-			_refresh()
-	)
-	controls.add_child(undo)
-	var end_turn := UI.primary_button("End turn ▸")
-	UI.expand(end_turn, true, false)
-	end_turn.disabled = _run.is_over()
-	end_turn.pressed.connect(
-		func() -> void:
-			_run.end_turn()
-			_snapshot = _run.snapshot()
-			_refresh()
-	)
-	controls.add_child(end_turn)
+	var undo_button := UI.plain_button("Undo")
+	UI.expand(undo_button, true, false)
+	undo_button.disabled = not bool(_snapshot.get("can_undo", false))
+	undo_button.tooltip_text = "Take back the last NET Action (Ctrl+Z)"
+	undo_button.pressed.connect(undo)
+	controls.add_child(undo_button)
+	var end_button := UI.primary_button("End turn ▸")
+	UI.expand(end_button, true, false)
+	end_button.disabled = _run.is_over()
+	end_button.tooltip_text = "Hand the turn on and refill NET Actions (N)"
+	end_button.pressed.connect(end_turn)
+	controls.add_child(end_button)
 	_action_box.add_child(controls)
 
 	var alarm := UI.tab_button("Alarm raised", bool((_snapshot["runner"] as Dictionary)["alerted"]))

@@ -471,6 +471,16 @@ func exchange(pursuer_move := "", quarry_move := "") -> void:
 	_refresh()
 
 
+## Take back the last exchange. Public so Ctrl+Z reaches it the way the button
+## does.
+func undo() -> void:
+	if _chase == null or not bool(_snapshot.get("can_undo", false)):
+		return
+	_chase.undo()
+	_snapshot = _chase.snapshot()
+	_refresh()
+
+
 func _build_controls() -> void:
 	_rail_box.add_child(_maneuver_picker("Pursuer", true))
 	_rail_box.add_child(_maneuver_picker("Quarry", false))
@@ -484,16 +494,12 @@ func _build_controls() -> void:
 	_rail_box.add_child(run)
 
 	var row := UI.hbox(UI.GAP_2)
-	var undo := UI.plain_button("Undo")
-	UI.expand(undo, true, false)
-	undo.disabled = not bool(_snapshot.get("can_undo", false))
-	undo.pressed.connect(
-		func() -> void:
-			_chase.undo()
-			_snapshot = _chase.snapshot()
-			_refresh()
-	)
-	row.add_child(undo)
+	var undo_button := UI.plain_button("Undo")
+	UI.expand(undo_button, true, false)
+	undo_button.disabled = not bool(_snapshot.get("can_undo", false))
+	undo_button.tooltip_text = "Take back the last exchange (Ctrl+Z)"
+	undo_button.pressed.connect(undo)
+	row.add_child(undo_button)
 	var leave := UI.plain_button("End chase")
 	UI.expand(leave, true, false)
 	leave.pressed.connect(end_chase)

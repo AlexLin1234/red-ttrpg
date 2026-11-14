@@ -20,7 +20,11 @@ const PlayerDisplayScreen := preload("res://scripts/screens/player_display.gd")
 const SHORTCUTS: Array[Dictionary] = [
 	{"keys": "1 … 0", "does": "Jump to a screen, in the order of the tabs"},
 	{"keys": "Ctrl + K", "does": "Find anything in the campaign"},
+	{"keys": "D", "does": "Dice tray: roll anything, in table notation"},
 	{"keys": "Ctrl + S", "does": "Save"},
+	{"keys": "Ctrl + Z", "does": "Undo, on Location, Netrun and Garage"},
+	{"keys": "Ctrl + Shift + Z", "does": "Redo, on Location"},
+	{"keys": "N", "does": "End the turn, on Location and Netrun"},
 	{"keys": "M", "does": "Show or hide the uploaded map, on the City screen"},
 	{"keys": "?  or  F1", "does": "This panel"},
 	{"keys": "Escape", "does": "Close whatever is open over the screen"},
@@ -39,6 +43,11 @@ const SCREENS := [
 	{"id": "assistant", "label": "Assistant"},
 ]
 
+## The screens that work before any campaign is open. One list, so the tab that
+## is enabled and the screen that will actually show cannot disagree — which
+## they did: the Assistant opened without a campaign and its tab was greyed out.
+const CAMPAIGN_FREE_SCREENS := ["library", "workshop", "assistant"]
+
 var _current := "library"
 var _nav_buttons: Dictionary = {}
 var _screens: Dictionary = {}
@@ -56,6 +65,9 @@ var _gm_notes_campaign_path := ""
 var _recovery_dialog: ConfirmationDialog
 var _search: SearchPalette
 var _shortcuts: ShortcutsOverlay
+var _dice: DiceTray
+var _clock_label: Label
+var _search_button: Button
 var _player_window_button: Button
 var _player_window: Window
 var _player_screen: Control
@@ -78,6 +90,8 @@ func _ready() -> void:
 	_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(_content)
 
+	root.add_child(_build_footer())
+
 	Store.campaign_opened.connect(_on_campaign_opened)
 	Store.campaign_changed.connect(_refresh_header)
 	Store.campaign_saved.connect(_refresh_header)
@@ -88,6 +102,9 @@ func _ready() -> void:
 	_search = SearchPalette.new()
 	_search.chosen.connect(_go_to)
 	add_child(_search)
+
+	_dice = DiceTray.new()
+	add_child(_dice)
 
 	_shortcuts = ShortcutsOverlay.new()
 	add_child(_shortcuts)
@@ -136,24 +153,12 @@ func _build_header() -> Control:
 	var brand := UI.display("Redline", 15)
 	row.add_child(brand)
 
-	# The campaign title takes the slack and gives it back: it expands to fill
-	# what the bar has spare and elides when it has none, so a long campaign name
-	# beside a full set of header buttons cannot push the whole app wider than
-	# the window and clip the Save button off the right-hand edge.
-	_title_label = UI.elide(UI.micro("GM Console · Build 0.5.0"))
-	_title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	# Ten nav tabs plus the GM Window and Player Display buttons already come
-	# close to the app's own 1600px default width, so this floor stays low
-	# rather than "a few words": it is the first half of the bar that gives way.
-	_title_label.custom_minimum_size.x = 60
-	UI.expand(_title_label, true, false)
-	row.add_child(_title_label)
-
 	var nav := UI.hbox(1)
 	row.add_child(nav)
 	for index in SCREENS.size():
 		var entry: Dictionary = SCREENS[index]
-		var button := UI.tab_button("%s %d" % [entry["label"], index + 1], index == 0)
+		# The digit is the key that jumps here; the tenth tab is on 0.
+		var button := UI.tab_button("%s %d" % [entry["label"], (index + 1) % 10], index == 0)
 		button.pressed.connect(_show.bind(String(entry["id"])))
 		nav.add_child(button)
 		_nav_buttons[String(entry["id"])] = button
@@ -161,6 +166,26 @@ func _build_header() -> Control:
 	var right_spacer := Control.new()
 	right_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(right_spacer)
+
+	# The three things that work on every screen and had no button: a GM who
+	# never pressed Ctrl+K never learned there was a search.
+	_search_button = UI.plain_button("Search")
+	_search_button.tooltip_text = "Find anything in the campaign (Ctrl+K)"
+	_search_button.focus_mode = Control.FOCUS_NONE
+	_search_button.pressed.connect(open_search)
+	row.add_child(_search_button)
+
+	var dice_button := UI.plain_button("Dice")
+	dice_button.tooltip_text = "Roll anything, in table notation (D)"
+	dice_button.focus_mode = Control.FOCUS_NONE
+	dice_button.pressed.connect(open_dice)
+	row.add_child(dice_button)
+
+	var help_button := UI.plain_button("?")
+	help_button.tooltip_text = "Keys and display settings (? or F1)"
+	help_button.focus_mode = Control.FOCUS_NONE
+	help_button.pressed.connect(open_shortcuts)
+	row.add_child(help_button)
 
 	_gm_window_button = UI.plain_button("GM Window")
 	_gm_window_button.tooltip_text = "Open private Notes / Beats in a separate native window"
@@ -176,29 +201,63 @@ func _build_header() -> Control:
 	_player_window_button.pressed.connect(toggle_player_display)
 	row.add_child(_player_window_button)
 
-	# A downtime report or a Hustle result can be a whole sentence, and the bar
-	# has ten tabs on it plus the GM Window and Player Display buttons once a
-	# campaign is open — together they leave no room for a generous floor here,
-	# so this elides down early rather than pushing the Save button off the
-	# edge of the window.
-	_status_label = UI.elide(UI.micro("", UI.GOOD))
-	_status_label.custom_minimum_size.x = 100
-	_status_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(_status_label)
-
-	# "Unsaved · autosaved" is half again as wide as "Saved", and the bar is at
-	# its tightest exactly when that is the text it holds — a campaign open, ten
-	# tabs, and both window buttons showing. Left at its full width it pushed the
-	# Save button off the right-hand edge, so it elides like its neighbours.
-	_dirty_label = UI.elide(UI.micro("Local library"))
-	_dirty_label.custom_minimum_size.x = 76
-	_dirty_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(_dirty_label)
-
 	_save_button = UI.primary_button("Save")
 	_save_button.visible = false
 	_save_button.pressed.connect(func() -> void: Store.save())
 	row.add_child(_save_button)
+
+	return bar
+
+
+## The line along the bottom: which campaign, what just happened, when it is in
+## the world, and whether it is saved.
+##
+## All four used to share the header with ten tabs and three buttons, where the
+## campaign's name was cut to five letters and a Hustle result to ten. A status
+## that cannot be read is not a status, so they have a bar of their own and the
+## message in the middle gets everything the other three leave.
+func _build_footer() -> Control:
+	var bar := PanelContainer.new()
+	var box := UI.chamfer(UI.PANEL, UI.HAIRLINE, 1, 0, 0.0, 0)
+	bar.add_theme_stylebox_override("panel", box)
+	bar.custom_minimum_size = Vector2(0, 26)
+
+	var row := UI.hbox(UI.GAP_4)
+	var wrap := UI.margins(row, 4)
+	wrap.add_theme_constant_override("margin_left", UI.GAP_3)
+	wrap.add_theme_constant_override("margin_right", UI.GAP_3)
+	bar.add_child(wrap)
+
+	_title_label = UI.elide(UI.micro("GM Console · Build 0.5.0"))
+	_title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_title_label.custom_minimum_size.x = 120
+	_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_title_label.size_flags_stretch_ratio = 1.0
+	row.add_child(_title_label)
+
+	_status_label = UI.elide(UI.micro("", UI.GOOD))
+	_status_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_status_label.size_flags_stretch_ratio = 2.0
+	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_status_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	row.add_child(_status_label)
+
+	var right := UI.hbox(UI.GAP_4)
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right.size_flags_stretch_ratio = 1.0
+	right.alignment = BoxContainer.ALIGNMENT_END
+	row.add_child(right)
+
+	_clock_label = UI.micro("")
+	_clock_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_clock_label.tooltip_text = "The in-world date and time, set on the City screen"
+	_clock_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	right.add_child(_clock_label)
+
+	_dirty_label = UI.micro("Local library")
+	_dirty_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	right.add_child(_dirty_label)
 
 	return bar
 
@@ -218,7 +277,7 @@ func _build_header() -> Control:
 func _show(screen_id: String) -> void:
 	# The Assistant opens without a campaign so its library and key can be set up
 	# before the first save exists; its Ask tab is the part that needs one.
-	if screen_id not in ["library", "workshop", "assistant"] and not Store.is_open():
+	if screen_id not in CAMPAIGN_FREE_SCREENS and not Store.is_open():
 		return
 	_current = screen_id
 	for id in _nav_buttons:
@@ -465,7 +524,19 @@ func _rebuild_gm_window_content() -> void:
 ## Show the keys, and the two display preferences that answer the same
 ## question. Public so a test can reach it the way the key does.
 func open_shortcuts() -> void:
+	_search.close()
+	_dice.close()
 	_shortcuts.present(SHORTCUTS)
+
+
+## Open the dice tray, or close it if it is the thing that is open.
+func open_dice() -> void:
+	if _dice.visible:
+		_dice.close()
+		return
+	_search.close()
+	_shortcuts.close()
+	_dice.open()
 
 
 ## Open the campaign-wide search. Public so a shortcut, a button and a test can
@@ -473,6 +544,8 @@ func open_shortcuts() -> void:
 func open_search() -> void:
 	if not Store.is_open():
 		return
+	_dice.close()
+	_shortcuts.close()
 	_search.open()
 
 
@@ -500,14 +573,31 @@ func _go_to(row: Dictionary) -> void:
 
 func _on_status(message: String) -> void:
 	_status_label.text = UI._letterspace(message.to_upper())
-	_status_label.visible = message != ""
+	# Even with the bar to itself a long report can still elide; the tooltip is
+	# the whole of it.
+	_status_label.tooltip_text = message
 
 
 func _refresh_header() -> void:
 	if Store.is_open():
-		_title_label.text = UI._letterspace(
-			("%s / %s" % [Store.campaign["name"], Store.campaign["city"]]).to_upper()
+		var title := "%s / %s" % [Store.campaign["name"], Store.campaign["city"]]
+		var sessions := int(Store.campaign.get("sessions", 0))
+		if sessions > 0:
+			title += " · Session %d" % sessions
+		_title_label.text = UI._letterspace(title.to_upper())
+		_title_label.tooltip_text = title
+		_title_label.mouse_filter = Control.MOUSE_FILTER_PASS
+		var clock: Dictionary = Store.campaign.get("clock", {})
+		_clock_label.text = (
+			UI._letterspace(
+				(
+					"%s · %s" % [CampaignSchema.format_date(clock), CampaignSchema.format_clock(clock)]
+				).to_upper()
+			)
+			if clock.has("hour") and clock.has("day")
+			else ""
 		)
+		_search_button.visible = true
 		var dirty_text := "Saved"
 		if Store.dirty:
 			dirty_text = (
@@ -523,6 +613,9 @@ func _refresh_header() -> void:
 		)
 	else:
 		_title_label.text = UI._letterspace("GM CONSOLE · BUILD 0.5.0")
+		_title_label.tooltip_text = ""
+		_clock_label.text = ""
+		_search_button.visible = false
 		_dirty_label.text = UI._letterspace("Local library")
 		_save_button.visible = false
 		_gm_window_button.visible = false
@@ -533,32 +626,71 @@ func _refresh_header() -> void:
 			_player_window.hide()
 
 	for id in _nav_buttons:
-		(_nav_buttons[id] as Button).disabled = id not in ["library", "workshop"] and not Store.is_open()
+		(_nav_buttons[id] as Button).disabled = (
+			id not in CAMPAIGN_FREE_SCREENS and not Store.is_open()
+		)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.is_pressed() or event.is_echo():
 		return
 	var key := event as InputEventKey
+	var command := key.ctrl_pressed or key.meta_pressed
 
-	if key.keycode == KEY_QUESTION or key.keycode == KEY_F1:
+	# "?" is Shift+/ on most layouts and a key of its own on a few, so it is
+	# matched by the character typed rather than by the key that typed it.
+	if key.unicode == 63 or key.keycode == KEY_QUESTION or key.keycode == KEY_F1:
 		open_shortcuts()
 		get_viewport().set_input_as_handled()
 		return
 
-	if key.ctrl_pressed and key.keycode == KEY_K:
+	if command and key.keycode == KEY_K:
 		open_search()
 		get_viewport().set_input_as_handled()
 		return
 
-	if key.ctrl_pressed and key.keycode == KEY_S:
+	if command and key.keycode == KEY_S:
 		if Store.is_open():
 			Store.save()
 		get_viewport().set_input_as_handled()
 		return
 
-	# Number keys jump between screens.
-	var index := key.keycode - KEY_1
-	if index >= 0 and index < SCREENS.size() and not key.ctrl_pressed and not key.alt_pressed:
+	# Undo and redo belong to whichever screen is up: each keeps its own exact
+	# history, so the key is handed to it rather than answered here.
+	if command and (key.keycode == KEY_Z or key.keycode == KEY_Y):
+		var redo := key.keycode == KEY_Y or key.shift_pressed
+		_call_on_screen("redo" if redo else "undo")
+		get_viewport().set_input_as_handled()
+		return
+
+	if command or key.alt_pressed:
+		return
+
+	if key.keycode == KEY_D:
+		open_dice()
+		get_viewport().set_input_as_handled()
+		return
+
+	if key.keycode == KEY_N:
+		_call_on_screen("end_turn")
+		get_viewport().set_input_as_handled()
+		return
+
+	# Number keys jump between screens: 1 to 9 are the first nine tabs and 0 is
+	# the tenth, as the keys sit on the row.
+	var index := -1
+	if key.keycode >= KEY_1 and key.keycode <= KEY_9:
+		index = key.keycode - KEY_1
+	elif key.keycode == KEY_0:
+		index = 9
+	if index >= 0 and index < SCREENS.size():
 		_show(String((SCREENS[index] as Dictionary)["id"]))
 		get_viewport().set_input_as_handled()
+
+
+## Call [param method] on the screen that is up, if it has one.
+func _call_on_screen(method: String) -> bool:
+	if not is_instance_valid(_screen) or not _screen.visible or not _screen.has_method(method):
+		return false
+	_screen.call(method)
+	return true

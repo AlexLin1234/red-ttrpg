@@ -28,6 +28,43 @@ static func run(h: Harness) -> void:
 	GearMarket.buy(buyer, catalog, "light_plate_head")
 	h.equal(buyer["armor"]["head"]["sp"], 11, "armor equipped")
 
+	h.it("sells a carried item for half what it cost, profile and all")
+	var seller := _character(0)
+	seller["cash"] = 500
+	GearMarket.buy(seller, catalog, "heavy_sidearm")
+	h.equal(seller["gear"][0]["value"], 500, "the owned copy remembers its price")
+	h.equal(GearMarket.resale_value(seller["gear"][0], catalog), 250, "half back")
+	var sold := GearMarket.sell(seller, catalog, 0)
+	h.equal(sold["ok"], true, "sale succeeds")
+	h.equal(seller["cash"], 250, "paid half")
+	h.equal(seller["gear"].size(), 0, "item gone")
+	h.equal(seller["weapons"].size(), 0, "weapon profile gone with it")
+
+	h.it("takes sold armor off the body")
+	var stripped := _character(1000)
+	GearMarket.buy(stripped, catalog, "light_plate_head")
+	GearMarket.sell(stripped, catalog, 0)
+	h.equal(stripped["armor"]["head"]["sp"], 0, "no longer worn")
+
+	h.it("prices older gear from the catalog by name, and refuses the unknown")
+	var legacy := _character(0)
+	legacy["gear"] = [{"name": "Heavy Sidearm", "kind": "weapon"}, {"name": "Grandmother's locket", "kind": "gear"}]
+	h.equal(GearMarket.resale_value(legacy["gear"][0], catalog), 250, "matched by name")
+	h.equal(
+		GearMarket.resale_value({"name": "Kevlar Weave", "kind": "armor"}, catalog),
+		50,
+		"a suit named without its location is priced as its cheapest piece"
+	)
+	h.equal(GearMarket.sell(legacy, catalog, 1)["ok"], false, "nobody is buying the locket")
+	h.equal(GearMarket.sell(legacy, catalog, 9)["ok"], false, "an index off the end is refused")
+	h.equal(legacy["cash"], 0, "nothing paid for a refused sale")
+
+	h.it("will not sell cyberware that is still installed")
+	var chromed := _character(0)
+	chromed["gear"] = [{"name": "Cybereye", "kind": "cyberware", "value": 100, "installed_on": "eyes"}]
+	h.equal(GearMarket.sell(chromed, catalog, 0)["ok"], false, "refused")
+	h.equal(chromed["gear"].size(), 1, "still theirs")
+
 	h.it("rejects an unaffordable purchase without changing the character")
 	var broke := _character(10)
 	h.equal(GearMarket.buy(broke, catalog, "agent")["ok"], false, "purchase rejected")

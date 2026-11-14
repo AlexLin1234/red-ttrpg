@@ -19,6 +19,9 @@ var _new_gm: LineEdit
 var _new_month: LineEdit
 
 
+var _award_amount := 40
+
+
 func _ready() -> void:
 	var grid := UI.hbox(UI.GAP_3)
 	add_child(UI.fill_margins(grid, UI.GAP_3))
@@ -135,7 +138,9 @@ func _build_row(row: Dictionary) -> Control:
 	wrapper.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	button.add_child(wrapper)
 
-	content.add_child(UI.hatch(Vector2(44, 32), "Cover"))
+	content.add_child(
+		UI.monogram(Vector2(44, 32), String(row["name"]), UI.ACCENT if is_selected else UI.MUTED)
+	)
 
 	var text := UI.vbox(1)
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -332,8 +337,38 @@ func _build_session_controls() -> Control:
 				_refresh()
 	)
 	entry.add_child(add)
+
+	# Improvement Points are earned at the end of a session and were typed onto
+	# each sheet one at a time in the Forge. One number, the whole party.
+	var award := SpinBox.new()
+	award.min_value = 5
+	award.max_value = 500
+	award.step = 5
+	award.value = _award_amount
+	award.suffix = " IP"
+	award.custom_minimum_size.x = 104
+	award.value_changed.connect(func(value: float) -> void: _award_amount = int(value))
+	entry.add_child(award)
+	var give := UI.plain_button("Award to party")
+	give.tooltip_text = "Add this many Improvement Points to every player character, and log it"
+	give.pressed.connect(
+		func() -> void:
+			award.apply()
+			award_ip(_award_amount)
+	)
+	entry.add_child(give)
 	box.add_child(entry)
 	return UI.margins(box, UI.GAP_4)
+
+
+## Hand the party their Improvement Points. Public so the screen runner awards
+## them the way the button does.
+func award_ip(amount: int) -> Dictionary:
+	var result := Store.award_ip(amount)
+	if not bool(result.get("ok", false)):
+		Store.set_status(String(result.get("error", "Could not award IP")))
+	_refresh()
+	return result
 
 
 func open_snapshots() -> void:
@@ -392,7 +427,7 @@ func _build_party_card(character: Dictionary) -> Control:
 	var row := UI.hbox(UI.GAP_2)
 	card.add_child(UI.margins(row, UI.GAP_2))
 
-	row.add_child(UI.hatch(Vector2(34, 34)))
+	row.add_child(UI.monogram(Vector2(34, 34), String(character["name"])))
 
 	var text := UI.vbox(2)
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -420,7 +455,9 @@ func _build_save_facts(row: Dictionary, loaded: Dictionary) -> Control:
 	column.custom_minimum_size = Vector2(250, 0)
 
 	column.add_child(UI.micro("Save file"))
-	var facts := UI.vbox(0)
+	# The rule above each row is lit at its left end, which is exactly where the
+	# row's label starts: with no gap the filament ran through the lettering.
+	var facts := UI.vbox(3)
 	column.add_child(facts)
 
 	var integrity: Dictionary = loaded.get("integrity", {"verified": true, "problems": []})

@@ -88,6 +88,8 @@ func _ready() -> void:
 
 	await _drive_search(app)
 	await _drive_shortcuts(app)
+	await _drive_dice(app)
+	await _drive_keys(app)
 	await _drive_assistant(app)
 
 	app.call("_show", "forge")
@@ -100,6 +102,7 @@ func _ready() -> void:
 	app.call("_show", "market")
 	await _settle(30)
 	await _shoot("1e-market")
+	await _drive_market(app)
 
 	var shopper := Store.active_character()
 	if shopper.is_empty():
@@ -596,6 +599,15 @@ func _drive_sessions(app: Control) -> void:
 		_errors.append("starting a session did not take a restore point")
 	if not Store.log_line("The client lied about the courier."):
 		_errors.append("a hand-written log line was refused")
+	var ip_before := int(Store.active_character().get("improvement_points", 0))
+	if screen.has_method("award_ip"):
+		var award: Dictionary = screen.call("award_ip", 40)
+		if not bool(award.get("ok", false)):
+			_errors.append("awarding IP to the party was refused")
+		elif int(Store.active_character().get("improvement_points", 0)) != ip_before + 40:
+			_errors.append("awarding IP did not reach the sheet")
+	else:
+		_errors.append("library screen did not expose the IP award")
 	screen.call("_refresh")
 	await _settle(12)
 	await _shoot("1a-session")
@@ -641,6 +653,124 @@ func _drive_shortcuts(app: Control) -> void:
 	await _settle(8)
 	if bool(overlay.get("visible")):
 		_errors.append("closing the shortcut overlay did not hide it")
+
+
+## The dice tray: open it, roll scripted dice through it, and read them back.
+func _drive_dice(app: Control) -> void:
+	if not app.has_method("open_dice"):
+		_errors.append("the app did not expose the dice tray")
+		return
+	app.call("open_dice")
+	await _settle(10)
+	var tray: Node = app.get("_dice")
+	if tray == null or not bool(tray.get("visible")):
+		_errors.append("the dice tray did not open")
+		return
+	tray.call("set_rng", Dice.FixedRandom.new([3, 5, 4, 2, 6, 10, 7]))
+	tray.call("roll", "2d6")
+	tray.call("roll", "3d6+2")
+	var bad: Dictionary = tray.call("roll", "banana")
+	if bool(bad.get("ok", false)):
+		_errors.append("the dice tray rolled something that is not dice")
+	var check: Dictionary = tray.call("roll", "d10!+14")
+	if int(check.get("total", 0)) != 31 or not bool(check.get("critical", false)):
+		_errors.append("the dice tray did not explode a check die: %s" % str(check))
+	if (tray.call("history") as Array).size() != 3:
+		_errors.append("the dice tray did not keep its history")
+	await _settle(10)
+	await _shoot("1k-dice")
+	app.call("open_dice")
+	await _settle(6)
+	if bool(tray.get("visible")):
+		_errors.append("the dice key did not close the tray it opened")
+
+
+## The keys that were bound to nothing, or to the wrong thing.
+func _drive_keys(app: Control) -> void:
+	await _press(KEY_0)
+	if String(app.get("_current")) != "assistant":
+		_errors.append("0 did not jump to the tenth tab")
+	await _press(KEY_4)
+	if String(app.get("_current")) != "location":
+		_errors.append("4 did not jump to Location")
+	var screen: Node = app.get("_screen")
+	var before := String(screen.call("current_actor_id"))
+	await _press(KEY_N)
+	var after := String(screen.call("current_actor_id"))
+	if before == "" or after == before:
+		_errors.append("N did not end the turn on Location")
+	await _press(KEY_Z, true)
+	if String(screen.call("current_actor_id")) != before:
+		_errors.append("Ctrl+Z did not take the turn change back")
+	await _press(KEY_D)
+	var tray: Node = app.get("_dice")
+	if not bool(tray.get("visible")):
+		_errors.append("D did not open the dice tray")
+	await _press(KEY_ESCAPE)
+	if bool(tray.get("visible")):
+		_errors.append("Escape did not close the dice tray")
+	tray.call("close")
+	await _settle(4)
+
+
+func _press(keycode: Key, ctrl := false) -> void:
+	for pressed in [true, false]:
+		var event := InputEventKey.new()
+		event.keycode = keycode
+		event.physical_keycode = keycode
+		event.ctrl_pressed = ctrl
+		event.pressed = pressed
+		Input.parse_input_event(event)
+		await _settle(3)
+	await _settle(6)
+
+
+## Narrow the shelf, buy off it, and sell the thing back.
+func _drive_market(app: Control) -> void:
+	var screen: Node = app.get("_screen")
+	if screen == null or not screen.has_method("visible_stock"):
+		_errors.append("market screen did not expose its filters")
+		return
+	var shopper := Store.active_character()
+	shopper["cash"] = 1200
+	screen.call("set_filter", "rifle")
+	await _settle(8)
+	var rifles: Array = screen.call("visible_stock")
+	if rifles.is_empty():
+		_errors.append("searching the market for a rifle found nothing")
+	for product in rifles:
+		if not String((product as Dictionary)["name"]).to_lower().contains("rifle"):
+			_errors.append("the market search let %s through" % (product as Dictionary)["name"])
+
+	screen.call("set_filter", "", "weapon", true, "price_down")
+	await _settle(10)
+	var affordable: Array = screen.call("visible_stock")
+	var last := 1 << 30
+	for product in affordable:
+		var entry: Dictionary = product
+		if String(entry["kind"]) != "weapon" or int(entry["price"]) > 1200:
+			_errors.append("the market filters let %s through" % entry["name"])
+		if int(entry["price"]) > last:
+			_errors.append("the market did not sort by price")
+		last = int(entry["price"])
+	await _shoot("1e-market-filtered")
+
+	var carried := (shopper.get("gear", []) as Array).size()
+	screen.call("_buy", String((affordable[0] as Dictionary)["id"]))
+	await _settle(6)
+	if (shopper.get("gear", []) as Array).size() != carried + 1:
+		_errors.append("buying off a filtered shelf did not add the item")
+	var cash := int(shopper["cash"])
+	screen.call("set_mode", "sell")
+	await _settle(10)
+	await _shoot("1e-market-sell")
+	screen.call("_sell", carried)
+	await _settle(6)
+	if (shopper.get("gear", []) as Array).size() != carried or int(shopper["cash"]) <= cash:
+		_errors.append("selling the item back did not pay for it and remove it")
+	screen.call("set_filter", "")
+	screen.call("set_mode", "buy")
+	await _settle(6)
 
 
 ## The rules helper, drawn on a machine that has no helper to talk to.

@@ -171,10 +171,18 @@ a separate button writes the results back onto the sheets, since an encounter is
 a scratch copy that is often replayed before it counts.
 
 **Market / Night Market** — top-level screens that buy from the application-wide
-item database onto the selected character. Market exposes the entire database;
-an Operator Rank 5+ Fixer can organize a Night Market whose rolled stock is saved
-with the campaign and available to every character. Rank 9+ also seats its
-Midnight Market.
+item database onto a character chosen on the screen itself. Market exposes the
+entire database; an Operator Rank 5+ Fixer can organize a Night Market whose
+rolled stock is saved with the campaign and available to every character. Rank
+9+ also seats its Midnight Market.
+
+The shelf narrows four ways — a search over name, kind and description, a tab
+per kind actually in stock, **Can afford**, and a sort by price or name — and
+each row prints the numbers the sheet will use: damage, ROF and magazine for a
+weapon, SP and location for armor, Humanity loss for cyberware. Buying keeps the
+filters and the scroll position. **Sell** lists what the character carries and
+pays half of what each thing cost, taking its weapon or armor profile off the
+sheet with it; installed cyberware has to be detached first.
 
 **Item Workshop** — available from the starting library even before a campaign
 is opened. Browse every built-in or custom item, read its description, and make
@@ -209,10 +217,23 @@ the list of restore points survives the trip.
 
 **Sessions** — starting one counts it, logs it, and takes a restore point.
 Ending one does the same on the way out. The session log also takes a line by
-hand, for what happened at the table.
+hand, for what happened at the table, and **Award to party** adds Improvement
+Points to every player character at once and logs who got them.
+
+**Dice tray** — `D`, or **Dice** in the header, on any screen. Click a die or
+type table notation — `2d6+3`, `4d6-1d4`, `d10!+14` — and the roll is printed
+longhand like every other roll in the app. `d10!` is a check die: a 10 explodes
+upward once and a 1 fumbles downward once, through the same code the resolver
+uses. Earlier rolls stay listed, and **Log it** writes one into the session log.
+
+**Status bar** — the line along the bottom carries the campaign and session,
+the last thing that happened in full, the in-world date and time, and whether
+there are unsaved changes.
 
 **Keys and display** — `?` lists every shortcut, from the same table the app
-binds them from, and carries the two display preferences that answer the same
+binds them from: `1`–`9` and `0` for the ten tabs, `Ctrl+K` to search, `D` for
+dice, `Ctrl+Z` and `Ctrl+Shift+Z` to undo and redo on the screen that is up, and
+`N` to end the turn. It also carries the two display preferences that answer the same
 question: interface size, for a console read across a room rather than at a
 desk, and reduce motion. Both are per-user application data rather than campaign
 state.

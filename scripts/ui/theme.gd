@@ -545,6 +545,11 @@ static func hp_bar(ratio: float, width := 0.0) -> Control:
 
 
 ## The hatched placeholder block standing in for art that has not been made yet.
+##
+## A caption replaces the lit diamond rather than sitting on top of it — the two
+## share the centre of the block, and drawn together they read as "CO◇ER". A
+## block too narrow to hold its caption keeps the diamond and carries the
+## caption as a tooltip instead.
 static func hatch(size: Vector2, caption := "") -> Control:
 	var holder := Panel.new()
 	holder.custom_minimum_size = size
@@ -553,6 +558,9 @@ static func hatch(size: Vector2, caption := "") -> Control:
 	box.bracket_length = 10.0
 	box.bracket_width = 1.0
 	holder.add_theme_stylebox_override("panel", box)
+	# These sit inside clickable rows; a Panel that stops the mouse makes the
+	# tile the one part of the row that does not select it.
+	holder.mouse_filter = Control.MOUSE_FILTER_PASS
 
 	var lines := _Hatch.new()
 	lines.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -561,12 +569,55 @@ static func hatch(size: Vector2, caption := "") -> Control:
 
 	if caption != "":
 		var label := micro(caption, MUTED_DIM)
-		label.set_anchors_preset(Control.PRESET_CENTER)
-		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		label.grow_horizontal = Control.GROW_DIRECTION_BOTH
-		label.grow_vertical = Control.GROW_DIRECTION_BOTH
-		holder.add_child(label)
+		var fits := size.x <= 0.0 or label.get_minimum_size().x + 12.0 <= size.x
+		if fits:
+			lines.diamond = false
+			label.set_anchors_preset(Control.PRESET_CENTER)
+			label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			label.grow_horizontal = Control.GROW_DIRECTION_BOTH
+			label.grow_vertical = Control.GROW_DIRECTION_BOTH
+			holder.add_child(label)
+		else:
+			label.free()
+			holder.tooltip_text = caption
 	return holder
+
+
+## A portrait tile for someone who has no portrait: their initials.
+##
+## A roster of twenty identical diamonds is twenty rows to read. Two letters are
+## enough to find a name by, and [param colour] says which side they are on
+## before the eye reaches the text beside it.
+static func monogram(size: Vector2, full_name: String, colour := ACCENT) -> Control:
+	var holder := hatch(size)
+	var lines := holder.get_child(0) as _Hatch
+	lines.diamond = false
+	var label := display(initials(full_name), int(clampf(minf(size.x, size.y) * 0.42, 10.0, 30.0)), colour)
+	label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	holder.add_child(label)
+	return holder
+
+
+## Up to two letters to know a name by: the first letter of its first and last
+## words, skipping titles' punctuation and quoted handles' quotes.
+static func initials(full_name: String) -> String:
+	var words: PackedStringArray = []
+	for word in full_name.split(" ", false):
+		var cleaned := ""
+		for index in word.length():
+			var code := word.unicode_at(index)
+			if (code >= 48 and code <= 57) or (code >= 65 and code <= 90) or (code >= 97 and code <= 122) or code > 191:
+				cleaned += word[index]
+		if cleaned != "":
+			words.append(cleaned)
+	if words.is_empty():
+		return "?"
+	if words.size() == 1:
+		return words[0].substr(0, 2).to_upper()
+	return (words[0][0] + words[words.size() - 1][0]).to_upper()
 
 
 ## A lattice, drawn rather than textured so it scales with the panel.
@@ -576,6 +627,9 @@ static func hatch(size: Vector2, caption := "") -> Control:
 ## yet" the way the single hatch did, and looks like part of the console while
 ## it says it.
 class _Hatch extends Control:
+	## Off when something else — a caption, a monogram — has the centre.
+	var diamond := true
+
 	func _draw() -> void:
 		var step := 7.0
 		var blue := Color(UI.ACCENT, 0.075)
@@ -588,7 +642,7 @@ class _Hatch extends Control:
 			offset += step * 2.0
 		var centre := size * 0.5
 		var radius := minf(size.x, size.y) * 0.16
-		if radius > 2.0:
+		if diamond and radius > 2.0:
 			Chrome.glow_stroke(
 				get_canvas_item(),
 				Chrome.closed(Chrome.diamond(centre, radius)),
