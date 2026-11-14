@@ -80,6 +80,28 @@ planned/active/complete/skipped status, write scene notes, link beats into
 possible paths, and drag cards around the canvas. Notes, links, and positions are
 saved inside the portable campaign.
 
+**GM tools** — three more tabs in that same private window, for the things a GM
+does between the rules. They are here rather than on a main-window screen for
+the same reason the notes are: the table should not watch them happen.
+
+*Party* lists every player character in the numbers asked for mid-scene — HP and
+wound state, head and body SP, Humanity, Luck left, cash, IP and Reputation —
+and follows the campaign as it changes. **Refresh the party's Luck** fills every
+pool at once, as the start of a session does. The **secret group check** rolls
+one skill for all of them against a DV, with the same exploding and fumbling die
+as any other check; a character without the skill rolls the bare stat behind it,
+and a DV of 0 just ranks the party.
+
+*Clocks* are countdowns: a name for what is coming and two to twelve ticks until
+it arrives. They are saved with the campaign, and the tick that fills one is
+written to the session log.
+
+*Generators* roll a person — name, job, what you notice, what they want, a habit
+and a secret — who can be given a sheet and added to the roster as a neutral
+NPC, and a bag of loot off the item catalog inside a budget, which can be handed
+to a player character with its weapon and armor profiles attached. The tables
+are homebrew placeholders, like the rest.
+
 **Player Display** — a second native OS window for the table's own screen, meant
 for the monitor or television they are looking at. Unlike the GM Window it asks
 for no capture exclusion: it is meant to be seen.

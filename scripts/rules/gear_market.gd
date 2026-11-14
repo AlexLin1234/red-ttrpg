@@ -147,6 +147,15 @@ static func buy(character: Dictionary, catalog: Array, item_id: String) -> Dicti
 	if int(character.get("cash", 0)) < price:
 		return {"ok": false, "error": "Not enough cash for %s." % product["name"]}
 	character["cash"] = int(character.get("cash", 0)) - price
+	grant(character, product)
+	return {"ok": true, "item": product["name"], "price": price}
+
+
+## Put [param product] on a sheet without charging for it: the carried copy,
+## and the weapon or armor profile that makes it usable in a fight. This is what
+## a purchase does after paying, and what found loot does instead of paying.
+static func grant(character: Dictionary, product: Dictionary) -> void:
+	var price := int(product.get("price", 0))
 	if not character.has("gear"):
 		character["gear"] = []
 	var owned := product.duplicate(true)
@@ -173,7 +182,6 @@ static func buy(character: Dictionary, catalog: Array, item_id: String) -> Dicti
 		var armor_profile: Dictionary = product["armor"]
 		var location := String(armor_profile["location"])
 		(character["armor"] as Dictionary)[location] = {"sp": int(armor_profile["sp"]), "ablated": false}
-	return {"ok": true, "item": product["name"], "price": price}
 
 
 ## What the street pays for something used: half of what it cost.

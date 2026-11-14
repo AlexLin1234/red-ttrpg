@@ -702,6 +702,64 @@ func award_ip(amount: int, character_ids: Array = []) -> Dictionary:
 	return result
 
 
+# -- GM tools ------------------------------------------------------------------------
+
+
+func clocks() -> Array:
+	return GMTools.ensure_clocks(campaign) if is_open() else []
+
+
+func add_clock(name: String, segments: int) -> Dictionary:
+	if not is_open():
+		return {}
+	var clock := GMTools.add_clock(campaign, name, segments)
+	mark_dirty()
+	return clock
+
+
+## Tick a clock forward or back. The moment one fills is logged: it is the
+## thing the GM was counting down to, and it should be in the session's record.
+func tick_clock(id: String, delta: int) -> Dictionary:
+	if not is_open():
+		return {"ok": false, "error": "No campaign is open."}
+	var result := GMTools.tick_clock(campaign, id, delta)
+	if not bool(result.get("ok", false)) or int(result.get("moved", 0)) == 0:
+		return result
+	var clock: Dictionary = result["clock"]
+	if bool(result["just_filled"]):
+		log_line("Clock filled: %s." % String(clock["name"]))
+		set_status("%s — the clock is full" % String(clock["name"]))
+	else:
+		mark_dirty()
+		set_status(
+			"%s %d / %d" % [String(clock["name"]), int(clock["filled"]), int(clock["segments"])]
+		)
+	return result
+
+
+func remove_clock(id: String) -> bool:
+	if not is_open() or not GMTools.remove_clock(campaign, id):
+		return false
+	mark_dirty()
+	return true
+
+
+## Give every player character their Luck back, as the start of a session does.
+func refresh_party_luck() -> int:
+	var restored := 0
+	for entry in characters():
+		var character: Dictionary = entry
+		if String(character.get("kind", "")) != "pc":
+			continue
+		Luck.ensure(character)
+		restored += Luck.pool(character) - Luck.available(character)
+		character["luck_available"] = Luck.pool(character)
+	if restored > 0:
+		mark_dirty()
+	set_status("Luck refreshed · %d point%s restored" % [restored, "" if restored == 1 else "s"])
+	return restored
+
+
 ## Roll a squad onto the roster and hand the sheets back.
 ##
 ## The board still has to place them; this only makes them exist, which is the

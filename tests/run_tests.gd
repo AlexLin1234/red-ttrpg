@@ -36,6 +36,7 @@ const SUITES := [
 	preload("res://tests/test_gear_market.gd"),
 	preload("res://tests/test_economy.gd"),
 	preload("res://tests/test_campaign_flow.gd"),
+	preload("res://tests/test_gm_tools.gd"),
 	preload("res://tests/test_rulebooks.gd"),
 	preload("res://tests/test_item_database.gd"),
 	preload("res://tests/test_model_database.gd"),

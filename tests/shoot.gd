@@ -71,6 +71,8 @@ func _ready() -> void:
 			_errors.append("GM Notes / Beats did not request capture exclusion")
 		if gm_window.is_embedded():
 			_errors.append("GM Notes / Beats was still embedded in the streamed viewport")
+		await _shoot_window("1l-gm-notes", gm_window)
+		await _drive_gm_tools(app, gm_window)
 		gm_window.hide()
 
 	app.call("_show", "location")
@@ -653,6 +655,63 @@ func _drive_shortcuts(app: Control) -> void:
 	await _settle(8)
 	if bool(overlay.get("visible")):
 		_errors.append("closing the shortcut overlay did not hide it")
+
+
+## The private tools beside the notes: the party, a clock, a person, a bag.
+func _drive_gm_tools(app: Control, window: Window) -> void:
+	var tools: Node = app.get("_gm_notes_screen")
+	if tools == null or not tools.has_method("set_tab"):
+		_errors.append("the GM window did not expose its tools")
+		return
+
+	tools.call("set_tab", "party")
+	var check: Dictionary = tools.call("roll_group_check", "Perception", 0, 13)
+	if not bool(check.get("ok", false)) or (check["results"] as Array).size() != 4:
+		_errors.append("the group check did not roll for the four player characters")
+	await _settle(12)
+	await _shoot_window("1l-gm-party", window)
+
+	tools.call("set_tab", "clocks")
+	var clock: Dictionary = tools.call("add_clock", "Arasaka response team", 6)
+	tools.call("add_clock", "Maelstrom find the courier first", 4)
+	var id := String(clock.get("id", ""))
+	for tick in 4:
+		tools.call("tick_clock", id, 1)
+	if int(Store.clocks()[0]["filled"]) != 4:
+		_errors.append("ticking a clock did not move it")
+	var logged: int = (Store.campaign.get("session_log", []) as Array).size()
+	var second := String(Store.clocks()[1]["id"])
+	for tick in 6:
+		tools.call("tick_clock", second, 1)
+	if (Store.campaign.get("session_log", []) as Array).size() != logged + 1:
+		_errors.append("a clock filling was not logged exactly once")
+	await _settle(12)
+	await _shoot_window("1l-gm-clocks", window)
+
+	tools.call("set_tab", "generators")
+	var roster := Store.characters().size()
+	var npc: Dictionary = tools.call("roll_npc")
+	if String(npc.get("name", "")) == "":
+		_errors.append("the NPC generator rolled nobody")
+	var kept := Store.active_character_id
+	tools.call("add_npc_to_roster")
+	tools.call("add_npc_to_roster")
+	if Store.characters().size() != roster + 1:
+		_errors.append("a rolled NPC was not added to the roster exactly once")
+	Store.active_character_id = kept
+	var loot: Dictionary = tools.call("roll_loot", 1000)
+	if not bool(loot.get("ok", false)) or int(loot.get("worth", 0)) > 1000:
+		_errors.append("the loot roller went over its budget")
+	await _settle(12)
+	await _shoot_window("1l-gm-generators", window)
+	var finder := Store.active_character()
+	var cash := int(finder.get("cash", 0))
+	if not bool(tools.call("give_loot", String(finder["id"]))):
+		_errors.append("rolled loot could not be given to a character")
+	elif int(finder.get("cash", 0)) != cash + int(loot["cash"]):
+		_errors.append("giving loot did not pay its cash")
+	tools.call("set_tab", "notes")
+	await _settle(6)
 
 
 ## The dice tray: open it, roll scripted dice through it, and read them back.

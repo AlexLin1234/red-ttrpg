@@ -39,6 +39,7 @@ func _build_header() -> Control:
 	UI.expand(titles, true, false)
 	row.add_child(titles)
 	var add := UI.primary_button("+ Add beat")
+	add.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	add.pressed.connect(_add_beat)
 	row.add_child(add)
 	return row
@@ -96,6 +97,9 @@ func _build_editor_shell() -> Control:
 	UI.expand(shell, false, true)
 	var scroll := ScrollContainer.new()
 	UI.expand(scroll)
+	# Scrolling sideways let the editor be wider than its panel, which cut the
+	# Add link and Remove buttons off at the edge instead of making room.
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_editor = UI.vbox(UI.GAP_2)
 	_editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(_editor)

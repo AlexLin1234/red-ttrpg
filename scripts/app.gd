@@ -5,7 +5,7 @@ extends Control
 
 const LibraryScreen := preload("res://scripts/screens/library.gd")
 const CityScreen := preload("res://scripts/screens/city.gd")
-const NotesBeatsScreen := preload("res://scripts/screens/notes_beats.gd")
+const GMToolsScreen := preload("res://scripts/screens/gm_tools.gd")
 const LocationScreen := preload("res://scripts/screens/location.gd")
 const ForgeScreen := preload("res://scripts/screens/forge.gd")
 const MarketScreen := preload("res://scripts/screens/market.gd")
@@ -188,7 +188,9 @@ func _build_header() -> Control:
 	row.add_child(help_button)
 
 	_gm_window_button = UI.plain_button("GM Window")
-	_gm_window_button.tooltip_text = "Open private Notes / Beats in a separate native window"
+	_gm_window_button.tooltip_text = (
+		"Private GM tools in a separate window: notes, beats, the party, clocks, generators"
+	)
 	_gm_window_button.visible = false
 	_gm_window_button.pressed.connect(open_gm_notes_window)
 	row.add_child(_gm_window_button)
@@ -513,7 +515,7 @@ func _rebuild_gm_window_content() -> void:
 
 	_gm_window.add_child(UI.backdrop(UI.BG_PAGE))
 
-	_gm_notes_screen = NotesBeatsScreen.new()
+	_gm_notes_screen = GMToolsScreen.new()
 	_gm_notes_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_gm_notes_screen.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_gm_notes_screen.grow_vertical = Control.GROW_DIRECTION_BOTH
