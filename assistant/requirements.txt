@@ -3,5 +3,5 @@
 anthropic==1.4.0
 fastapi==0.141.1
 uvicorn[standard]==0.52.4
-PyMuPDF==1.28.2
+PyMuPDF==2.0
 keyring==25.7.0
