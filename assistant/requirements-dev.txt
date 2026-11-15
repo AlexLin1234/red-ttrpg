@@ -1,5 +1,5 @@
 -r requirements.txt
 # Building the helper executable and running its suite.
-pyinstaller==6.22.2
+pyinstaller==6.22.3
 pytest==9.1.1
 httpx==0.28.1
