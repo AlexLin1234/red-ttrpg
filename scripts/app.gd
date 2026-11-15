@@ -25,6 +25,7 @@ const SHORTCUTS: Array[Dictionary] = [
 	{"keys": "Ctrl + Z", "does": "Undo, on Location, Netrun and Garage"},
 	{"keys": "Ctrl + Shift + Z", "does": "Redo, on Location"},
 	{"keys": "N", "does": "End the turn, on Location and Netrun"},
+	{"keys": "S  W  F  A  U  B", "does": "Location tools: select, move, fire, aimed, autofire, blast"},
 	{"keys": "M", "does": "Show or hide the uploaded map, on the City screen"},
 	{"keys": "?  or  F1", "does": "This panel"},
 	{"keys": "Escape", "does": "Close whatever is open over the screen"},
@@ -48,6 +49,9 @@ const SCREENS := [
 ## they did: the Assistant opened without a campaign and its tab was greyed out.
 const CAMPAIGN_FREE_SCREENS := ["library", "workshop", "assistant"]
 
+## The tab indexes that begin a new group in the header.
+const NAV_GROUP_STARTS := [2, 6, 9]
+
 var _current := "library"
 var _nav_buttons: Dictionary = {}
 var _screens: Dictionary = {}
@@ -67,6 +71,8 @@ var _search: SearchPalette
 var _shortcuts: ShortcutsOverlay
 var _dice: DiceTray
 var _clock_label: Label
+var _toasts: Toasts
+var _quit_dialog: ConfirmationDialog
 var _search_button: Button
 var _player_window_button: Button
 var _player_window: Window
@@ -108,10 +114,54 @@ func _ready() -> void:
 
 	_shortcuts = ShortcutsOverlay.new()
 	add_child(_shortcuts)
+
+	# Last, so a toast is drawn over an open overlay rather than dimmed by it.
+	_toasts = Toasts.new()
+	add_child(_toasts)
 	AppSettings.apply(get_tree())
+
+	# Closing the window with work unsaved is a question, not an exit.
+	get_tree().auto_accept_quit = false
 
 	Store.seed_library_if_empty()
 	_show("library")
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		request_quit()
+
+
+## Leave, unless there is something to lose — then ask first.
+##
+## The autosave would catch it, but "your work is probably recoverable" is not
+## what anyone wants to learn by closing a window.
+func request_quit() -> void:
+	if not Store.is_open() or not Store.dirty:
+		get_tree().quit()
+		return
+	if is_instance_valid(_quit_dialog):
+		_quit_dialog.queue_free()
+	_quit_dialog = ConfirmationDialog.new()
+	_quit_dialog.title = "Unsaved changes"
+	_quit_dialog.theme = UI.build_theme()
+	_quit_dialog.get_ok_button().text = "Save and quit"
+	_quit_dialog.get_cancel_button().text = "Keep working"
+	_quit_dialog.add_button("Quit without saving", true, "discard")
+	var box := UI.vbox(UI.GAP_2)
+	box.add_child(UI.display(String(Store.campaign.get("name", "This campaign")), 18))
+	var body := UI.body("There are changes that have not been saved.", 13, UI.MUTED)
+	body.custom_minimum_size = Vector2(430, 0)
+	box.add_child(body)
+	_quit_dialog.add_child(UI.margins(box, UI.GAP_4))
+	_quit_dialog.confirmed.connect(
+		func() -> void:
+			if Store.save():
+				get_tree().quit()
+	)
+	_quit_dialog.custom_action.connect(func(_action: StringName) -> void: get_tree().quit())
+	add_child(_quit_dialog)
+	_quit_dialog.popup_centered(Vector2i(520, 200))
 
 
 func _build_header() -> Control:
@@ -160,6 +210,13 @@ func _build_header() -> Control:
 		# The digit is the key that jumps here; the tenth tab is on 0.
 		var button := UI.tab_button("%s %d" % [entry["label"], (index + 1) % 10], index == 0)
 		button.pressed.connect(_show.bind(String(entry["id"])))
+		# A gap where one kind of screen ends and the next begins: setup, the
+		# world, the people in it, and the reference shelf. Ten tabs in a row
+		# were ten things to read; four groups are four.
+		if index in NAV_GROUP_STARTS:
+			var gap := Control.new()
+			gap.custom_minimum_size.x = 10
+			nav.add_child(gap)
 		nav.add_child(button)
 		_nav_buttons[String(entry["id"])] = button
 
@@ -305,7 +362,10 @@ func _show(screen_id: String) -> void:
 	elif cached.has_method("on_shown"):
 		cached.call("on_shown")
 
+	var arriving := cached != _screen or not cached.visible
 	cached.visible = true
+	if arriving:
+		Fx.fade_in(cached)
 	_screen_revisions[screen_id] = Store.edit_revision
 	_screen = cached
 	_refresh_header()
@@ -578,6 +638,7 @@ func _on_status(message: String) -> void:
 	# Even with the bar to itself a long report can still elide; the tooltip is
 	# the whole of it.
 	_status_label.tooltip_text = message
+	_toasts.push(message)
 
 
 func _refresh_header() -> void:

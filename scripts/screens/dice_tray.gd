@@ -21,10 +21,13 @@ var _history: Array[Dictionary] = []
 var _error := ""
 var _count := 1
 var _modifier := 0
+var _tumble := false
 
 var _field: LineEdit
 var _result_box: VBoxContainer
 var _history_box: VBoxContainer
+
+var _frame: PanelContainer
 
 
 func _init() -> void:
@@ -60,13 +63,13 @@ func _init() -> void:
 	drop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_child(drop)
 
-	var frame := UI.panel(UI.PANEL)
-	frame.custom_minimum_size = Vector2(640, 0)
-	frame.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	stack.add_child(frame)
+	_frame = UI.panel(UI.PANEL)
+	_frame.custom_minimum_size = Vector2(640, 0)
+	_frame.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	stack.add_child(_frame)
 
 	var column := UI.vbox(UI.GAP_2)
-	frame.add_child(UI.margins(column, UI.GAP_4))
+	_frame.add_child(UI.margins(column, UI.GAP_4))
 
 	var head := UI.hbox()
 	var title := UI.display("Dice tray", 22)
@@ -150,7 +153,11 @@ func _quick_notation(die: String) -> String:
 
 
 func open() -> void:
+	var was_open := visible
 	visible = true
+	if not was_open:
+		Fx.fade_in(self)
+		Fx.pop.call_deferred(_frame)
 	_error = ""
 	_render()
 	_field.grab_focus()
@@ -172,6 +179,7 @@ func roll(notation: String) -> Dictionary:
 	var result := Dice.roll_notation(notation, _rng)
 	if bool(result.get("ok", false)):
 		_error = ""
+		_tumble = true
 		_history.push_front(result)
 		if _history.size() > MAX_HISTORY:
 			_history.resize(MAX_HISTORY)
@@ -181,6 +189,26 @@ func roll(notation: String) -> Dictionary:
 		_error = String(result.get("error", "That could not be rolled."))
 	_render()
 	return result
+
+
+## Let the number rattle before it lands: a few frames of other faces, then the
+## real one, lit. The result is already decided and already in the history —
+## this is only how it arrives.
+func _tumble_into(label: Label, landed: int) -> void:
+	if not Fx.enabled() or not visible:
+		return
+	var spread := maxi(6, absi(landed) * 2)
+	var tween := label.create_tween()
+	for step in 7:
+		tween.tween_callback(
+			func() -> void: label.text = str(randi_range(mini(1, landed), spread))
+		)
+		tween.tween_interval(0.035 + 0.008 * step)
+	tween.tween_callback(
+		func() -> void:
+			label.text = str(landed)
+			Fx.flash(label, Color(1.8, 1.7, 1.3), 0.5)
+	)
 
 
 func history() -> Array[Dictionary]:
@@ -232,6 +260,9 @@ func _render() -> void:
 	var total := UI.display(str(int(result["total"])), 54, colour)
 	total.custom_minimum_size.x = 110
 	line.add_child(total)
+	if _tumble:
+		_tumble = false
+		_tumble_into(total, int(result["total"]))
 
 	var detail := UI.vbox(2)
 	UI.expand(detail, true, false)

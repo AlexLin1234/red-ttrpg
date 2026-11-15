@@ -130,6 +130,11 @@ static func build_theme() -> Theme:
 	var button_hover := chamfer(PANEL_RAISED, ACCENT, 1, 8)
 	button_hover.edge = AMBER
 	button_hover.edge_length = 12.0
+	# A lit rim under the cursor: the control that is about to be pressed is
+	# the brightest thing near it.
+	button_hover.bg_top = PANEL_RAISED.lightened(0.07)
+	button_hover.glow = ACCENT_GLOW
+	button_hover.glow_strength = 1.3
 	var button_pressed := chamfer(ACCENT_DIM, ACCENT, 1, 8)
 	button_pressed.foot = AMBER
 	var button_disabled := chamfer(PANEL_INSET, HAIRLINE, 1, 8)
@@ -435,6 +440,10 @@ static func backdrop(base := BG_PAGE) -> Control:
 	ground.grid = ACCENT
 	ground.trace = ACCENT_GLOW
 	ground.spark = AMBER_GLOW
+	# Light running along the traces, so the console looks switched on.
+	var pulses := Fx.Pulses.new()
+	pulses.colours = [ACCENT_GLOW, AMBER_GLOW, ACCENT_GLOW]
+	ground.add_child(pulses)
 	return ground
 
 
@@ -468,8 +477,9 @@ static func tab_button(text: String, selected: bool) -> Button:
 	var idle := chamfer(PANEL_INSET, Color.TRANSPARENT, 0, 8, CUT_CONTROL, Chrome.CUT_TOP_LEFT)
 	button.add_theme_stylebox_override("normal", idle)
 	var hover := chamfer(PANEL_INSET, HAIRLINE, 1, 8, CUT_CONTROL, Chrome.CUT_TOP_LEFT)
-	hover.foot = Color(ACCENT, 0.45)
-	hover.foot_width = 1.0
+	hover.foot = Color(ACCENT, 0.7)
+	hover.foot_width = 2.0
+	hover.bg_top = PANEL_RAISED
 	button.add_theme_stylebox_override("hover", hover)
 	# The selected tab is the one place both accents meet: a blue frame cut at
 	# the top-left, standing on an amber bar.

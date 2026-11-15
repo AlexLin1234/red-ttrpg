@@ -16,6 +16,8 @@ var _results: VBoxContainer
 var _rows: Array[Dictionary] = []
 var _index := 0
 
+var _frame: PanelContainer
+
 
 func _init() -> void:
 	name = "SearchPalette"
@@ -53,13 +55,13 @@ func _init() -> void:
 	drop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_child(drop)
 
-	var frame := UI.panel(UI.PANEL)
-	frame.custom_minimum_size = Vector2(620, 0)
-	frame.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	stack.add_child(frame)
+	_frame = UI.panel(UI.PANEL)
+	_frame.custom_minimum_size = Vector2(620, 0)
+	_frame.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	stack.add_child(_frame)
 
 	var column := UI.vbox(0)
-	frame.add_child(column)
+	_frame.add_child(column)
 
 	_field = LineEdit.new()
 	_field.placeholder_text = "Find a character, zone, place, beat, board, item…"
@@ -72,7 +74,11 @@ func _init() -> void:
 
 
 func open() -> void:
+	var was_open := visible
 	visible = true
+	if not was_open:
+		Fx.fade_in(self)
+		Fx.pop.call_deferred(_frame)
 	_field.text = ""
 	_index = 0
 	_rows = []

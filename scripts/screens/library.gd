@@ -126,10 +126,19 @@ func _build_row(row: Dictionary) -> Control:
 	button.add_theme_stylebox_override("normal", normal)
 	button.add_theme_stylebox_override("hover", UI.flat(UI.PANEL_RAISED, UI.HAIRLINE, 1, 8))
 	button.add_theme_stylebox_override("pressed", normal)
+	button.tooltip_text = "Double-click to open"
 	button.pressed.connect(
 		func() -> void:
 			_selected = path
 			_refresh()
+	)
+	# Select, then find Continue across the screen, was two trips for the one
+	# thing a list of saves is for.
+	button.gui_input.connect(
+		func(event: InputEvent) -> void:
+			var click := event as InputEventMouseButton
+			if click != null and click.double_click and click.button_index == MOUSE_BUTTON_LEFT:
+				Store.open(path)
 	)
 
 	var content := UI.hbox(UI.GAP_3)

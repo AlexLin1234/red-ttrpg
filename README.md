@@ -138,6 +138,15 @@ is not, so it does not. Moving shows the reach of one Move Action as a ring on
 the board, and a cell beyond it lights red under the cursor before it is
 clicked.
 
+The budget rows are the controls as well as the read-out: clicking **Move**,
+**Attack**, **Aimed shot** or **Autofire** arms that tool, and **Reload** or
+**Clear jam** does it on the spot. The same tools sit under the board and on
+`S` `W` `F` `A` `U` `B`. A new turn always starts on Select, so a tool left armed
+by the last unit cannot turn the next click into a shot, and the turn change is
+announced across the top of the board — "ROUND 2 · SPIKE ADEBAYO" — where the
+table is already looking. The selected unit's card leads with what it can do
+now, then its condition, then its stats.
+
 **Reloading is an Action**, as it is in the book, so it spends the turn: a
 character who reloads shoots on their next turn, not this one. Clearing a jam
 costs the same.
@@ -247,6 +256,14 @@ type table notation — `2d6+3`, `4d6-1d4`, `d10!+14` — and the roll is printe
 longhand like every other roll in the app. `d10!` is a check die: a 10 explodes
 upward once and a 1 fumbles downward once, through the same code the resolver
 uses. Earlier rolls stay listed, and **Log it** writes one into the session log.
+
+**Toasts and motion** — anything the app reports rises as a toast in the
+bottom-right corner, green for done and red for refused, and stays a few
+seconds. Screens fade in, overlays pop open, the dice tray's total rattles
+before it lands, and light runs along the backdrop's traces. All of it is
+skipped when **Reduce motion** is on. Closing the window with unsaved changes
+asks first: save and quit, quit without saving, or keep working. In the Library,
+double-clicking a save opens it.
 
 **Status bar** — the line along the bottom carries the campaign and session,
 the last thing that happened in full, the in-world date and time, and whether

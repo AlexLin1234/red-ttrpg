@@ -17,6 +17,8 @@ var _errors: PackedStringArray = []
 
 func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUT_DIR))
+	# A shot taken half-way through a fade is a shot of nothing in particular.
+	Fx.suspended = true
 
 	var app: Control = preload("res://scenes/app.tscn").instantiate()
 	add_child(app)
@@ -116,6 +118,8 @@ func _ready() -> void:
 	app.call("_show", "night_market")
 	await _settle(30)
 	await _shoot("1f-night-market")
+
+	await _drive_motion(app)
 
 	if _errors.is_empty():
 		print("\nall screens rendered to %s" % ProjectSettings.globalize_path(OUT_DIR))
@@ -712,6 +716,48 @@ func _drive_gm_tools(app: Control, window: Window) -> void:
 		_errors.append("giving loot did not pay its cash")
 	tools.call("set_tab", "notes")
 	await _settle(6)
+
+
+## Everything that moves, with the motion switched on: the point is that none
+## of it errors and all of it finishes where the still version would have been.
+func _drive_motion(app: Control) -> void:
+	Fx.suspended = false
+	app.call("_show", "location")
+	await _settle(4)
+	var screen: Node = app.get("_screen")
+	screen.call("use_budget_action", "attack")
+	if String(screen.get("_tool")) != "fire":
+		_errors.append("clicking the Attack row did not arm the Fire tool")
+	await _press(KEY_W)
+	if String(screen.get("_tool")) != "move":
+		_errors.append("W did not arm the Move tool on Location")
+	await _settle(4)
+	await _shoot("1m-actions")
+	screen.call("end_turn")
+	if String(screen.get("_tool")) != "select":
+		_errors.append("a new turn did not start on Select")
+	await get_tree().create_timer(0.5).timeout
+	await _shoot("1m-turn-banner")
+
+	var toasts: Node = app.get("_toasts")
+	Store.set_status("Mira Vega hustled for 600 eb over seven days")
+	Store.set_status("Could not open: the file is not a campaign")
+	if int(toasts.call("count")) != 2:
+		_errors.append("two status messages did not raise two toasts")
+	if String(Toasts.tone_of("Could not open: x")) != "bad" or String(Toasts.tone_of("Saved")) != "good":
+		_errors.append("toasts did not tell a failure from a success")
+	app.call("open_dice")
+	(app.get("_dice") as Node).call("set_rng", Dice.SeededRandom.new(3))
+	(app.get("_dice") as Node).call("roll", "3d6+2")
+	await get_tree().create_timer(0.9).timeout
+	await _shoot("1m-toasts")
+	var frame: Control = (app.get("_dice") as Node).get("_frame")
+	if not is_equal_approx(frame.modulate.a, 1.0) or not frame.scale.is_equal_approx(Vector2.ONE):
+		_errors.append("the dice tray did not finish opening")
+	app.call("open_dice")
+	if not is_equal_approx((app.get("_screen") as Control).modulate.a, 1.0):
+		_errors.append("a screen was left part-faded")
+	Fx.suspended = true
 
 
 ## The dice tray: open it, roll scripted dice through it, and read them back.

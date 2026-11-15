@@ -10,13 +10,18 @@ const BLAST_RADIUS_M := 6.0
 const BLAST_DICE := 6
 
 const TOOLS := [
-	{"id": "select", "label": "Select", "hint": "Click a unit to inspect it"},
-	{"id": "move", "label": "Move", "hint": "Click a unit, then click a cell"},
-	{"id": "fire", "label": "Fire", "hint": "Click a target"},
-	{"id": "aimed", "label": "Aimed", "hint": "Called shot at −8 DV"},
-	{"id": "autofire", "label": "Autofire", "hint": "Ten rounds, multiplier by margin"},
-	{"id": "blast", "label": "Blast", "hint": "Click a cell to detonate"},
+	{"id": "select", "label": "Select", "key": KEY_S, "hint": "Click a unit to inspect it"},
+	{"id": "move", "label": "Move", "key": KEY_W, "hint": "Click a unit, then click a cell"},
+	{"id": "fire", "label": "Fire", "key": KEY_F, "hint": "Click a target"},
+	{"id": "aimed", "label": "Aimed", "key": KEY_A, "hint": "Called shot at −8 DV"},
+	{"id": "autofire", "label": "Autofire", "key": KEY_U, "hint": "Ten rounds, multiplier by margin"},
+	{"id": "blast", "label": "Blast", "key": KEY_B, "hint": "Click a cell to detonate"},
 ]
+
+## Which tool, or which immediate action, a row of the turn budget stands for.
+## The rows used to be a read-out: they said what the unit could do, and the
+## GM then went to a different strip under the board to actually do it.
+const BUDGET_TOOLS := {"move": "move", "attack": "fire", "aimed": "aimed", "autofire": "autofire"}
 
 var _encounter: Encounter
 var _snapshot: Dictionary = {}
@@ -48,6 +53,10 @@ var _end_turn_button: Button
 var _location_id := ""
 var _warning_panel: PanelContainer
 var _warning_box: VBoxContainer
+var _banner: Label
+var _banner_tween: Tween
+var _initiative_scroll: ScrollContainer
+var _last_card_key := ""
 
 
 func _ready() -> void:
@@ -405,6 +414,18 @@ func _build_stage(location: Dictionary) -> Control:
 	# is drawn after it.
 	frame.add_child(UI.reticle())
 
+	# Whose turn it is, said across the board as the turn changes, where the
+	# table is already looking, instead of only as a highlighted row in a list.
+	_banner = UI.display("", 30, UI.AMBER)
+	_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_banner.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_banner.add_theme_color_override("font_outline_color", UI.BG_DEEP)
+	_banner.add_theme_constant_override("outline_size", 8)
+	_banner.modulate.a = 0.0
+	frame.add_child(UI.margins(_banner, UI.GAP_4))
+	(_banner.get_parent() as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+
 	_board = IsoBoard.new()
 	_viewport.add_child(_board)
 	_board.set_location(location, Store.cover_palette())
@@ -416,7 +437,11 @@ func _build_stage(location: Dictionary) -> Control:
 	toolbar.add_child(UI.margins(tools, UI.GAP_2))
 	for tool in TOOLS:
 		var entry: Dictionary = tool
-		var button := UI.tab_button(String(entry["label"]), String(entry["id"]) == _tool)
+		var key_name := OS.get_keycode_string(int(entry["key"]))
+		var button := UI.tab_button(
+			"%s  %s" % [entry["label"], key_name], String(entry["id"]) == _tool
+		)
+		button.tooltip_text = "%s  (%s)" % [entry["hint"], key_name]
 		button.pressed.connect(_set_tool.bind(String(entry["id"])))
 		tools.add_child(button)
 		_tool_buttons[String(entry["id"])] = button
@@ -830,6 +855,7 @@ func roll_initiative() -> void:
 	_clear_warning()
 	_message = "Initiative rolled."
 	_refresh()
+	_announce_turn()
 
 
 ## Pass the turn on. Public so the screenshot harness walks the turn order the
@@ -843,7 +869,11 @@ func end_turn() -> void:
 	if not current.is_empty():
 		_selected_unit = String(current["actor_id"])
 	_clear_warning()
+	# A new turn starts on Select, not on whatever the last unit was doing:
+	# leaving Fire armed made the next click on the board a shot.
+	_set_tool("select")
 	_refresh()
+	_announce_turn()
 
 
 ## Whose turn it is, or "" before initiative.
@@ -1243,9 +1273,10 @@ func _build_rail() -> Control:
 	column.add_child(UI.rule_line())
 
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(0, 190)
+	scroll.custom_minimum_size = Vector2(0, 60)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	column.add_child(scroll)
+	_initiative_scroll = scroll
 	_initiative_box = UI.vbox(1)
 	UI.expand(_initiative_box, true, false)
 	var init_wrapper := UI.margins(_initiative_box, UI.GAP_2)
@@ -1455,12 +1486,18 @@ func _refresh_initiative() -> void:
 	var order: Array = _snapshot.get("initiative", [])
 	_refresh_history_buttons()
 	if order.is_empty():
+		_initiative_scroll.custom_minimum_size.y = 60.0
 		_initiative_box.add_child(UI.margins(UI.micro("Not rolled yet."), UI.GAP_2))
 		_end_turn_button.disabled = true
 		_end_turn_button.tooltip_text = "Roll initiative before turns can be passed."
 		return
 	_end_turn_button.disabled = false
 	_end_turn_button.tooltip_text = "Hands the turn on and gives the next unit their Action back (N)."
+
+	# As tall as the fight is, up to a point: four rows of fixed height hid the
+	# second half of a six-unit turn order behind a scrollbar, and left a hole
+	# under a two-unit one.
+	_initiative_scroll.custom_minimum_size.y = clampf(order.size() * 46.0 + 14.0, 60.0, 244.0)
 
 	for entry in order:
 		var row: Dictionary = entry
@@ -1576,17 +1613,25 @@ func _refresh_selected() -> void:
 	head.add_child(who)
 	_selected_box.add_child(UI.margins(head, UI.GAP_2))
 
-	var hidden := bool(_unit_entry(_selected_unit).get(PlayerView.HIDDEN_KEY, false))
-	var reveal := UI.tab_button("Hidden from players", hidden)
-	reveal.tooltip_text = (
-		"On the GM board only — not drawn on the player display, and not listed in its turn order"
-	)
-	reveal.pressed.connect(
-		func() -> void: set_unit_hidden(_selected_unit, reveal.button_pressed)
-	)
-	_selected_box.add_child(UI.margins(reveal, UI.GAP_2))
-
+	# In the order they are reached for: what this unit can do now, then how
+	# hurt it is, then the sheet. The stat block and the hide toggle used to sit
+	# on top and push the actions off the bottom of the rail.
 	var stats: Dictionary = actor.get("stats", {})
+	var actions_head := UI.hbox()
+	var actions_title := UI.micro("Actions this turn")
+	UI.expand(actions_title, true, false)
+	actions_head.add_child(actions_title)
+	actions_head.add_child(UI.micro("Click one to use it", UI.MUTED_DIM))
+	_selected_box.add_child(UI.margins(actions_head, UI.GAP_2))
+	_selected_box.add_child(UI.margins(_build_budget(actor, stats), UI.GAP_2))
+
+	_build_condition(actor)
+
+	if _is_setup():
+		_build_setup_skill_check()
+
+
+	_selected_box.add_child(UI.rule_line())
 	var grid := GridContainer.new()
 	grid.columns = 5
 	grid.add_theme_constant_override("h_separation", 1)
@@ -1605,14 +1650,16 @@ func _refresh_selected() -> void:
 		grid.add_child(tile)
 	_selected_box.add_child(UI.margins(grid, UI.GAP_2))
 
-	_build_condition(actor)
 
-	if _is_setup():
-		_build_setup_skill_check()
-
-	_selected_box.add_child(UI.margins(UI.micro("Actions this turn"), UI.GAP_2))
-	_selected_box.add_child(UI.margins(_build_budget(actor, stats), UI.GAP_2))
-	_selected_box.add_child(UI.margins(_build_weapon_controls(actor), UI.GAP_2))
+	var hidden := bool(_unit_entry(_selected_unit).get(PlayerView.HIDDEN_KEY, false))
+	var reveal := UI.tab_button("Hidden from players", hidden)
+	reveal.tooltip_text = (
+		"On the GM board only — not drawn on the player display, and not listed in its turn order"
+	)
+	reveal.pressed.connect(
+		func() -> void: set_unit_hidden(_selected_unit, reveal.button_pressed)
+	)
+	_selected_box.add_child(UI.margins(reveal, UI.GAP_2))
 
 
 ## The turn budget, spelled out. An action the unit cannot take keeps its row
@@ -1637,14 +1684,16 @@ func _build_budget(actor: Dictionary, stats: Dictionary) -> Control:
 	for row in budget:
 		var entry: Dictionary = row
 		var check: Dictionary = available.get(String(entry["key"]), _clear_check())
-		rows.add_child(
-			_action_row(
-				String(entry["label"]),
-				String(entry["note"]),
-				String(check.get("short", "")),
-				String(check.get("reason", "")),
-			)
+		var key := String(entry["key"])
+		var row_control := _action_row(
+			String(entry["label"]),
+			String(entry["note"]),
+			String(check.get("short", "")),
+			String(check.get("reason", "")),
+			BUDGET_TOOLS.has(key) and String(BUDGET_TOOLS[key]) == _tool,
 		)
+		row_control.gui_input.connect(_on_budget_row.bind(key))
+		rows.add_child(row_control)
 
 	var used := PackedStringArray()
 	for cost in ["action", "move"]:
@@ -1667,37 +1716,6 @@ func _weapon_summary(actor: Dictionary) -> String:
 	if weapon.is_empty():
 		return "no weapon"
 	return "%s %d/%d" % [String(weapon["name"]), int(weapon["ammo"]), int(weapon["magazine"])]
-
-
-## Reload and Clear jam sit next to the ammo count they act on. Each stays
-## visible when it is unavailable and carries the reason on its tooltip.
-func _build_weapon_controls(actor: Dictionary) -> Control:
-	var available: Dictionary = actor.get("available", {})
-	var row := UI.hbox(UI.GAP_2)
-	var reload_check: Dictionary = available.get("reload", _clear_check())
-	var reload := UI.plain_button("Reload")
-	UI.expand(reload, true, false)
-	reload.disabled = not bool(reload_check.get("ok", true))
-	reload.tooltip_text = (
-		String(reload_check.get("reason", ""))
-		if reload.disabled
-		else "Refills the magazine. Costs this turn's Action."
-	)
-	reload.pressed.connect(reload_selected.bind(false))
-	row.add_child(reload)
-
-	var jam_check: Dictionary = available.get("clear_jam", _clear_check())
-	var jam := UI.plain_button("Clear jam")
-	UI.expand(jam, true, false)
-	jam.disabled = not bool(jam_check.get("ok", true))
-	jam.tooltip_text = (
-		String(jam_check.get("reason", ""))
-		if jam.disabled
-		else "Clears the jam. Costs this turn's Action."
-	)
-	jam.pressed.connect(clear_jam_selected.bind(false))
-	row.add_child(jam)
-	return row
 
 
 ## Condition, and the medicine that answers it.
@@ -1935,10 +1953,73 @@ static func _clear_check() -> Dictionary:
 ## action is unavailable and takes the place of its cost; [param detail] is the
 ## whole sentence, which the row carries on its tooltip so the narrow column
 ## never has to elide it.
-func _action_row(label: String, note: String, blocked := "", detail := "") -> Control:
+## Use the action a budget row names: arm its tool, or do it if it needs no
+## target. A blocked row is still clickable, because the click is how the GM
+## gets the banner that says why and offers to waive it.
+func use_budget_action(key: String) -> void:
+	if BUDGET_TOOLS.has(key):
+		_set_tool(String(BUDGET_TOOLS[key]))
+		_refresh_selected()
+	elif key == "reload":
+		reload_selected(false)
+	elif key == "clear_jam":
+		clear_jam_selected(false)
+
+
+func _on_budget_row(event: InputEvent, key: String) -> void:
+	var click := event as InputEventMouseButton
+	if click != null and click.pressed and click.button_index == MOUSE_BUTTON_LEFT:
+		use_budget_action(key)
+
+
+## Say whose turn it is across the top of the board, then get out of the way.
+func _announce_turn() -> void:
+	if _banner == null:
+		return
+	var actor_id := current_actor_id()
+	var actor_name := ""
+	for candidate in _snapshot.get("actors", []):
+		if String((candidate as Dictionary)["id"]) == actor_id:
+			actor_name = String((candidate as Dictionary)["name"])
+	if actor_name == "":
+		return
+	_banner.text = ("Round %d · %s" % [int(_snapshot.get("round", 0)), actor_name]).to_upper()
+	if is_instance_valid(_banner_tween):
+		_banner_tween.kill()
+	if not Fx.enabled():
+		_banner.modulate.a = 0.0
+		return
+	_banner.modulate.a = 0.0
+	_banner_tween = _banner.create_tween()
+	_banner_tween.tween_property(_banner, "modulate:a", 1.0, 0.15)
+	_banner_tween.tween_interval(1.1)
+	_banner_tween.tween_property(_banner, "modulate:a", 0.0, 0.5)
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo or not is_visible_in_tree():
+		return
+	if key.ctrl_pressed or key.alt_pressed or key.meta_pressed or _encounter == null:
+		return
+	for tool in TOOLS:
+		if int((tool as Dictionary)["key"]) == key.keycode:
+			_set_tool(String((tool as Dictionary)["id"]))
+			_refresh_selected()
+			get_viewport().set_input_as_handled()
+			return
+
+
+func _action_row(
+	label: String, note: String, blocked := "", detail := "", armed := false
+) -> Control:
 	var available := blocked == ""
-	var panel := UI.panel(UI.PANEL_INSET, UI.HAIRLINE if available else UI.ALERT)
-	panel.tooltip_text = detail
+	var border := UI.HAIRLINE if available else Color(UI.ALERT, 0.55)
+	if armed:
+		border = UI.AMBER
+	var panel := UI.panel(UI.PANEL_RAISED if armed else UI.PANEL_INSET, border)
+	panel.tooltip_text = detail if detail != "" else "Click to use"
+	panel.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	var row := UI.hbox(UI.GAP_2)
 	panel.add_child(UI.margins(row, 5))
@@ -1977,10 +2058,16 @@ func _refresh_card() -> void:
 	if String(card.get("tone", "")) == "miss":
 		tone = UI.MUTED
 	elif String(card.get("tone", "")) == "hit":
-		tone = UI.ACCENT
+		tone = UI.AMBER
 	elif String(card.get("tone", "")) == "blocked":
 		tone = UI.ALERT_BRIGHT
-	head.add_child(UI.display(String(card["title"]), 26, tone))
+	var title := UI.display(String(card["title"]), 30 if String(card.get("tone", "")) == "hit" else 26, tone)
+	head.add_child(title)
+	# Flash only when the card is a new one, not on every redraw of the rail.
+	var card_key := "%s|%s" % [card.get("title", ""), str(card.get("lines", []))]
+	if card_key != _last_card_key:
+		_last_card_key = card_key
+		Fx.flash.call_deferred(title)
 
 	var lines := UI.vbox(0)
 	UI.expand(lines, true, false)

@@ -12,6 +12,8 @@ const SCALE_STEPS: Array[float] = [0.8, 0.9, 1.0, 1.15, 1.3, 1.5, 1.75, 2.0]
 var _rows: Array[Dictionary] = []
 var _body: VBoxContainer
 
+var _frame: PanelContainer
+
 
 func _init() -> void:
 	name = "ShortcutsOverlay"
@@ -41,20 +43,24 @@ func _init() -> void:
 	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(stack)
 
-	var frame := UI.panel(UI.PANEL)
-	frame.custom_minimum_size = Vector2(640, 0)
-	frame.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	stack.add_child(frame)
+	_frame = UI.panel(UI.PANEL)
+	_frame.custom_minimum_size = Vector2(640, 0)
+	_frame.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	stack.add_child(_frame)
 
 	_body = UI.vbox(UI.GAP_2)
-	frame.add_child(UI.margins(_body, UI.GAP_4))
+	_frame.add_child(UI.margins(_body, UI.GAP_4))
 
 
 ## [param rows] is the app's own shortcut table, so this cannot drift from what
 ## the keys actually do.
 func present(rows: Array[Dictionary]) -> void:
 	_rows = rows
+	var was_open := visible
 	visible = true
+	if not was_open:
+		Fx.fade_in(self)
+		Fx.pop.call_deferred(_frame)
 	_render()
 
 
